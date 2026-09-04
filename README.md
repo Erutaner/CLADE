@@ -123,6 +123,11 @@ Unlike certain auto-research projects that organise experiments as a tree or a l
 
 <br>
 
+> [!NOTE]
+> This document is still being updated. A detailed account of the mechanisms will be added shortly; should it grow too large, it will be posted separately to arXiv.
+
+<br>
+
 ## ⚠️ Limitations of CLADE
 
 <br>
