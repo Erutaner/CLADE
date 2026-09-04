@@ -4,13 +4,13 @@
 
 # 🧬 CLADE
 
-### **C**losed-**L**oop **A**gentic **D**iscovery **E**ngine<br><sub>*for Machine Learning Research and Engineering*</sub>
+### **C**losed-**L**oop **A**gentic **D**iscovery **E**ngine<br>*for Machine Learning Research and Engineering*
 
-*让你的 ML 项目像生物一样演化*
+### *让你的 ML 项目像生物一样演化*
 
 <br>
 
-**Ji Zhang** &nbsp;·&nbsp; <a href="mailto:jizhang@g.harvard.edu">jizhang@g.harvard.edu</a>
+### Ji Zhang &nbsp;·&nbsp; <a href="mailto:jizhang@g.harvard.edu">jizhang@g.harvard.edu</a>
 
 [![Harvard University](https://img.shields.io/badge/Harvard%20University-A51C30?style=for-the-badge)](https://www.harvard.edu)
 ![Nobody Funded Me Shit Lab](https://img.shields.io/badge/Nobody%20Funded%20Me%20Shit%20Lab-2f3136?style=for-the-badge)
