@@ -1,0 +1,3 @@
+# The package is pure text (Python + Markdown); store LF in the repo so a
+# clone on Linux/macOS never sees CRLF noise, whatever the author edited on.
+* text=auto eol=lf

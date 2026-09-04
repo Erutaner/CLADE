@@ -1,0 +1,5 @@
+# generated content only - the package source has no build step
+__pycache__/
+*.pyc
+tests/out/
+debug.log
