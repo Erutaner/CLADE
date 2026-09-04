@@ -150,7 +150,7 @@ Unlike certain auto-research projects that organise experiments as a tree or a l
 > [!CAUTION]
 > ### 🚧 4 · Still a work in progress
 >
-> This project is still being brought to completion. Although we have run long-horizon tests across several settings (a real one-month run in Research mode, 30+ nodes) and CLADE ships with several repair mechanisms, we still cannot guarantee that no deadlocks or other bugs occur during a run. The agent should be permitted to modify CLADE's engine code when a genuine bug in the engine's design has led to a deadlock, which is a further reason we recommend a frontier LLM.
+> This project is still being brought to completion. Although we have run long-horizon tests across several settings (a real one-month run in Research mode, 30+ nodes; a real run of more than 20 days in Engineering mode, 15+ nodes) and CLADE ships with several repair mechanisms, we still cannot guarantee that no deadlocks or other bugs occur during a run. The agent should be permitted to modify CLADE's engine code when a genuine bug in the engine's design has led to a deadlock, which is a further reason we recommend a frontier LLM.
 
 <br>
 
