@@ -1,5 +1,7 @@
 <div align="center">
 
+<sub><a href="README.en.md">English</a> &nbsp;·&nbsp; <b>简体中文</b></sub>
+
 <br>
 
 # 🧬 CLADE
