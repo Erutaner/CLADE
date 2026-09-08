@@ -1,11 +1,8 @@
-"""Declarative control-plane tables (v10).
+"""Declarative control-plane tables.
 
-v9.2 encoded the flow topology four times: in scheduler if-chains, in the
-validator registry, in per-transition apply code, and again by hand inside
-doctor. The copies drifted; a legal-but-unhandled status was a runtime crash.
-
-v10 states the topology once, as data, and proves it total at import/check
-time:
+The flow topology is stated once, as data, and proved total at import/check
+time; the scheduler, the validator registry, the apply code and doctor all
+read these tables, so a legal-but-unhandled status cannot exist:
 
 * ``LANE_FLOW`` / ``NODE_FLOW``: one entry per persisted lane/node status.
 * ``ROUTE_SEQUENCES``: the enforced temporal order of each search origin.
@@ -127,9 +124,9 @@ BOOTSTRAP_SEQ: tuple[str, ...] = (
     "profile", "dossier", "rubric", "sota_scan",
 )
 
-# v11: tasks whose subject has ALREADY paid its full compute by the time they
+# Tasks whose subject has ALREADY paid its full compute by the time they
 # run. Abandoning one over report formatting destroys a trained node and its
-# sealed evidence - the survival audit's single most disproportionate death.
+# sealed evidence - the single most disproportionate death possible.
 # They are protected from on_stuck=abandon (a stuck one escalates instead) and
 # their escalation gates stay MANUAL even under full_auto+abandon: an
 # auto-reject would abandon the node anyway, defeating the protection.
@@ -140,7 +137,7 @@ EXPENSIVE_TERMINAL_TASKS: tuple[str, ...] = ("evaluate", "conclude", "scientific
 # ``deep_read`` appears twice on repair (pre-sketch priors, post-freeze
 # collision audit) and core_synthesis (actual-work reconstruction, post-freeze
 # audit); the scheduler distinguishes the passes by lane sub-state
-# (reading_done / sketches_path), exactly as v9.2 did.
+# (reading_done / sketches_path).
 
 ROUTE_SEQUENCES: dict[str, tuple[str, ...]] = {
     "repair":         ("diagnose", "deep_read", "sketch", "deep_read", "tournament"),
@@ -153,21 +150,19 @@ ROUTE_SEQUENCES: dict[str, tuple[str, ...]] = {
 # ablation_design -> ablation_review -> gate -> approved -> node_created.
 POST_TOURNAMENT_SEQ: tuple[str, ...] = ("mature", "red_team", "gate", "approved", "node_created")
 ABLATION_SEQ: tuple[str, ...] = ("ablation_design", "ablation_review", "gate", "approved", "node_created")
-# Instrumental purposes (v10.2): same idea-gate-node rail, lighter admission.
+# Instrumental purposes: same idea-gate-node rail, lighter admission.
 # A probe's protection is its manual user gate + budget cap, so it carries no
 # separate review stage; maintenance keeps an adversarial review (novelty
 # smuggling / parity risk) before the user gate.
 PROBE_SEQ: tuple[str, ...] = ("probe_design", "gate", "approved", "node_created")
 MAINTENANCE_SEQ: tuple[str, ...] = ("maintenance_design", "maintenance_review", "gate", "approved", "node_created")
 
-# One purpose -> one route.  Three facts used to be spelled out separately per
-# purpose - the status a lane ENTERS at (eapply._lane_entry_status), the stage a
-# user-rejected lane may rewind to (egate), and the statuses that lane may
-# legally hold (edoctor) - so adding a purpose meant finding all three.  It also
-# invited the inverse-of-candidate idiom ("purpose != targeted_ablation" to mean
-# "is candidate"), which quietly broke the moment a third purpose existed.
-# Stating the routes once makes "is instrumental" a lookup and the entry stage a
-# derivation.
+# One purpose -> one route.  Three facts derive from it - the status a lane
+# ENTERS at (eapply._lane_entry_status), the stage a user-rejected lane may
+# rewind to (egate), and the statuses that lane may legally hold (edoctor) - so
+# adding a purpose means adding one route.  "Is instrumental" is a lookup here,
+# never an inverse-of-candidate idiom ("purpose != targeted_ablation"), which
+# would break the moment another purpose existed.
 INSTRUMENTAL_SEQ: dict[str, tuple[str, ...]] = {
     "targeted_ablation": ABLATION_SEQ,
     "diagnostic_probe": PROBE_SEQ,
@@ -229,6 +224,9 @@ TASK_TYPES: dict[str, TaskDef] = {
     "evaluate":           TaskDef(card="evaluate"),
     "conclude":           TaskDef(card="conclude"),
     "scientific_conclude": TaskDef(card="scientific_conclude"),
+    # post-conclusion: an independent judge rules on a claimed instrument
+    # (formula) error behind a settled mechanism verdict
+    "instrument_review":  TaskDef(card="instrument_review"),
 }
 
 
@@ -253,13 +251,13 @@ GATE_POLICY: dict[str, GatePolicy] = {
     "infra_confirm":        GatePolicy(protected=True,  auto="never"),
     "infra_canary_blocked": GatePolicy(protected=True,  auto="never"),
     "provision_blocked":    GatePolicy(protected=True,  auto="provision_full_auto_reject"),
-    # v11.7: fit questions NEED a human in every mode - an unattended run
+    # Fit questions NEED a human in every mode - an unattended run
     # never proceeds past (or overrides) an unfit assessment on its own.
     "engine_fit_blocked":   GatePolicy(protected=True,  auto="never"),
     "infra_revision":       GatePolicy(protected=True,  auto="never"),
     "resource_approval":    GatePolicy(protected=True,  auto="never"),
     "repeat_spend":         GatePolicy(protected=True,  auto="never"),
-    # v11.1 P4: buying back one measurement spends a training run - user-owned.
+    # Buying back one measurement spends a training run - user-owned.
     "repeat_measure":       GatePolicy(protected=True,  auto="never"),
     "idea_approval":        GatePolicy(protected=False, auto="auto_or_full_approve",
                                        manual_when=("targeted_ablation", "diagnostic_probe", "maintenance",
@@ -273,6 +271,12 @@ GATE_POLICY: dict[str, GatePolicy] = {
     # Deliberate abandonment spends nothing but discards admitted work - the
     # user owns that call in every autonomy mode.
     "abandon_request":      GatePolicy(protected=True,  auto="never"),
+    # Re-settling a mechanism verdict rewrites what the graph learned; the
+    # user sees the judge's ruling and decides, in every autonomy mode.
+    "instrument_correction": GatePolicy(protected=True, auto="never"),
+    # A new bet placed with the data in hand: labeled post-hoc, judged by the
+    # user against the original bet, never rewriting it.
+    "posthoc_claim":        GatePolicy(protected=True, auto="never"),
 }
 
 AUTO_POLICY_IDS = {
@@ -334,26 +338,28 @@ def check_tables(*, cards_dir=None, validators=None) -> list[str]:
             errs.append(f"FLOW_INSTRUMENTAL_TAIL: route/{purpose} must end at the manual user gate "
                         f"and node creation, got {seq[-3:]}")
 
-    # The injectable subset (rides on top of the portfolio, mid-round intake)
-    # must partition INSTRUMENTAL_PURPOSES with targeted_ablation, and every
-    # injectable purpose needs a real budget cap key: these facts used to live
-    # as literal tuples at four validator sites with nothing proving them.
+    # Every instrumental purpose rides on top of the portfolio and may enter
+    # mid-round through its own door, so the injectable set IS the
+    # instrumental set, and every member needs a real budget cap key.
     for purpose in econfig.INSTRUMENTAL_PURPOSES:
-        if purpose != "targeted_ablation" and purpose not in econfig.INJECTABLE_PURPOSES:
-            errs.append(f"FLOW_INJECTABLE_MISSING: instrumental purpose {purpose!r} is neither "
-                        "targeted_ablation nor injectable - it could not enter any round")
+        if purpose not in econfig.INJECTABLE_PURPOSES:
+            errs.append(f"FLOW_INJECTABLE_MISSING: instrumental purpose {purpose!r} has no mid-round "
+                        "door - it could not enter any round")
     for purpose in econfig.INJECTABLE_PURPOSES:
-        if purpose not in econfig.INSTRUMENTAL_PURPOSES or purpose == "targeted_ablation":
+        if purpose not in econfig.INSTRUMENTAL_PURPOSES:
             errs.append(f"FLOW_INJECTABLE_UNKNOWN: injectable purpose {purpose!r} is not an "
-                        "on-top instrumental purpose")
+                        "instrumental purpose")
         cap_key = econfig.INJECTABLE_CAP_KEYS.get(purpose)
-        if not cap_key or cap_key not in (econfig.merged_default().get("budgets") or {}):
-            errs.append(f"FLOW_INJECTABLE_CAP: injectable purpose {purpose!r} has no default "
-                        f"budget cap key (got {cap_key!r})")
-    if set(econfig.INJECTABLE_CAP_KEYS) != set(econfig.INJECTABLE_PURPOSES):
-        errs.append("FLOW_INJECTABLE_CAP_KEYS: INJECTABLE_CAP_KEYS and INJECTABLE_PURPOSES disagree")
+        if cap_key is not None and cap_key not in (econfig.merged_default().get("budgets") or {}):
+            errs.append(f"FLOW_INJECTABLE_CAP: injectable purpose {purpose!r} names a budget cap key "
+                        f"{cap_key!r} that has no default")
+    if not set(econfig.INJECTABLE_CAP_KEYS) <= set(econfig.INJECTABLE_PURPOSES):
+        errs.append("FLOW_INJECTABLE_CAP_KEYS: INJECTABLE_CAP_KEYS names a purpose that is not injectable")
+    if "targeted_ablation" in econfig.INJECTABLE_CAP_KEYS:
+        errs.append("FLOW_ABLATION_UNCAPPED: the inheritance tax has no per-round cap - every "
+                    "program-level win owes one; its off switch is evidence_policy.ablation.budget_multiple")
 
-    # v11.1 P5: exploratory is a declared purpose, never instrumental/injectable
+    # Exploratory is a declared purpose, never instrumental/injectable
     # (it is a real search bet), and its gates must be user-owned - the duty
     # exemptions it buys make an auto-approved exploratory lane a rigor bypass.
     for purpose in econfig.EXPLORATORY_PURPOSES:

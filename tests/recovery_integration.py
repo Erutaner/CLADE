@@ -1,8 +1,8 @@
 #!/usr/bin/env python3
-"""Focused integration checks for v9.2 recovery semantics.
+"""Focused integration checks for recovery semantics.
 
-This intentionally exercises the state transitions that the old large harness
-could not express.  It is not a second end-to-end fixture.
+This exercises the state transitions a large end-to-end harness cannot
+express cleanly.  It is not a second end-to-end fixture.
 """
 from __future__ import annotations
 
@@ -32,7 +32,7 @@ def ok(condition: bool, message: str) -> None:
 
 
 def fresh_project() -> M.D:
-    out = Path(__file__).resolve().parent / "out" / "v92_recovery_integration"
+    out = Path(__file__).resolve().parent / "out" / "recovery_integration"
     out.mkdir(parents=True, exist_ok=True)
     repo = out / "proj"
     if repo.exists():
@@ -443,7 +443,7 @@ def main() -> None:
     abandoned_authority_is_terminal_not_required()
     historical_baseline_consumption_requires_project_fork()
     unsubmitted_round_projection_is_reversible()
-    print(f"V9.2 RECOVERY INTEGRATION GREEN: {CHECKS} checks passed")
+    print(f"RECOVERY INTEGRATION GREEN: {CHECKS} checks passed")
 
 
 if __name__ == "__main__":

@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Small contradiction tests for v9.2 holds and recovery impact discovery."""
+"""Small contradiction tests for holds and recovery impact discovery."""
 from __future__ import annotations
 
 import os
@@ -150,7 +150,7 @@ def stage_probe_gap_reaches_eval_checks() -> None:
 
 def probe_landing_overwrite_cannot_rewrite_history() -> None:
     """A reused producer path must resolve to the first RUN-owned snapshot."""
-    repo = HERE / "out" / "v92_probe_snapshot"
+    repo = HERE / "out" / "probe_snapshot"
     repo.mkdir(parents=True, exist_ok=True)
     landing = repo / "probe.json"
     landing.write_text(json.dumps({"signal": 1.0}), encoding="utf-8")
@@ -211,7 +211,7 @@ def probe_landing_overwrite_cannot_rewrite_history() -> None:
 
 
 def new_attempt_cannot_borrow_old_probe() -> None:
-    repo = HERE / "out" / "v92_probe_snapshot"
+    repo = HERE / "out" / "probe_snapshot"
     node = {"id": "N030", "stage_cursor": 0, "replica_index": 0,
             "evidence_heads": {"stage:0:0": "RUN-OLD"}}
     old = {
@@ -285,7 +285,7 @@ def main() -> None:
     probe_landing_overwrite_cannot_rewrite_history()
     new_attempt_cannot_borrow_old_probe()
     seed_filesystem_identity_checks()
-    print(f"V9.2 CONTROL PLANE UNIT GREEN: {CHECKS} checks passed")
+    print(f"CONTROL PLANE UNIT GREEN: {CHECKS} checks passed")
 
 
 if __name__ == "__main__":

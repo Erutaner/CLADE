@@ -1,12 +1,12 @@
-"""v11.2 feature contracts at unit speed.
+"""Tombstone contracts at unit speed.
 
-    python tests/v112_feature_unit.py
+    python tests/tombstone_unit.py
 
 Covers the tombstone mechanism: collision deaths bank an anonymous absorption
 criterion (a predicate bounding what ONE published work absorbs - never a
 direction, never a menu), routed to the round strategist only; generator
-inputs stay untouched. Validator branches are exercised BEHAVIORALLY (the
-v11.1 postmortem rule: composite/validator paths must run, not just grep).
+inputs stay untouched. Validator branches are exercised BEHAVIORALLY
+(composite/validator paths must run, not just grep).
 """
 from __future__ import annotations
 
@@ -81,7 +81,7 @@ def review_level_contract():
               "criterion + one note + section heading after: clean")
         errs = evalid._review_tombstone_errors(ctx, head + "## Verdict rationale\nx")
         check(any("REVIEW_TOMBSTONE:" in e for e in errs), "a missing TOMBSTONE line is refused")
-        # F1 regression: an empty label must NOT absorb the next line as its criterion.
+        # An empty label must NOT absorb the next line as its criterion.
         empty_label = head + "TOMBSTONE:\n\n## Verdict rationale\nx"
         check(evalid.TOMBSTONE_LINE_RE.findall(empty_label) == [],
               "an empty `TOMBSTONE:` label captures nothing (no cross-newline walk)")
@@ -191,7 +191,7 @@ def placement_guards():
     src = open(HERE.parent / "engine" / "evalid.py", encoding="utf-8").read()
     lic = src.split("def _duplicate_evidence_errors")[1].split("\ndef ")[0]
     check("REVIEW_TOMBSTONE" not in lic and "TOMBSTONE_LINE_RE" not in lic,
-          "the license fn itself is untouched (pre-v11.2 reviews keep hard-disposition status)")
+          "the license fn itself is untouched (hard-disposition status never depends on the line)")
     for anchor in ("TOURNAMENT_TOMBSTONE_MISSING", "TOURNAMENT_TOMBSTONE_SHAPE",
                    "TOURNAMENT_TOMBSTONE_CA", "TOURNAMENT_TOMBSTONE_KNOWN",
                    "TOURNAMENT_TOMBSTONE_ADVANCE", "TOURNAMENT_TOMBSTONE_CA_BINDING",
@@ -249,7 +249,7 @@ def producer_and_ledger():
               "ids allocate past the max existing number, never reissuing one")
 
         # review-driven banking: CA target + line -> banked; TB reference -> event only;
-        # N target and line-less (pre-v11.2) reviews -> silent
+        # N target and line-less reviews -> silent
         n0 = len(eutil.read_jsonl(path))
         self._bank_tombstone_from_review(
             lane, f"VERDICT: REJECT_DUPLICATE\nDUPLICATE_OF: CA007\nTOMBSTONE: {'w' * 61}\n")
@@ -265,7 +265,7 @@ def producer_and_ledger():
         self._bank_tombstone_from_review(
             lane, "VERDICT: REJECT_DUPLICATE\nDUPLICATE_OF: CA007\n")
         check(len(eutil.read_jsonl(path)) == n0 + 1,
-              "graph-target duplicates and line-less (pre-v11.2) reviews bank nothing")
+              "graph-target duplicates and line-less reviews bank nothing")
 
         # tournament-side banking routes all three validated forms correctly
         tj = {"audits": [
@@ -328,4 +328,4 @@ if __name__ == "__main__":
     placement_guards()
     producer_and_ledger()
     strategist_and_reviewer_blocks()
-    done("V11.2 FEATURE UNIT")
+    done("TOMBSTONE UNIT")

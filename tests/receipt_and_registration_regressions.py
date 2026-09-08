@@ -1,26 +1,25 @@
-"""R11-batch fix regressions (v11.6).
+"""Receipt and registration regressions.
 
-Unit pins for the eleventh-round root-cause reconciliations (drives exercise
-the composed paths; these pin the load-bearing mechanics):
-  - R11-010/015/G-4  context receipts are declared by the RENDERER: the
-                     observations block returns (lines, ids) incl. pinned
-                     rows; artifacts_receipts shares artifacts_block's row
-                     source; the materializer stores explicit receipts and
-                     the title-prefix heuristic is dead; rematerialize replays
-  - R11-010          NODE_SPEC acceptance compares the card's artifact
-                     receipt against the current registry (GENERATION_MOVED)
-  - R11-005          a mid-revision producer's artifact refuses new freezing
-                     (SPEC_CONSUME_PRODUCER_MID_REVISION); plain building
-                     without a scheduled redo stays consumable
-  - R11-009          the recovery impact closure sees shared-artifact
-                     receipts and on-disk NODE_SPEC draft consumes
-  - R11-001          a repeat lane's product registrations are deferred into
-                     repeat_measure and flushed only when the repeat seals;
-                     unresolvable rows are dropped with a receipt
-  - R11-015          maintenance defect_evidence ids must exist and be active
-  - W6 doctor        STUCK_TASK_NO_GATE / TERMINAL_PHASE_OPEN_OBLIGATIONS /
-                     ARTIFACT_BYTES_MISSING/DRIFTED / RUN_ARCHIVE_ORPHAN /
-                     ABANDONED_PENDING_INFRA / MULTI_OPEN_TASKS --fix parks
+Unit pins (drives exercise the composed paths; these pin the load-bearing
+mechanics):
+  - context receipts are declared by the RENDERER: the observations block
+    returns (lines, ids) incl. pinned rows; artifacts_receipts shares
+    artifacts_block's row source; the materializer stores explicit receipts
+    and no title-prefix heuristic exists; rematerialize replays
+  - NODE_SPEC acceptance compares the card's artifact receipt against the
+    current registry (GENERATION_MOVED)
+  - a mid-revision producer's artifact refuses new freezing
+    (SPEC_CONSUME_PRODUCER_MID_REVISION); plain building without a scheduled
+    redo stays consumable
+  - the recovery impact closure sees shared-artifact receipts and on-disk
+    NODE_SPEC draft consumes
+  - a repeat lane's product registrations are deferred into repeat_measure
+    and flushed only when the repeat seals; unresolvable rows are dropped
+    with a receipt
+  - maintenance defect_evidence ids must exist and be active
+  - doctor: STUCK_TASK_NO_GATE / TERMINAL_PHASE_OPEN_OBLIGATIONS /
+    ARTIFACT_BYTES_MISSING/DRIFTED / RUN_ARCHIVE_ORPHAN /
+    ABANDONED_PENDING_INFRA / MULTI_OPEN_TASKS --fix parks
 """
 import json
 import shutil
@@ -44,7 +43,7 @@ import eutil      # noqa: E402
 import evalid     # noqa: E402
 
 
-# ------------------------------------------------- R11-015 / G-4: OB ids ----
+# ---- OB ids ----
 def observations_block_returns_receipt() -> None:
     rows = [{"id": f"OB{i:03d}", "statement": f"s{i}", "where": "w",
              "measurement": "m", "node": ("NX" if i == 2 else "NY"),
@@ -58,15 +57,32 @@ def observations_block_returns_receipt() -> None:
           "the window must disclose its cut")
     lines2, ids2 = etask.TaskMixin._observations_block(stub, pin_node="NX")
     check(ids2[0] == "OB002" and set(ids) < set(ids2),
-          "pin_node rows must enter BOTH the lines and the receipt (G-4)")
+          "pin_node rows must enter BOTH the lines and the receipt")
     check(len(lines2) >= len(ids2), "every receipt id has a rendered line")
     stub_empty = SimpleNamespace(
         store=SimpleNamespace(observations=lambda st, active_only=False: []), st={})
     lines3, ids3 = etask.TaskMixin._observations_block(stub_empty)
     check(ids3 == [] and len(lines3) == 1, "an empty ledger yields an empty receipt")
+    # engine readings (one per concluded node with a probe) get their own
+    # window and never crowd the agent-mined phenomena out of the card
+    mixed = [{"id": "OB001", "statement": "mined one", "where": "w", "measurement": "m", "node": "NY"}]
+    mixed += [{"id": f"OB{i:03d}", "statement": f"reading {i}", "where": "probe", "measurement": "m",
+               "node": f"N{i:03d}", "source": "engine", "kind": "probe_reading"} for i in range(2, 22)]
+    stub_mixed = SimpleNamespace(
+        store=SimpleNamespace(observations=lambda st, active_only=False: mixed), st={})
+    lines4, ids4 = etask.TaskMixin._observations_block(stub_mixed)
+    check(ids4[0] == "OB001" and any("OB001: mined one" in ln for ln in lines4),
+          "twenty later probe readings do not push the one mined phenomenon out of the window")
+    check(ids4[1:] == [f"OB{i:03d}" for i in range(14, 22)]
+          and any("engine readings" in ln for ln in lines4)
+          and any("older readings omitted" in ln for ln in lines4),
+          f"the readings window shows the newest eight and discloses its cut: {ids4}")
+    lines5, ids5 = etask.TaskMixin._observations_block(stub_mixed, pin_node="N003")
+    check("OB003" in ids5 and any("OB003 [probe_reading]" in ln for ln in lines5),
+          "a pinned node's own reading enters the readings window and the receipt")
 
 
-# ------------------------------------------- R11-010: artifact receipts ----
+# ---- artifact receipts ----
 _REG = {"artifacts": [
     {"id": "AR001", "name": "corpus", "kind": "dataset", "node": "NP", "stage": "s1",
      "status": "available", "generation": 2, "content_digest": "abc123", "uri": "shared/a"},
@@ -86,7 +102,7 @@ def artifacts_receipts_same_source() -> None:
           "block and receipt agree on which rows are visible")
 
 
-# ------------------------- R11-010/015: materializer stores declarations ----
+# ---- materializer stores declarations ----
 def materializer_stores_declared_receipts() -> None:
     tmp = HERE / f"v116-mat-{uuid.uuid4().hex}"
     tmp.mkdir()
@@ -132,7 +148,7 @@ def materializer_stores_declared_receipts() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-# ---------------------- R11-010/005: acceptance-time consume validation ----
+# ---- acceptance-time consume validation ----
 def _consume_ctx(producer: dict) -> SimpleNamespace:
     return SimpleNamespace(reg=_REG, g={"nodes": [producer]}, st={}, cfg={},
                            store=SimpleNamespace())
@@ -150,7 +166,7 @@ def consume_receipt_and_stability_checks() -> None:
                                 role="variant", where="w",
                                 receipts={"AR001": {"generation": 1, "content_digest": "abc123"}})
     check(any(e.startswith("SPEC_ARTIFACT_GENERATION_MOVED") for e in errs),
-          "a card that rendered g1 may not silently freeze g2 (R11-010)")
+          "a card that rendered g1 may not silently freeze g2")
     errs = evalid._stage_errors(_consume_ctx(producer), _CONSUME_SPEC,
                                 role="variant", where="w",
                                 receipts={"AR001": {"generation": 2, "content_digest": "abc123"}})
@@ -167,10 +183,10 @@ def consume_receipt_and_stability_checks() -> None:
                                               "implementation_revision_pending": True}),
                                 _CONSUME_SPEC, role="variant", where="w")
     check(any(e.startswith("SPEC_CONSUME_PRODUCER_MID_REVISION") for e in errs),
-          "a scheduled implementation revision refuses new freezing too (R11-005)")
+          "a scheduled implementation revision refuses new freezing too")
 
 
-# --------------------------------------------- R11-009: impact closure ----
+# ---- impact closure ----
 def closure_sees_receipts_and_drafts() -> None:
     graph = {"nodes": [{"id": "NP", "status": "concluded"}]}
     tasks = [
@@ -190,7 +206,7 @@ def closure_sees_receipts_and_drafts() -> None:
         spec_reader=lambda rel: drafts.get(rel))
     by_id = {row["task"]: row["reasons"] for row in impact["tasks"]}
     check("shared_artifact_receipt" in by_id.get("T001", []),
-          "a card whose receipt names the recovered producer is a consumer (R11-009)")
+          "a card whose receipt names the recovered producer is a consumer")
     check("output_draft_consumes" in by_id.get("T002", []),
           "an on-disk NODE_SPEC draft consuming the producer's AR is a consumer")
     check("T003" not in by_id, "an unrelated receipt stays out of the closure")
@@ -202,13 +218,13 @@ def closure_sees_receipts_and_drafts() -> None:
     check("output_draft_unreadable" in by_id2.get("T002", []),
           "a torn draft cannot prove innocence - it is counted as a consumer, "
           "and the planning command survives instead of exiting")
-    legacy = erecover.pending_authority_consumers(graph, [], tasks, ["NP"])
-    check([row["task"] for row in legacy["tasks"]] == ["T001"],
+    registry_less = erecover.pending_authority_consumers(graph, [], tasks, ["NP"])
+    check([row["task"] for row in registry_less["tasks"]] == ["T001"],
           "receipts carry their producer, so even a registry-less call sees the "
           "card consumer; only the draft scan needs the reader")
 
 
-# ------------------------------------- R11-001: deferred registration ----
+# ---- deferred registration ----
 _R11_SPEC = {"workflow": {"stages": [
     {"name": "s1", "metrics_file": "work/m.json", "produces": [{"name": "p", "uri": "out/p"}]},
     {"name": "s2", "metrics_file": "work/m2.json"}]}}
@@ -239,7 +255,7 @@ def repeat_registration_deferred_and_flushed() -> None:
     stub._register_or_defer_stage_products(node, stage, 0, 7, run)
     check(registered == [] and node["repeat_measure"]["pending_product_registrations"]
           == [{"stage_index": 0, "run": "RUN7", "seed": 7}],
-          "a repeat stage DEFERS registration into repeat_measure (R11-001)")
+          "a repeat stage DEFERS registration into repeat_measure")
     stub._register_or_defer_stage_products(node, stage, 0, 7, run)
     check(len(node["repeat_measure"]["pending_product_registrations"]) == 1,
           "replay of the same stage does not duplicate the pending row")
@@ -266,7 +282,7 @@ def repeat_registration_deferred_and_flushed() -> None:
           "a second flush is a no-op (idempotent belt)")
 
 
-# ---------------- W6 self-audit: same-run re-registration converges ----
+# ---- same-run re-registration converges ----
 def replay_registration_does_not_inflate_generation() -> None:
     import hashlib
     tmp = HERE / f"v116-reg-{uuid.uuid4().hex}"
@@ -301,7 +317,7 @@ def replay_registration_does_not_inflate_generation() -> None:
         shutil.rmtree(tmp, ignore_errors=True)
 
 
-# ------------------------------------------ W6: doctor semantic audits ----
+# ---- doctor semantic audits ----
 def doctor_semantic_audits() -> None:
     repo = HERE / f"v116-doctor-{uuid.uuid4().hex}"
     repo.mkdir()
@@ -377,7 +393,7 @@ def doctor_semantic_audits() -> None:
         check("TERMINAL_PHASE_OPEN_OBLIGATIONS" in text3 and "RUN001 running" in text3,
               "phase=done with a live RUN is a buried obligation")
         check("ABANDONED_PENDING_INFRA: node N001" in text3,
-              "abandoned mirrors concluded for lost dispositions (R11-008 W6)")
+              "abandoned mirrors concluded for lost dispositions")
     finally:
         shutil.rmtree(repo, ignore_errors=True)
 
@@ -446,7 +462,7 @@ def resolution_rows_dedupe_by_outbox_key() -> None:
           "times overlapping processes appended it (dedup by outbox_key)")
 
 
-# --------------------------------- R11-015: defect_evidence liveness ----
+# ---- defect_evidence liveness ----
 def maintenance_evidence_must_be_live() -> None:
     # Pin just the ledger-liveness arm: real ids pass, unknown/stale ids fail.
     obs = [{"id": "OB001", "disposition": "active"},
@@ -497,7 +513,7 @@ def main() -> None:
     resolution_rows_dedupe_by_outbox_key()
     doctor_semantic_audits()
     maintenance_evidence_must_be_live()
-    done("V11.6 R11 FIX REGRESSIONS")
+    done("RECEIPT / REGISTRATION REGRESSIONS")
 
 
 if __name__ == "__main__":

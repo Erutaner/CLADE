@@ -1,15 +1,15 @@
-"""R8-batch fix regressions (v11.3).
+"""Material-custody regressions.
 
-Unit-level pins for the r8 audit fixes (the drive suites exercise the full
-paths; these pin the load-bearing mechanics):
-  - R8-01 sota acceptance stamps the ledger watermark (branch un-shadowed)
-  - R8-02 landing lease covers the material lifecycle (finished+incomplete)
-  - R8-05 adoption deferral persists past the hold and clears on reconcile
-  - R8-06 revive verifies local bytes before promising availability
-  - R8-08 stage settlement requires declared local products to exist
-  - R8-13 _create_task reuses a parked same-duty task (attempts preserved)
-  - R8-14 retirement floor suggests only revivable verdicts
-  - N003  gitignore classification API + advisory demotion inputs
+Unit-level pins (the drive suites exercise the full paths; these pin the
+load-bearing mechanics):
+  - sota acceptance stamps the ledger watermark
+  - landing lease covers the material lifecycle (finished+incomplete)
+  - adoption deferral persists past the hold and clears on reconcile
+  - revive verifies local bytes before promising availability
+  - stage settlement requires declared local products to exist
+  - _create_task reuses a parked same-duty task (attempts preserved)
+  - retirement floor suggests only revivable verdicts
+  - gitignore classification API + advisory demotion inputs
 """
 import json
 import shutil
@@ -47,13 +47,13 @@ def sota_acceptance_stamps_watermark() -> None:
         eapply.ApplyMixin._transition(stub, {"type": "sota_scan", "subject": {}, "outputs": []})
         wm = (stub.st.get("ledger_accept") or {}).get("sota") or {}
         check(wm.get("count") == 1 and bool(wm.get("digest")),
-              "sota acceptance stamps the accepted-ledger watermark (R8-01)")
+              "sota acceptance stamps the accepted-ledger watermark")
         check("sota_scan" in stub.st["bootstrap_done"],
               "the dedicated branch keeps the bootstrap bookkeeping")
         check(evalid.stamped_ledger_watermark(stub.st, "sota")[0] == 1,
               "stamped_ledger_watermark reads the stamp back")
         check(evalid.stamped_ledger_watermark({}, "sota") == (0, ""),
-              "no stamp -> nothing frozen (legacy states may repair the whole table)")
+              "no stamp -> nothing frozen (the task may repair the whole table)")
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -67,7 +67,7 @@ def lease_covers_material_lifecycle() -> None:
                        _ensure_run_claims=lambda run: None)
     holder = eabsorb.AbsorbMixin._landing_lease_holder(stub, "shared/metrics.json")
     check(holder is not None and holder["id"] == "RUN001",
-          "a finished RUN still awaiting evidence keeps its landing lease (R8-02)")
+          "a finished RUN still awaiting evidence keeps its landing lease")
     stub.st["runs"][0]["evidence_status"] = "complete"
     stub.st["runs"][0]["resource_accounted"] = True
     check(eabsorb.AbsorbMixin._landing_lease_holder(stub, "shared/metrics.json") is None,
@@ -85,7 +85,7 @@ def adoption_deferral_persists() -> None:
                            _authorized_recovery_hold_for_run=lambda r: None)
     blocked = eabsorb.AbsorbMixin._run_adoption_blocked(stub, run)
     check(blocked and run.get("adoption_deferred_by_hold") == ["H001"],
-          "an active hold defers adoption AND persists the obligation (R8-05)")
+          "an active hold defers adoption AND persists the obligation")
     st["holds"][0]["status"] = "released"
     check(eabsorb.AbsorbMixin._run_adoption_blocked(stub, run),
           "the deferral outlives the hold: absorption stays blocked after release")
@@ -115,7 +115,7 @@ def revive_verifies_bytes() -> None:
         ]}
         revived, skipped = eartifact.revive_for_node(store, reg, "N1")
         check(revived == 1 and reg["artifacts"][0]["status"] == "available",
-              "matching local bytes revive (R8-06)")
+              "matching local bytes revive")
         check(len(skipped) == 1 and skipped[0]["id"] == "AR002"
               and reg["artifacts"][1]["status"] == "stale",
               "missing bytes stay stale and are reported, not promised")
@@ -134,7 +134,7 @@ def stage_settlement_requires_products() -> None:
                  "produces": [{"name": "ckpt", "kind": "weights", "uri": "out/model.bin"}]}
         errs = evalid.stage_result_errors(ctx, stage, "m.json", None, where="t")
         check(any(str(e).startswith("STAGE_PRODUCT_MISSING") for e in errs),
-              "a completed stage without its declared product is refused (R8-08)")
+              "a completed stage without its declared product is refused")
         (root / "out").mkdir()
         (root / "out" / "model.bin").write_bytes(b"w")
         errs2 = evalid.stage_result_errors(ctx, stage, "m.json", None, where="t")
@@ -165,7 +165,7 @@ def create_task_reuses_parked_duty() -> None:
     check(out is parked and out["status"] == "open" and out["attempts"] == 2
           and out["last_errors"] == ["IMPL_X: fix exactly this"]
           and out["outputs"] == ["new.md"] and "queued_after_hold" not in out,
-          "a parked same-duty task is reopened with its history (R8-13)")
+          "a parked same-duty task is reopened with its history")
     check("queued_task_reopened" in events, "the reuse is on the event record")
 
 
@@ -177,7 +177,7 @@ def retirement_floor_suggests_only_revivable() -> None:
     ]}
     ids = egraph.retired_settled_ids(g, cfg)
     check(ids == ["N2"],
-          "screened_out is never suggested for revival (R8-14); deliverable verdicts are")
+          "screened_out is never suggested for revival; deliverable verdicts are")
 
 
 def gitignore_classification() -> None:
@@ -189,7 +189,7 @@ def gitignore_classification() -> None:
         (root / "kept.json").write_text("{}", encoding="utf-8")
         got = evcs.ignored_paths(root, ["runtime.json", "kept.json", "gone/also_runtime.json"])
         check("runtime.json" in got and "kept.json" not in got,
-              "on-disk classification matches gitignore rules (N003)")
+              "on-disk classification matches gitignore rules")
         got2 = evcs.ignored_paths(root, ["kept.json"])
         check(got2 == set(), "rc=1 (nothing ignored) is a substantive empty answer")
         check(evcs.ignored_paths(root, []) == set(), "empty candidate set short-circuits")
@@ -206,7 +206,7 @@ def main() -> None:
     create_task_reuses_parked_duty()
     retirement_floor_suggests_only_revivable()
     gitignore_classification()
-    done("V11.3 R8 FIX REGRESSIONS")
+    done("MATERIAL CUSTODY REGRESSIONS")
 
 
 if __name__ == "__main__":

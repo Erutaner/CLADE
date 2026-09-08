@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Focused doctor checks for v9.2 RUN and recovery-control integrity."""
+"""Focused doctor checks for RUN and recovery-control integrity."""
 from __future__ import annotations
 
 import copy
@@ -122,7 +122,7 @@ def doctor_control_check() -> None:
 
 
 def instrumental_route_status_check() -> None:
-    """v10.2: an instrumental lane must only ever hold a status on its own route.
+    """An instrumental lane must only ever hold a status on its own route.
 
     Lane status is written from several places, so a mis-routed rewind parks the
     lane in a candidate status whose scheduler branch then asks for artifacts
@@ -195,7 +195,7 @@ def main() -> None:
     head_seal_check()
     doctor_control_check()
     instrumental_route_status_check()
-    print(f"V9.2 DOCTOR RECOVERY UNIT GREEN: {CHECKS} checks passed")
+    print(f"DOCTOR RECOVERY UNIT GREEN: {CHECKS} checks passed")
 
 
 if __name__ == "__main__":

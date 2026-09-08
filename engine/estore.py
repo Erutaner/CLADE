@@ -1,5 +1,5 @@
 """State store: .evo layout, state.json, graph.json, artifacts.json, events, lessons,
-error journal, phenomenon ledger, id allocation (v10).
+error journal, phenomenon ledger, id allocation.
 
 The engine is the ONLY writer of these files. Task roles write artifact files only.
 """
@@ -27,10 +27,10 @@ class Store:
     def _commit_marker_path(self) -> Path: return self.evo / "commit_pending.json"
 
     def _recover_torn_generation(self) -> None:
-        """R7 external audit: save_all replaces graph -> artifacts -> state as
-        separate atomic files. A crash between replaces left a MIXED
-        generation ("new graph + old state") that the old comment called
-        inert - but graph/registry bytes carry decision semantics (recovery
+        """save_all replaces graph -> artifacts -> state as
+        separate atomic files. A crash between replaces leaves a MIXED
+        generation ("new graph + old state") that is NOT inert:
+        graph/registry bytes carry decision semantics (recovery
         scopes, repeat grants, probe caps, node status, AR rows), so retrying
         the interrupted command against the mixed world silently changed its
         meaning (scope widened, grants double-applied, ids re-used).
@@ -120,9 +120,6 @@ class Store:
     def init(self, name: str, goal: str) -> None:
         if self.exists():
             raise SystemExit("[evo] .evo/state.json already exists; refusing to re-init. Use 'evo status'.")
-        legacy = [p for p in ("SESSION_STATE.json", "PROCESS_CARD.md") if (self.evo / p).exists()]
-        if legacy:
-            raise SystemExit(f"[evo] {self.evo} looks like a legacy project ({legacy}); init v10 in a fresh repo.")
         for d in ("tasks", "nodes", "rounds", "evidence", "views", "profile", "ideas", "runs", "recoveries"):
             (self.evo / d).mkdir(parents=True, exist_ok=True)
         cfg = econfig.merged_default()
@@ -131,14 +128,14 @@ class Store:
         eutil.write_json_atomic(self.config_path, cfg)
         eutil.write_text(self.evo / "ONBOARDING.md", _ONBOARDING)
         state = {
-            "evo_version": "10",
+            "evo_version": "1",
             "state_revision": 0,
             "created_at": eutil.utc_now(),
             "phase": "bootstrap",          # bootstrap | rounds | done
             "current_round": None,
             "round_status": None,           # opening | running | closed
             "counters": {"N": 0, "L": 0, "I": 0, "T": 0, "G": 0, "R": 0, "RUN": 0, "LS": 0, "AR": 0,
-                         "ER": 0, "OB": 0, "H": 0, "REC": 0},
+                         "ER": 0, "OB": 0, "H": 0, "REC": 0, "AM": 0, "IC": 0, "PC": 0},
             "bootstrap_done": [],           # ordered list of completed bootstrap task types
             "profile_digests": {},          # immutable bootstrap problem-model files
             "tasks": [],
@@ -156,15 +153,15 @@ class Store:
             "bootstrap_contract_confirmed": False,
             "bootstrap_contract_digest": None,
             "bootstrap_infra_facts_digest": None,
-            # v11.7: an approved INFRA_FACTS revision whose fresh canary proof
+            # An approved INFRA_FACTS revision whose fresh canary proof
             # is still owed; stage/eval launches refuse while it is pending.
             "infra_revision_pending": False,
             "bootstrap_terminated": False,
             "infra_canary": None,           # active passed engine-owned canary record
         }
         eutil.write_json_atomic(self.state_path, state)
-        eutil.write_json_atomic(self.graph_path, {"version": "10", "nodes": []})
-        eutil.write_json_atomic(self.artifacts_path, {"version": "10", "artifacts": []})
+        eutil.write_json_atomic(self.graph_path, {"version": "1", "nodes": []})
+        eutil.write_json_atomic(self.artifacts_path, {"version": "1", "artifacts": []})
         # Candidate-specific prior-art edges are kept separate from reusable
         # paper facts.  The empty ledger is an explicit deep-read output even
         # before the first constructive program exists.
@@ -176,8 +173,10 @@ class Store:
         st = eutil.read_json(self.state_path)
         if st is None:
             raise SystemExit("[evo] no .evo/state.json here. Run 'evo init' first (see README).")
-        if st.get("evo_version") != "10":
-            raise SystemExit("[evo] state.json is not evo_version 10. Use an explicit migration; v10 never silently reinterprets v9.x state.")
+        if st.get("evo_version") != "1":
+            raise SystemExit("[evo] state.json was written by a different engine schema (evo_version != 1); "
+                             "this engine never silently reinterprets foreign state - migrate it explicitly "
+                             "or start a fresh project ('evo init' in a new directory)")
         return st
 
     def save_state(self, st: dict) -> None:
@@ -186,9 +185,9 @@ class Store:
     def save_all(self, st: dict, g: dict, reg: dict) -> None:
         """Write state+graph+artifacts as ONE optimistic transaction.
 
-        v9.2 revision-guarded only state.json; graph/artifact writes could
-        interleave with another process's stale copies. The state revision now
-        guards all three files: they change together or not at all (within the
+        The state revision guards all three files - graph/artifact writes
+        cannot interleave with another process's stale copies: they change
+        together or not at all (within the
         atomic-per-file guarantee; a crash between files is repaired by doctor
         against the authoritative state)."""
         self._transactional_write(st, extra=((self.graph_path, g), (self.artifacts_path, reg)))
@@ -196,7 +195,8 @@ class Store:
     def _transactional_write(self, st: dict, extra: tuple = ()) -> None:
         expected = st.get("state_revision")
         if isinstance(expected, bool) or not isinstance(expected, int) or expected < 0:
-            raise SystemExit("[evo] state has no valid revision; refusing a non-transactional write")
+            raise SystemExit("[evo] state has no valid revision; refusing a non-transactional write - "
+                             "run 'evo doctor'")
         with eutil.exclusive_file_lock(
                 self.evo / "state.lock",
                 "[evo] another engine process is writing state; retry this command"):
@@ -210,10 +210,10 @@ class Store:
             actual = (current or {}).get("state_revision")
             if actual != expected:
                 raise SystemExit("[evo] state changed concurrently; no stale state was written. "
-                                 "Reload and retry the command.")
+                                 "Another engine process committed first - re-run this same command.")
             st["state_revision"] = expected + 1
-            # R7 external audit: graph/artifacts BEFORE state; state.json (the
-            # last, atomic replace) is the commit point. R7 follow-up: "new
+            # Graph/artifacts BEFORE state; state.json (the
+            # last, atomic replace) is the commit point. "New
             # graph + old state" is NOT inert - graph bytes carry decision
             # semantics - so every replaced file is pre-imaged and a
             # pending-commit marker is stamped first; a crash between the
@@ -221,7 +221,7 @@ class Store:
             # _recover_torn_generation) instead of leaving a mixed world.
             writes = []
             for path, data in extra:
-                # v11: graph/artifacts frequently did not change in this
+                # Graph/artifacts frequently did not change in this
                 # transition (every plain reject, run-bind, gate decision,
                 # hold/resume). An identical-bytes skip is observationally
                 # equivalent for every reader - no engine reader consumes file
@@ -260,18 +260,18 @@ class Store:
         return cfg
 
     def load_graph(self) -> dict:
-        g = eutil.read_json(self.graph_path, {"version": "10", "nodes": []})
-        if g.get("version") != "10":
-            raise SystemExit("[evo] graph.json is not version 10.")
+        g = eutil.read_json(self.graph_path, {"version": "1", "nodes": []})
+        if g.get("version") != "1":
+            raise SystemExit("[evo] graph.json is not version 1.")
         return g
 
     def save_graph(self, g: dict) -> None:
         eutil.write_json_atomic(self.graph_path, g)
 
     def load_artifacts(self) -> dict:
-        reg = eutil.read_json(self.artifacts_path, {"version": "10", "artifacts": []})
-        if reg.get("version") != "10":
-            raise SystemExit("[evo] artifacts.json is not version 10.")
+        reg = eutil.read_json(self.artifacts_path, {"version": "1", "artifacts": []})
+        if reg.get("version") != "1":
+            raise SystemExit("[evo] artifacts.json is not version 1.")
         return reg
 
     def save_artifacts(self, reg: dict) -> None:
@@ -295,14 +295,13 @@ class Store:
 
     @classmethod
     def knowledge_is_active(cls, st: dict | None, ref: str) -> bool:
-        """One activity predicate for all consumers (v9.2 had four drifted
-        copies with two incompatible semantics)."""
+        """One activity predicate for all consumers."""
         row = cls.knowledge_dispositions(st).get(str(ref or "").strip())
         return str((row or {}).get("status") or "active") not in ("superseded", "retracted")
 
     @staticmethod
     def _committed_journal_rows(st: dict | None, rows: list[dict], prefix: str) -> list[dict]:
-        """R9 (external audit r6): rows whose numeric id exceeds the committed
+        """Rows whose numeric id exceeds the committed
         state counter are crash ghosts (their transition's state save never
         landed). The next same-id allocation quarantines them; readers that
         hold a state must not treat them as authority meanwhile."""
@@ -333,7 +332,7 @@ class Store:
                 not in ("superseded", "retracted")]
 
     def _quarantine_ghost_rows(self, path, new_id: str) -> None:
-        """R8 (external audit r5): allocate-then-append journals leave a ghost
+        """Allocate-then-append journals leave a ghost
         row when the process dies between the append and the state commit -
         the committed counter then re-allocates the same id and the ghost
         aliases the real row for every reader. The caller's state counter is
@@ -357,7 +356,7 @@ class Store:
                                      "raw": raw}, ensure_ascii=False) + "\n")
         kept = [r for r in rows if str(r.get("id") or "") != new_id]
         payload = "".join(json.dumps(r, ensure_ascii=False) + "\n" for r in kept)
-        # R9: atomic replace - a crash inside a plain truncate+write here
+        # Atomic replace - a crash inside a plain truncate+write here
         # destroyed every committed row this cleanup meant to KEEP.
         eutil.write_text_atomic(path, payload)
         self.event("engine", "journal_ghost_quarantined", journal=path.name, id=new_id,
@@ -382,7 +381,7 @@ class Store:
                 not in ("superseded", "retracted")]
 
     def add_observation(self, st: dict, rec: dict) -> str:
-        """The phenomenon ledger (v9): quantitative anomalies mined from OUR OWN
+        """The phenomenon ledger: quantitative anomalies mined from OUR OWN
         runs (loss spikes, slice-level failures, dynamics oddities, eval quirks).
         Oral-tier method work is overwhelmingly phenomenon-first - the ledger is
         the engine's supply line from execution back into ideation: sketches may
@@ -410,11 +409,11 @@ class Store:
 
     def error_records(self, st: dict | None = None) -> list[dict]:
         """ER failure rows only (resolution rows filtered out)."""
-        # R9 (external audit r6): only real FAILURE rows. Recovery writes
+        # Only real FAILURE rows. Recovery writes
         # kind="resolution_retraction" control rows with no id/stage/run/note;
-        # they used to pass this filter and surface as "[None] ... no note
-        # recorded" pseudo-errors in bundles while doctor reported them as
-        # duplicate empty ids. Dispositions are folded by error_resolutions().
+        # they must not pass this filter, or they would surface as "[None] ...
+        # no note recorded" pseudo-errors in bundles while doctor reported
+        # them as duplicate empty ids. Dispositions are folded by error_resolutions().
         return [r for r in self.errors(st)
                 if str(r.get("kind") or "") not in ("resolution", "resolution_retraction")]
 
@@ -435,7 +434,7 @@ class Store:
         for i, r in enumerate(self.errors(st)):
             kind = r.get("kind")
             if kind == "resolution":
-                # R11 interruption audit: two overlapping processes can both
+                # Two overlapping processes can both
                 # append the same staged outbox row (the key rides the state
                 # commit; the appends do not). One logical disposition is one
                 # row to every reader, however many times it landed.
@@ -565,7 +564,7 @@ class Store:
         state and binds the platform job later through ``run-bind``.
         """
         if not str(contract_digest or "").strip():
-            raise ValueError("v10 RUNs require a non-empty executable contract digest")
+            raise ValueError("a RUN requires a non-empty executable contract digest")
         rid = self.next_id(st, "RUN")
         run = {
             "id": rid, "node": node, "kind": kind, "stage": stage,
@@ -653,11 +652,12 @@ Paths (files or folders) documenting:
   boundary with explicit caps. Algorithm-intrinsic search/multiple models may
   stay inside one preregistered stage. The project scan recommends, and you
   approve before automation, whether training uses one recorded seed or an
-  exact preplanned repeat set. Ablation is separately off or limited to one
-  manually approved, decision-changing child run; it is never triggered by
-  every gain and never multiplied by seed count. Cheap mechanism probes add no
-  training. Scaling is off/reuse-only/budgeted/full, never a global tax hidden
-  inside every L4 node.
+  exact preplanned repeat set. Ablation is separately off, or allowed as a
+  manually approved causal diagnostic (a few changed-component runs sized by
+  noise arithmetic, up to a ceiling you set) opened when a settled gain's
+  mechanism actually needs answering - never a tax on every gain. Cheap
+  mechanism probes add no training. Scaling is off/reuse-only/budgeted/full,
+  never a global tax hidden inside every L4 node.
 
 ## 3. What happens next (so you know the engine is working)
 project scan -> configure -> infra scan -> success/resource interview (you approve) -> one engine-run

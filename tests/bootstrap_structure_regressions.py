@@ -1,6 +1,6 @@
-"""v11.7 structural-round regressions.
+"""Bootstrap structure regressions.
 
-Unit pins for the bootstrap/rehearsal/revision restructuring (mock_drive
+Unit pins for the bootstrap/rehearsal/revision machinery (mock_drive
 exercises the composed paths; these pin the load-bearing mechanics):
   - engine-fit: four-assumption coverage, evidence duty, overall derivation
     (F0 violated = unfit), readiness worklist duty
@@ -113,7 +113,7 @@ def scheduler_fit_readers() -> None:
         ns = SimpleNamespace(store=SimpleNamespace(repo=repo))
         check(esched.Engine._engine_fit_overall(ns) == "", "no discovery yet reads as ''")
         check(esched.Engine._provision_needed(ns) is False,
-              "no discovery yet reads as certified (legacy projects keep their sequence)")
+              "no discovery yet reads as certified (a project keeps the sequence its scan defined)")
         d = SimpleNamespace(repo=repo)
         (repo / "README.md").write_text("r\n", encoding="utf-8")
         (repo / "eval.py").write_text("e\n", encoding="utf-8")
@@ -352,7 +352,7 @@ def main() -> None:
     rehearsal_observation_contract()
     rehearsal_real_execution()
     doctor_advisories()
-    done("V11.7 STRUCTURAL REGRESSIONS")
+    done("BOOTSTRAP STRUCTURE REGRESSIONS")
 
 
 if __name__ == "__main__":

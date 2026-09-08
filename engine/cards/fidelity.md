@@ -35,8 +35,20 @@ to the exact implementation seal; it cannot certify a later code revision.
      (one row can be sufficient for a single-file/single-kernel innovation;
      snippets >=3 tokens and copied exactly)
    - `## Omissions and simplifications` - every place the implementation is a
-     simplified/partial version of the idea and why that is acceptable (or
-     'NONE-FOUND' after a real diff of idea vs code)
+     simplified/partial version of the idea and why that is acceptable, AND
+     every load-bearing ADDITION beyond the frozen program - a piece the build
+     introduced that could plausibly move the number on its own (a new
+     training step, a kernel, a stabilizer). Additions are not a fidelity
+     failure by themselves, but they must be named here so the conclusion can
+     attribute the gain honestly instead of crediting the kernel by default
+     (or 'NONE-FOUND' after a real diff of idea vs code)
+   - `## Refuted kernel disposition` - only when the spec carries
+     `refuted_kernel_disposition` (a model parent's kernel was refuted by its
+     ablation): confirm from the CODE that the node did what it declared -
+     built on the control version, removed the kernel, replaced it (with
+     what), or carries it as its own new claim. A declaration the code does
+     not match is a fidelity failure; the engine records the declaration, you
+     verify it.
    - `## Audit verdict` - what you checked, what almost failed
 
 ## Output contract

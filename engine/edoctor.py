@@ -1,4 +1,4 @@
-"""Cross-file consistency checks and safe repairs (v8)."""
+"""Cross-file consistency checks and safe repairs."""
 from __future__ import annotations
 
 import json
@@ -6,6 +6,7 @@ import math
 from collections.abc import Mapping
 from pathlib import Path
 
+import eamend
 import eartifact
 import ecanary
 import econfig
@@ -154,9 +155,9 @@ def diagnose(store, fix: bool = False) -> tuple[list[str], list[str]]:
     cfg = store.load_config()
     g = store.load_graph()
     reg = store.load_artifacts()
-    # R8 (external audit r5): a torn JSONL tail used to kill doctor itself -
-    # every strict reader exits with "run doctor", and doctor ran the same
-    # strict readers. Sweep the journals tolerantly FIRST. --fix quarantines
+    # A torn JSONL tail must not kill doctor itself -
+    # every strict reader exits with "run doctor", so doctor cannot use the
+    # same strict readers. Sweep the journals tolerantly FIRST. --fix quarantines
     # a torn FINAL line (exactly the crash append_jsonl models: raw bytes
     # preserved in <name>.quarantine beside the journal); mid-journal damage
     # is reported with exact line numbers and honestly stops the audit.
@@ -208,7 +209,7 @@ def diagnose(store, fix: bool = False) -> tuple[list[str], list[str]]:
                             "irrecoverable-evidence receipt")
     problems.extend(_recovery_control_errors(store, st, g))
 
-    # v11.1 T3: WINNER.json is agent-facing but unsealed - doctor cross-checks
+    # WINNER.json is agent-facing but unsealed - doctor cross-checks
     # it against the lane's frozen winner identity so a corrupted copy cannot
     # silently mislead four stages while validators keep passing the originals.
     for lane in st.get("lanes", []):
@@ -238,14 +239,14 @@ def diagnose(store, fix: bool = False) -> tuple[list[str], list[str]]:
                             "unaffected - delete this WINNER.json (stages fall back to them)")
         elif eprogram.candidate_digest(wdata.get("sketch") or {}) != str(lane.get("winner_program_digest") or ""):
             # Header fields intact but the sketch PAYLOAD was altered - the
-            # only part four stages actually read (R2: header-only checking
-            # left the body unguarded).
+            # only part four stages actually read (header-only checking
+            # would leave the body unguarded).
             problems.append(f"WINNER_FILE_BODY_MUTATED: lane {lane.get('id')} WINNER.json sketch payload "
                             "no longer matches the frozen winner_program_digest; the sealed batch/"
                             "tournament are unaffected - delete this WINNER.json (stages fall back to "
                             "the sealed originals) or let the next tournament accept rewrite it")
 
-    # v11.1 (final audit C31): ledger slices share WINNER.json's threat shape -
+    # Ledger slices share WINNER.json's threat shape -
     # engine-written, unsealed, agent-facing. Every slice row must be
     # byte-identical to the same-id row of its source pool.
     slice_dir = eutil.rpath(store.repo, ".evo/slices")
@@ -302,7 +303,7 @@ def diagnose(store, fix: bool = False) -> tuple[list[str], list[str]]:
         missing_bootstrap = sorted(required_bootstrap - set(st.get("bootstrap_done") or []))
         if missing_bootstrap:
             problems.append(f"BOOTSTRAP_ORDER: frozen config is missing completed prerequisites {missing_bootstrap}")
-        # C6: the two decision-carrying preparation files are stamped at
+        # The two decision-carrying preparation files are stamped at
         # acceptance; a post-acceptance edit silently rewrites the admission
         # verdict / the signed-off preparation facts
         for label, rel, key in (
@@ -335,7 +336,7 @@ def diagnose(store, fix: bool = False) -> tuple[list[str], list[str]]:
     # A canary intent row that survived (attach clears rows at or below the
     # attached attempt) marks an attempt whose external command ran but whose
     # receipt was never attached - a possibly-live remote job / spent physical
-    # attempt nobody adopted. This is the read side of the R9 intent row.
+    # attempt nobody adopted. This is the read side of the intent row.
     for t in st.get("tasks", []):
         for row in (t.get("infra_canary_intents") or []):
             problems.append(
@@ -349,8 +350,7 @@ def diagnose(store, fix: bool = False) -> tuple[list[str], list[str]]:
     # superseded snapshot so provenance remains append-only without quadratic
     # per-task I/O as a project grows.
     # Shared with the scheduler: one seal-field registry, one requiredness
-    # predicate, one availability computation (v9.2 hand-copied all four
-    # blocks here and the copies had drifted).
+    # predicate, one availability computation.
     import eauthority
     import esched
     eng = esched.Engine(store)
@@ -360,6 +360,20 @@ def diagnose(store, fix: bool = False) -> tuple[list[str], list[str]]:
     node_required = eauthority.AuthorityMixin._node_seal_required
     active_digests, all_digests = eng._seal_availability()
     seal_digest_cache: dict[str, str] = {}
+    amended = ctx.amended_digests()
+    problems.extend(eamend.integrity_problems(store))
+    node_ids_all = {str(n.get("id")) for n in g.get("nodes", [])}
+    for case in st.get("corrections", []) or []:
+        cid = str(case.get("id") or "?")
+        if str(case.get("status") or "") not in ("review_open", "awaiting_user", "closed_by_review",
+                                                  "rejected_by_user", "applied", "closed_unreviewed"):
+            problems.append(f"CORRECTION_STATUS: {cid} has unknown status {case.get('status')!r}")
+        if str(case.get("node") or "") not in node_ids_all:
+            problems.append(f"CORRECTION_NODE: {cid} names node {case.get('node')} not in graph")
+        for field in ("proposal_seal", "review_seal"):
+            if isinstance(case.get(field), dict):
+                problems.extend(eseal.verify(store.repo, case[field], label=f"correction {cid} {field}",
+                                             require_working=True, digest_cache=seal_digest_cache))
     for lane in st.get("lanes", []):
         problems.extend(evalid.core_palette_contract_errors(ctx, lane))
         problems.extend(evalid.lane_pointer_binding_errors(ctx, lane))
@@ -368,7 +382,8 @@ def diagnose(store, fix: bool = False) -> tuple[list[str], list[str]]:
             if lane_required(lane, field) or isinstance(seal, dict):
                 label = f"lane {lane.get('id')} {field}"
                 problems.extend(eseal.verify(store.repo, seal, label=label,
-                                             require_working=True, digest_cache=seal_digest_cache))
+                                             require_working=True, digest_cache=seal_digest_cache,
+                                             amended=amended))
                 problems.extend(eseal.upstream_errors(seal, active_digests, label=label))
         for i, seal in enumerate(lane.get("seal_history") or []):
             if isinstance(seal, dict):
@@ -385,7 +400,8 @@ def diagnose(store, fix: bool = False) -> tuple[list[str], list[str]]:
             if node_required(node, field) or isinstance(seal, dict):
                 label = f"node {node.get('id')} {field}"
                 problems.extend(eseal.verify(store.repo, seal, label=label,
-                                             require_working=bytes_active, digest_cache=seal_digest_cache))
+                                             require_working=bytes_active, digest_cache=seal_digest_cache,
+                                             amended=amended))
                 problems.extend(eseal.upstream_errors(
                     seal, active_digests if bytes_active else all_digests, label=label))
         for i, seal in enumerate(node.get("seal_history") or []):
@@ -451,8 +467,10 @@ def diagnose(store, fix: bool = False) -> tuple[list[str], list[str]]:
         dossier_path = eutil.rpath(store.repo, dossier_rel)
         if not dossier_path.exists():
             problems.append("PROBLEM_DOSSIER_MISSING: frozen bootstrap dossier is missing")
-        elif evalid.text_file_digest(evalid.Ctx(store, st, cfg, g, reg), dossier_rel) != dossier_digest:
-            problems.append("PROBLEM_DOSSIER_MUTATED: method-blind bootstrap dossier changed after it was frozen")
+        elif evalid.text_file_digest(evalid.Ctx(store, st, cfg, g, reg), dossier_rel) != dossier_digest \
+                and eseal.artifact_digest(store.repo, dossier_rel) != amended.get(dossier_rel):
+            problems.append("PROBLEM_DOSSIER_MUTATED: method-blind bootstrap dossier changed after it was frozen "
+                            "without a recorded amendment ('evo amend' keeps the history)")
 
     # counters must dominate used ids (engine-allocated kinds only; E/M ids are
     # agent-numbered inside their JSONL files and checked for uniqueness there)
@@ -480,7 +498,7 @@ def diagnose(store, fix: bool = False) -> tuple[list[str], list[str]]:
     for r in st.get("rounds", []):
         see(r.get("id"))
     see(st.get("current_round"))
-    # R7: duplicate-id audits for lessons/errors, mirroring observations. A
+    # Duplicate-id audits for lessons/errors, mirroring observations. A
     # transition abort AFTER these journal appends but BEFORE the state commit
     # re-allocates the same id on retry - the ghost row then aliases the real
     # one for every later reader.
@@ -498,11 +516,22 @@ def diagnose(store, fix: bool = False) -> tuple[list[str], list[str]]:
         if eid in err_seen:
             problems.append(f"ERROR_DUP_ID: duplicate id {eid} in errors.jsonl")
         err_seen.add(eid)
-    # R7: a concluded node with still-open infrastructure ERs means its
+    # The three decision ledgers mint engine ids too: instrument corrections
+    # (IC), post-hoc claims (PC) and amendments (AM).
+    for case in st.get("corrections", []) or []:
+        see(str((case or {}).get("id") or ""))
+    for claim in st.get("posthoc_claims", []) or []:
+        see(str((claim or {}).get("id") or ""))
+    try:
+        for rec in eamend.read_all(store):
+            see(str((rec or {}).get("id") or ""))
+    except Exception:  # noqa: BLE001 - a torn amendment ledger is reported by integrity_problems
+        pass
+    # A concluded node with still-open infrastructure ERs means its
     # conclusion's dispositions were lost in the post-commit journal window -
     # otherwise invisible, because no future conclude task exists for it.
     for n in g.get("nodes", []):
-        # R11-008 (W6): abandoned mirrors concluded - an abandon's disposition
+        # Abandoned mirrors concluded - an abandon's disposition
         # rows ride the same post-commit window, and no future task exists for
         # either terminal state to re-surface the loss.
         if n.get("status") in ("concluded", "abandoned"):
@@ -535,7 +564,7 @@ def diagnose(store, fix: bool = False) -> tuple[list[str], list[str]]:
         problems.append(f"RESOLUTION_RETRACTION_MISSING: node {node_id} was superseded by "
                         f"recovery {row.get('recovery')} but its ER resolutions were never "
                         "retracted - stale playbook/suppressor rows are still live")
-    # v11.7: repeated DIFFERENT fixes on one infrastructure surface are the
+    # Repeated DIFFERENT fixes on one infrastructure surface are the
     # signature of an approved fact being wrong (the playbook keeps patching
     # around it) - point at the revision verb instead of letting the pile grow.
     fix_keys: dict[str, set[str]] = {}
@@ -555,7 +584,7 @@ def diagnose(store, fix: bool = False) -> tuple[list[str], list[str]]:
                         "proof is still owed and new stage/eval spend is refused meanwhile - "
                         "the canary task is presented once the current open card settles "
                         "('evo next' shows the queue)")
-    # v9 phenomenon ledger: id continuity + record shape + node references
+    # Phenomenon ledger: id continuity + record shape + node references
     node_ids = {n.get("id") for n in g.get("nodes", [])}
     obs_seen: set[str] = set()
     for rec in store.observations():
@@ -584,7 +613,7 @@ def diagnose(store, fix: bool = False) -> tuple[list[str], list[str]]:
             if rid in seen_ids:
                 problems.append(f"{name}_DUP_ID: duplicate id {rid} in {name}.jsonl")
             seen_ids.add(rid)
-    # v11.2 tombstone ledger: it routes future briefs via the strategist, so a
+    # Tombstone ledger: it routes future briefs via the strategist, so a
     # corrupt or duplicated row is a routing hazard, not cosmetic noise.
     tb_path = eutil.rpath(store.repo, ".evo/evidence/TOMBSTONES.jsonl")
     tb_rows: list = []
@@ -624,7 +653,7 @@ def diagnose(store, fix: bool = False) -> tuple[list[str], list[str]]:
             if fix:
                 st.setdefault("counters", {})[kind] = mx
                 if kind in ("LS", "OB", "ER"):
-                    # R9 (external audit r6): a behind counter has two causes -
+                    # A behind counter has two causes -
                     # counter corruption (rows are real; forward is the repair,
                     # this branch) or a crash ghost (row uncommitted; the next
                     # allocation would have quarantined it, and this forward
@@ -643,7 +672,7 @@ def diagnose(store, fix: bool = False) -> tuple[list[str], list[str]]:
     if len(open_tasks) > 1:
         problems.append(f"MULTI_OPEN_TASKS: {open_tasks} (engine invariant: at most one)")
         if fix:
-            # R11-014: converge instead of just reporting - keep the task
+            # Converge instead of just reporting - keep the task
             # `evo next` would present (state order) and park the rest as
             # queued_after_hold, the exact shape the reopen pump re-presents
             # one at a time. Nothing is cancelled; only the presentation
@@ -789,7 +818,7 @@ def diagnose(store, fix: bool = False) -> tuple[list[str], list[str]]:
         if seeds and (not isinstance(ridx, int) or ridx < 0 or ridx >= len(seeds)):
             problems.append(f"NODE_REPLICA_INDEX: node {n['id']} replica_index {ridx} out of range 0..{len(seeds)-1}")
         completed = n.get("replicas_completed") or []
-        # R9-002: the bought-back repeat lane records its completion beside the
+        # The bought-back repeat lane records its completion beside the
         # preplanned lanes but is not one of them - the prefix law governs the
         # preplanned rows only.
         planned_rows = [x for x in completed
@@ -820,7 +849,7 @@ def diagnose(store, fix: bool = False) -> tuple[list[str], list[str]]:
             problems.append(f"RUN_STAGE_INDEX: run {r.get('id')} stage_index={r.get('stage_index')} but "
                             f"stage {r.get('stage')!r} is index {stage_index}")
         if r.get("repeat_measure_attempt"):
-            # R9-002: the repeat buy-back lane binds a fresh seed outside the
+            # The repeat buy-back lane binds a fresh seed outside the
             # preplanned lanes (no replica index/total); its own position law
             # is the pending-seed check in absorption, not the lane table.
             if r.get("replica_seed") is None:
@@ -872,9 +901,6 @@ def diagnose(store, fix: bool = False) -> tuple[list[str], list[str]]:
                             f"{producer_ledger!r}, expected {expected_ledger!r}")
         result_errs = evalid.stage_result_errors(
             ctx, stage, r.get("metrics_file"), r.get("ledger_file"), where=f"doctor run {r.get('id')}",
-            # historical replay: honor the band actually applied at seal time
-            # (v12 era-gating; see evalid.budget_band_floor_of)
-            budget_band_floor=evalid.budget_band_floor_of(r),
             expected_seed=(r.get("replica_seed") if strict_paths else None),
             # Active run fields point at immutable ingested snapshots; producer
             # landing paths are checked separately above.
@@ -901,7 +927,7 @@ def diagnose(store, fix: bool = False) -> tuple[list[str], list[str]]:
         if r.get("scientific_outcome") != decision.get("outcome") or r.get("scientific_gate") != decision:
             problems.append(f"RUN_GATE_DRIFT: run {r.get('id')} scientific decision does not match the frozen gate and metrics")
         if decision.get("outcome") == "stop_node" and not r.get("repeat_measure_attempt"):
-            # (R10-013: the repeat buy-back lane records a stop decision as an
+            # (the repeat buy-back lane records a stop decision as an
             # observation but never applies it - the purchased second
             # measurement runs to completion by design)
             node = idx.get(str(r.get("node") or "")) or {}
@@ -924,15 +950,11 @@ def diagnose(store, fix: bool = False) -> tuple[list[str], list[str]]:
         node = idx.get(str(r.get("node") or "")) or {}
         for err in evalid.evaluation_result_errors(ctx, spec, r.get("metrics_file"),
                                                    where=f"doctor eval run {r.get('id')}",
-                                                   budget_band_floor=evalid.budget_band_floor_of(r),
                                                    allow_probe_unavailable=(
                                                        r.get("probe_evidence_status") == "unavailable"
                                                        or evalid.active_probe_unavailable(ctx, node)),
                                                    probe_artifact_sources=evalid.active_probe_snapshot_map(
-                                                       ctx, node, include_run=r),
-                                                   # historical replay: RUNs sealed before the R9
-                                                   # raw-side trials duty must not fail it forever
-                                                   enforce_harness_trials=False):
+                                                       ctx, node, include_run=r)):
             problems.append(f"RUN_EVAL_RESULT: {err}")
 
     # lanes reference real things
@@ -989,8 +1011,8 @@ def diagnose(store, fix: bool = False) -> tuple[list[str], list[str]]:
                     problems.append(f"LANE_MAINTENANCE_REVIEW_MISSING: lane {l['id']} accepted maintenance review is missing")
             meta = eutil.read_json(eutil.rpath(store.repo, f".evo/ideas/{l['idea']}.meta.json"), {}) or {}
             # Winner program/kernel digests exist only where a tournament ran -
-            # candidates AND exploratory scouts (v11.1 R2 fix: keying this on
-            # == "candidate" silently dropped scouts from the custody audit).
+            # candidates AND exploratory scouts (keying this on == "candidate"
+            # would silently drop scouts from the custody audit).
             if meta and econfig.lane_purpose(l) in ("candidate", "exploratory"):
                 if meta.get("program_digest") != l.get("winner_program_digest"):
                     problems.append(f"LANE_PROGRAM_DIGEST: lane {l['id']} winner and idea digests differ")
@@ -1059,7 +1081,7 @@ def diagnose(store, fix: bool = False) -> tuple[list[str], list[str]]:
                   if l.get("round") == rnd.get("id") and l.get("status") not in ("done", "abandoned")]
         if active:
             problems.append(f"ROUND_CLOSED_WITH_ACTIVE_LANE: round {rnd.get('id')} has active lanes {active}")
-    # R7 external audit: an ACTIVE lane whose node is already terminal is a
+    # An ACTIVE lane whose node is already terminal is a
     # torn abandon cascade (graph committed, state lane update lost - possible
     # in pre-generation-commit states or foreign backups). It wedges
     # close_round on ROUND_ACTIVE_LANES forever; surface it with the verb.
@@ -1074,7 +1096,7 @@ def diagnose(store, fix: bool = False) -> tuple[list[str], list[str]]:
                 f"abandoned node {n.get('id')} - a torn abandon cascade; finish it with "
                 f"'evo propose-abandon --lane {l.get('id')} --reason ...' and approve the gate")
 
-    # R11 (W6) semantic audits.
+    # Semantic audits.
     # A STUCK task is by contract waiting on an escalation decision; with no
     # open/paused escalation gate naming it, nothing can ever decide it - the
     # scheduler's settlement arms should have retired it, so surface the gap.
@@ -1113,7 +1135,9 @@ def diagnose(store, fix: bool = False) -> tuple[list[str], list[str]]:
                 term_blockers.append(f"RUN {r.get('id')} evidence {r.get('evidence_status')}")
         for n in g.get("nodes", []):
             rm = n.get("repeat_measure")
-            if isinstance(rm, Mapping) and not rm.get("waived")                     and not n.get("repeat_measure_done")                     and n.get("repeat_pending_seed") is not None:
+            if isinstance(rm, Mapping) and not rm.get("waived") \
+                    and not n.get("repeat_measure_done") \
+                    and n.get("repeat_pending_seed") is not None:
                 term_blockers.append(f"node {n.get('id')} owes its approved repeat measurement")
         if term_blockers:
             problems.append("TERMINAL_PHASE_OPEN_OBLIGATIONS: phase is 'done' but "
@@ -1161,7 +1185,7 @@ def diagnose(store, fix: bool = False) -> tuple[list[str], list[str]]:
                     f"--artifact {aid} --note <why>`, otherwise recover the producer back to "
                     "the sealed generation")
 
-    # v11.7 (interruption audit): a rehearsal RECEIPT whose node record is
+    # A rehearsal RECEIPT whose node record is
     # missing/mismatched marks an interrupted attach - the tiny platform work
     # ran but was never adopted; the re-run re-spends it (tiny, but disclose).
     for n in g.get("nodes", []):
@@ -1181,7 +1205,7 @@ def diagnose(store, fix: bool = False) -> tuple[list[str], list[str]]:
                             "stays for the audit trail")
 
     # An archive dir whose run id the state never committed is the uncommitted
-    # predecessor of a prepare-window interruption (R11-013); the reconciler
+    # Predecessor of a prepare-window interruption; the reconciler
     # restores it when that id is re-allocated - flag it so nobody deletes it.
     runs_known = {str(r.get("id") or "") for r in st.get("runs", [])}
     runs_root = eutil.rpath(store.repo, ".evo/runs")

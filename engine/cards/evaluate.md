@@ -88,9 +88,14 @@ belong here.
      registered controller stopped and selected its output. Discuss every stage
      by name and echo recorded values.
    - `## Comparability` - walk the dossier invariants BY ID and state how each
-     held; the ids must be real V# ids from PROBLEM_DOSSIER.md (checked). If this node has a metric
-     bridge, reference its anchor result.
-   - `## Anomalies` - the phenomenon hunt (v9): anything SURPRISING in curves,
+     held; the ids must be real V# ids from PROBLEM_DOSSIER.md (checked). For
+     every data-usage invariant, name the concrete test you ran rather than
+     reciting the rule: a record that read the future, a split that leaked
+     into training, an eval slice the model saw - one such fact voids the
+     whole node and every descendant, and it is free to check now while
+     costing rounds to discover later. If this node has a metric bridge,
+     reference its anchor result.
+   - `## Anomalies` - the phenomenon hunt: anything SURPRISING in curves,
      slices, or behaviors - a loss spike at one stage, a slice that moves
      opposite to the aggregate, an output pathology. Each anomaly you report
      here is a candidate OB### ledger entry (mined at conclusion) - the raw

@@ -1,4 +1,4 @@
-"""Accepted-submission transitions (v10): the single mutation site per task
+"""Accepted-submission transitions: the single mutation site per task
 type. Validation stays in evalid; eapply may assume a validated payload.
 """
 
@@ -34,7 +34,7 @@ class ApplyMixin:
         if t == "project_scan":
             if t not in st["bootstrap_done"]:
                 st["bootstrap_done"].append(t)
-            # C6: the discovery file carries CONTROL FLOW (engine-fit gate,
+            # The discovery file carries CONTROL FLOW (engine-fit gate,
             # provision step) - stamp the accepted bytes so a post-acceptance
             # edit is detectable instead of silently rewriting the admission
             st.setdefault("profile_digests", {})["project_discovery"] = \
@@ -47,10 +47,9 @@ class ApplyMixin:
             if t not in st["bootstrap_done"]:
                 st["bootstrap_done"].append(t)
         elif t in ("infra", "infra_interview", "profile", "dossier", "rubric"):
-            # R8 audit: "sota_scan" used to sit in this tuple too, so the
-            # dedicated branch below (which stamps the accepted-ledger
-            # watermark) was unreachable and the watermark was NEVER written -
-            # every later reader fell back to freezing the raw file wholesale,
+            # "sota_scan" must not join this tuple: its dedicated branch
+            # below stamps the accepted-ledger watermark, and without that
+            # stamp every later reader freezes the raw file wholesale,
             # cancelled tasks' unaccepted tails included.
             if t not in st["bootstrap_done"]:
                 st["bootstrap_done"].append(t)
@@ -97,7 +96,7 @@ class ApplyMixin:
             spec_artifacts = [("node_spec", task["outputs"][0])]
             spec_protocol = ((spec.get("eval") or {}).get("protocol") or {})
             if isinstance(spec_protocol, dict) and str(spec_protocol.get("episode_order_file") or ""):
-                # E4: a streaming episode order is part of the frozen contract;
+                # A streaming episode order is part of the frozen contract;
                 # its BYTES freeze with the spec, not merely at evaluation.
                 spec_artifacts.append(("episode_order", str(spec_protocol["episode_order_file"])))
             self._archive_seal(node, "spec_seal")
@@ -111,7 +110,7 @@ class ApplyMixin:
                 self._capture_commit(node)
             egraph.touch(node)
         elif t == "provision":
-            # v11.7: the preparation pass runs BEFORE configure - its observed
+            # The preparation pass runs BEFORE configure - its observed
             # facts (real metric keys, data locations, landing paths) are what
             # the contract will be frozen against, and its constructive
             # choices are listed for the user's sign-off at the contract gate.
@@ -139,14 +138,14 @@ class ApplyMixin:
                 self.store.event("engine", "provision_blocked",
                                  blockers=[str((b or {}).get("missing")) for b in data.get("blockers") or []])
         elif t == "evidence":
-            # R7: acceptance freezes the validated prefix - the next evidence
+            # Acceptance freezes the validated prefix - the next evidence
             # task holds THIS history immutable, while a cancelled task's
             # unaccepted leftovers stay repairable.
             evalid.stamp_ledger_watermark(self.st, "evidence", self.store.evidence())
         elif t == "sota_scan":
             # Acceptance = the whole file just validated; freeze it as the
             # accepted prefix (and keep the bootstrap bookkeeping the generic
-            # tuple used to provide before it shadowed this branch).
+            # branch above provides for the other bootstrap tasks).
             if t not in st["bootstrap_done"]:
                 st["bootstrap_done"].append(t)
             evalid.stamp_ledger_watermark(
@@ -196,7 +195,7 @@ class ApplyMixin:
             self._archive_seal(lane, "theory_draft_seal")
             lane["theory_seq"] = int(lane.get("theory_seq") or 0) + 1
             lane["theory_path"] = task["outputs"][0]
-            # R5 blind-operator audit: the sketch validator demands
+            # The sketch validator demands
             # data.theory_digest == text_file_digest(theory_path), but nothing
             # ever assigned lane.theory_digest - the Frozen digests block reads
             # it, so the row was unreachable and every theory-derived sketch
@@ -326,10 +325,9 @@ class ApplyMixin:
             self._capture_commit(node)
             egraph.touch(node)
         elif t == "rehearsal":
-            # v12 (field deadlock T0081): v11.7 shipped the rehearsal task with
-            # only failure/blocked routing - a PASSING submission fell into the
-            # terminal no-transition branch below and the loop wedged (attempts
-            # never increment on that path). The authority is already complete
+            # A PASSING rehearsal must route here explicitly: in the terminal
+            # no-transition branch below the loop would wedge (attempts never
+            # increment on that path). The authority is already complete
             # before this transition: run-rehearsal recorded rehearsal_run
             # {passed + receipt + seal binding} and every consumer (launch
             # audits, card minting) reads that record, so acceptance changes no
@@ -390,9 +388,7 @@ class ApplyMixin:
                 self.ctx(), self._spec(node), task["outputs"][0],
                 where=f"node {node['id']} evaluation transition", metrics_data=metrics,
                 allow_probe_unavailable=probe_unavailable,
-                probe_artifact_sources=probe_sources, node=node,
-                budget_band_floor=evalid.budget_band_floor_of(
-                    self.store.get_run(self.st, str(node.get("eval_run") or ""))))
+                probe_artifact_sources=probe_sources, node=node)
             result_errs += evalid.normalized_raw_binding_errors(self.ctx(), node, metrics)
             if result_errs:
                 raise SystemExit("[evo] evaluation evidence changed after validation; node was not advanced: "
@@ -407,7 +403,7 @@ class ApplyMixin:
             if isinstance(rm, dict) and not node.get("repeat_measure_done"):
                 row = metrics.get(str(rm.get("result_key") or ""))
                 if isinstance(row, dict) and isinstance(row.get("training_replication"), dict):
-                    # R9-002 (guard 4): an engine-run buy-back settles only
+                    # An engine-run buy-back settles only
                     # AFTER its repeat evaluation RUN reached a sealed
                     # terminal state - the aggregate may never outrun the
                     # purchase it reports. The scheduler already withholds the
@@ -418,7 +414,7 @@ class ApplyMixin:
                             "[evo] repeat_measure aggregate reported before the engine-run repeat "
                             "evaluation settled; the repeat RUN must reach its sealed terminal "
                             "state first")
-                    # v11.1 P4: the buy-back is settled on this aggregate, once.
+                    # The buy-back is settled on this aggregate, once.
                     # The done flag is what makes re-triggering impossible.
                     self._flush_repeat_product_registrations(node)
                     node["repeat_measure_done"] = True
@@ -443,7 +439,7 @@ class ApplyMixin:
                 row = metrics.get(str(cell.get("result_key") or ""))
                 if isinstance(row, dict) and str(row.get("study_artifact") or ""):
                     extra_sealed.append((f"human_study_{cell.get('id')}", str(row["study_artifact"])))
-            # R7: an interval's fixed evaluation/prediction artifact is part of
+            # An interval's fixed evaluation/prediction artifact is part of
             # the settlement evidence - seal the local ones so a post-hoc
             # rewrite/delete of the file behind the bounds trips the seal
             # audit instead of leaving the interval unauditable.
@@ -466,11 +462,10 @@ class ApplyMixin:
                           str((node.get("workflow_reuse_seal") or {}).get("digest") or ""),
                           str((node.get("resource_receipt_seal") or {}).get("digest") or "")]
                 + [str((run.get("evidence_seal") or {}).get("digest") or "")
-                   # F6: only ADOPTED evidence heads are active upstreams. v9.2
-                   # swept every run's seal (quarantined/superseded included),
-                   # and one historical digest in an active upstream list made
-                   # the active-seal audit fail permanently, bricking every
-                   # later engine command.
+                   # Only ADOPTED evidence heads are active upstreams: one
+                   # historical digest (quarantined/superseded) in an active
+                   # upstream list would make the active-seal audit fail
+                   # permanently, bricking every later engine command.
                    for run in self.st.get("runs", [])
                    if run.get("node") == node.get("id") and erun.is_active_evidence(run)],
                 revision=int(node.get("eval_revision") or 0) + 1)
@@ -483,6 +478,8 @@ class ApplyMixin:
             self._apply_conclude(task)
         elif t == "close_round":
             self._apply_close_round(task)
+        elif t == "instrument_review":
+            self._apply_instrument_review(task)
         else:
             raise SystemExit(f"[evo] no transition for task type {t} (engine bug)")
 
@@ -522,10 +519,95 @@ class ApplyMixin:
                       else ("deep_read" if ln.get("search_origin") == "core_synthesis"
                             else "sketch")))
 
-    def _create_lane(self, rid: str, ln: dict) -> dict:
+    def open_instrumental_lane(self, *, purpose: str, parent: str, text: str, brief_title: str,
+                               name: str | None = None, actor: str = "engine",
+                               opened_by: str = "cli") -> dict:
+        """Mid-round intake for instrumental work (ablate / probe / maintain).
+
+        The round portfolio stays the only door for search bets; a causal
+        question, a user question or a discovered defect may enter NOW instead
+        of masquerading as next round's research candidate. Same legality rules
+        as the portfolio door (evalid.injected_lane_errors), full seal/receipt
+        discipline downstream. Raises SystemExit with the reason when the lane
+        cannot open; callers that must not abort record the reason instead."""
+        import erecover
+        st = self.st
+        if st.get("phase") != "rounds" or st.get("round_status") != "running":
+            raise SystemExit("[evo] mid-round intake needs an open, running round (phase=rounds); "
+                             "declare the lane in the next open_round portfolio instead")
+        rid = str(st.get("current_round") or "")
+        # The RECEIVING round's own hold blocks intake too.
+        round_holds = erecover.active_holds_for_subject(st, self.g, round_=rid)
+        if round_holds:
+            raise SystemExit("[evo] the current round is under active hold(s) "
+                             + ", ".join(round_holds)
+                             + "; resume them (or finish their recovery) before injecting a lane")
+        # Every legality check runs BEFORE any state or event changes below:
+        # a refusal has no side effects (no cancelled close_round task, no
+        # event row for a cancellation that never happened).
+        name = str(name or f"{purpose.replace('_', '-')}-{rid.lower()}")
+        text = str(text or "").strip()
+        if len(text) < 20:
+            flag = "--defect" if purpose == "maintenance" else "--question"
+            raise SystemExit(f"[evo] {flag} needs >= 20 chars of substance (it becomes the lane brief)")
+        brief_rel = f".evo/rounds/{rid}/lanes/{name}/BRIEF.md"
+        ln = {"name": name, "intent": "exploit", "experiment_purpose": purpose,
+              "search_origin": "repair", "min_level": 0,
+              "parents": [str(parent)], "bottleneck_ids": [], "brief_md": brief_rel}
+        errs = evalid.injected_lane_errors(self.ctx(), ln, rid)
+        if errs:
+            raise SystemExit("[evo] cannot open this lane:\n  - " + "\n  - ".join(errs))
+        # Containment belt beside the name slug check: the engine authors this
+        # file, so it must be provably inside the managed .evo tree.
+        brief_path = eutil.rpath(self.store.repo, brief_rel).resolve()
+        evo_root = (self.store.repo / ".evo").resolve()
+        if evo_root not in brief_path.parents:
+            raise SystemExit(f"[evo] refusing to write a lane brief outside .evo: {brief_path}")
+        if brief_path.exists():
+            raise SystemExit(f"[evo] a lane brief already exists at {brief_rel}; choose another --name "
+                             "(an existing brief is another lane's frozen evidence)")
+        # ANY not-yet-terminal close_round lifecycle (open, paused, stuck - and a
+        # stuck task's escalation gate) means this round is already closing. An
+        # injected lane would make that task permanently unsubmittable while it
+        # pre-empts all scheduling. Cancel the whole close lifecycle; the
+        # scheduler re-mints it once the lane is done. Only reached once the
+        # lane is certain to be created.
+        for t in st.get("tasks", []):
+            if t.get("type") == "close_round" and t.get("status") in ("open", "paused", "stuck") \
+                    and str((t.get("subject") or {}).get("round") or "") == rid:
+                for gate in st.get("gates", []):
+                    if gate.get("status") == "open" and gate.get("kind") == "escalation" \
+                            and str((gate.get("subject") or {}).get("task") or "") == str(t.get("id")):
+                        gate["status"] = "cancelled"
+                        gate["resolved_at"] = eutil.utc_now()
+                        gate["note"] = "superseded: mid-round intake cancelled the stuck close_round task"
+                        self.store.event("engine", "gate_cancelled", gate=gate.get("id"),
+                                         reason="close_round_lifecycle_cancelled")
+                t["status"] = "cancelled"
+                t.pop("_render", None)
+                t["updated_at"] = eutil.utc_now()
+                self.store.event("engine", "close_round_task_cancelled", task=t.get("id"), round=rid,
+                                 reason="mid-round instrumental intake reopened the round's work")
+        eutil.write_text(eutil.rpath(self.store.repo, brief_rel),
+                         f"# {brief_title}\n\n## Goal\n{text}\n\n## Constraints\n"
+                         f"- instrumental work: no novelty claim, level 0\n"
+                         f"- parent: {parent}\n")
+        lane = self._create_lane(rid, ln, opened_by=opened_by)
+        # actor=engine, matching the lane_created event this rides beside: this
+        # door is open to the agent and to the engine itself by design, and
+        # authority over the spend is exercised at the gate (gate_decided
+        # records who exercised it).
+        self.store.event(actor, "instrumental_lane_injected", lane=lane["id"], round=rid,
+                         purpose=purpose, parent=str(parent), note=eutil.clip_words(text, 240), opened_by=opened_by)
+        return lane
+
+    def _create_lane(self, rid: str, ln: dict, *, opened_by: str = "portfolio") -> dict:
         """One lane record constructor shared by the round portfolio and the
         mid-round instrumental intake (`evo probe` / `evo maintain`) - the two
-        entry points can never drift on lane shape."""
+        entry points can never drift on lane shape. A targeted-ablation lane
+        on a parent whose mechanism is still deferred is that parent's open
+        inheritance-tax lane whichever door opened it: the parent points at
+        it, a pending tax record is cleared, and who opened it is recorded."""
         st = self.st
         lid = self.store.next_id(st, "L")
         lane = {
@@ -548,6 +630,7 @@ class ApplyMixin:
             "problem_path": None,
             "problem_seq": 0, "problem_seal": None,
             "focus": str(ln.get("focus") or "") or None,
+            "mechanism_premises": [str(x) for x in (ln.get("mechanism_premises") or [])],
             "scaling_followup_of": str(ln.get("scaling_followup_of")) if ln.get("scaling_followup_of") else None,
             "confirmatory_of": str(ln.get("confirmatory_of")) if ln.get("confirmatory_of") else None,
             "diagnosis_path": None, "diagnosis_digest": None, "diagnosis_seal": None,
@@ -567,6 +650,20 @@ class ApplyMixin:
                          search_origin=lane["search_origin"],
                          experiment_purpose=lane["experiment_purpose"], parents=lane["parents"],
                          min_level=lane["min_level"], focus=lane["focus"])
+        if lane["experiment_purpose"] == "targeted_ablation":
+            idx = egraph.by_id(self.g)
+            parent = next((idx[p] for p in lane["parents"]
+                           if p in idx and idx[p].get("role") != "platform"), None)
+            pending = parent.get("ablation_pending") if isinstance(parent, dict) else None
+            if parent is not None and (isinstance(pending, dict)
+                                       or (str(parent.get("mechanism_status") or "") == "deferred"
+                                           and not egraph.open_ablation_lane(parent, st))):
+                parent["ablation_lane"] = lid
+                parent["ablation_lane_opened_by"] = opened_by
+                parent.pop("ablation_pending", None)
+                egraph.touch(parent)
+                self.store.event("engine", "ablation_lane_bound", parent=parent.get("id"), lane=lid,
+                                 round=rid, opened_by=opened_by, was_pending=isinstance(pending, dict))
         return lane
 
     def _apply_portfolio(self, task: dict) -> None:
@@ -574,23 +671,44 @@ class ApplyMixin:
         rid = task["subject"]["round"]
         pf = self._spec_from(task["outputs"][0])
         for ln in pf.get("lanes", []):
-            self._create_lane(rid, ln)
+            self._create_lane(rid, ln, opened_by="portfolio")
         st["round_status"] = "running"
         st.setdefault("round_start_primary", {})[rid] = self._observed_best()
         st.setdefault("round_start_frontier", {})[rid] = [n["id"] for n in egraph.frontier(self.g, self.cfg, self.st)]
         st.setdefault("round_start_performance_frontier", {})[rid] = [
             n["id"] for n in egraph.performance_frontier(self.g, self.cfg, self.st)]
         self.store.event("engine", "round_running", round=rid, lanes=len(pf.get("lanes", [])))
+        self._accept_advice = self._open_pending_ablations()
+
+    def _open_pending_ablations(self) -> list[str]:
+        """Pending inheritance tax is the engine's job: every promoted win whose
+        mechanism is still deferred and whose ablation could not open at its
+        own conclusion gets another attempt the moment a round goes running.
+        Every waiting node gets its lane; what still cannot open (a held
+        round) stays pending with a refreshed timestamp and remains on the
+        open_round card's doors."""
+        advice: list[str] = []
+        for node in sorted(self.g.get("nodes", []), key=lambda n: str(n.get("id") or "")):
+            pending = node.get("ablation_pending")
+            if not isinstance(pending, dict) or egraph.open_ablation_lane(node, self.st) \
+                    or str(node.get("mechanism_status") or "") != "deferred" \
+                    or node.get("scientific_promotion_status") != "met" \
+                    or str(node.get("experiment_purpose") or "candidate") != "candidate" \
+                    or node.get("retire_reason") in ("archived", "pruned"):
+                continue
+            kernels = ", ".join(str(k) for k in (node.get("kernel_ids") or [])) or "its kernel"
+            advice.extend(self._open_inheritance_tax(node, kernels, opened_by="open_round"))
+        return advice
 
     def _apply_deep_read(self, task: dict) -> None:
         lane = self._lane_of(task["subject"])
         lane["reading_done"] = True
-        # R7: freeze the validated mech/collision prefixes at acceptance.
+        # Freeze the validated mech/collision prefixes at acceptance.
         # The evidence watermark must advance here TOO: v_deep_read validates
-        # the per-lane evidence top-up this task legally appended, and since
-        # R9 every consumer reads only the accepted prefix - leaving the
-        # watermark behind made those just-accepted E### rows invisible (and
-        # citing them a validation error) until the next evidence task.
+        # the per-lane evidence top-up this task legally appended, and every
+        # consumer reads only the accepted prefix - a watermark left behind
+        # makes those just-accepted E### rows invisible (and citing them a
+        # validation error) until the next evidence task.
         evalid.stamp_ledger_watermark(self.st, "evidence", self.store.evidence())
         evalid.stamp_ledger_watermark(self.st, "mech", self.store.mech_cards())
         evalid.stamp_ledger_watermark(
@@ -652,8 +770,8 @@ class ApplyMixin:
             raise SystemExit(f"[evo] ranked survivor {sketch_id!r} is absent from the sealed program set")
         lane["winner_program_digest"] = eprogram.candidate_digest(wsk)
         lane["winner_kernel_hash"] = eprogram.kernel_fingerprint(wsk)
-        # v11.1 T3: the winner's COMPLETE record in its own file. Winner-only
-        # stages (pose/theorize/challenge/mature) used to re-read the whole
+        # The winner's COMPLETE record in its own file, so winner-only
+        # stages (pose/theorize/challenge/mature) never re-read the whole
         # 4-program batch (~3/4 dead content, 4-6K tok per lifecycle); the
         # engine keeps validating against the sealed original, only the
         # agent-facing input slims. The batch and tournament stay on disk and
@@ -732,7 +850,7 @@ class ApplyMixin:
 
     def _append_tombstone(self, lane: dict, *, criterion: str, source: dict,
                           note: str | None = None) -> str:
-        """v11.2: bank a published-territory boundary from a collision death.
+        """Bank a published-territory boundary from a collision death.
 
         The tombstone is the ONE cross-lane learning channel for idea-level
         deaths: an anonymous absorption criterion plus fixed semantics. It is
@@ -778,8 +896,8 @@ class ApplyMixin:
             return
         crit = next(iter(evalid.TOMBSTONE_LINE_RE.findall(review or "")), "")
         if not crit:
-            # The validator enforces the line going forward; a pre-v11.2
-            # review without one stays silent rather than half-banked.
+            # The validator enforces the line; a review that somehow lacks
+            # one stays silent rather than half-banked.
             return
         if evalid._TOMBSTONE_KNOWN_RE.fullmatch(crit):
             # `TOMBSTONE: TB###` re-cites territory an existing tombstone
@@ -1146,7 +1264,7 @@ class ApplyMixin:
         node["program_digest"] = meta.get("program_digest")
         node["kernel_hash"] = meta.get("kernel_hash")
         node["kernel_ids"] = eprogram.kernel_ids(meta)
-        # v11.1 (R2 fix): the once-per-registration duplicate guards scan lanes
+        # The once-per-registration duplicate guards scan lanes
         # AND nodes; without these copies the node half was dead code and the
         # guarantee rested entirely on lanes never being archived.
         lane_row = self.store.get_lane(self.st, str(node.get("lane") or "")) or {}
@@ -1155,7 +1273,7 @@ class ApplyMixin:
                 node[copy_field] = str(lane_row[copy_field])
         node["operator_ids"] = sorted({str(op) for row in eprogram.kernel_components(meta)
                                        for op in (row.get("operator_refs") or [])})
-        # R4 science audit: freeze the beaten SOTA numbers at node creation -
+        # Freeze the beaten SOTA numbers at node creation -
         # the registered beat-claim must settle against the line as it stood
         # when the claim was made, not against a later in-place ledger rewrite.
         sota_rows = {str(r.get("id") or ""): r for r in eutil.read_jsonl(
@@ -1180,7 +1298,7 @@ class ApplyMixin:
             else:
                 node["effect_comparator_node"] = declared_comparator
         node["search_origin"] = lane.get("search_origin")
-        # R8 (external audit r5): freeze WHICH bytes each consumed shared
+        # Freeze WHICH bytes each consumed shared
         # artifact meant at plan time. The spec stores only the logical AR id;
         # a producer fix could re-generate the same id in place and this
         # consumer would silently read different bytes (or the registry would
@@ -1196,10 +1314,6 @@ class ApplyMixin:
                                      "content_digest": str(art.get("content_digest") or "")}
         if bindings:
             node["artifact_bindings"] = bindings
-        node["mechanism_probe_required"] = bool(
-            (meta.get("mechanism_probe") or {}).get("signal")
-            and not str(meta.get("attribution_waiver") or "").strip())
-        node["attribution_waived"] = bool(str(meta.get("attribution_waiver") or "").strip())
         node["needs_metric_bridge"] = bool(meta.get("metric_bridge_needed"))
         # Fidelity follows a claimed research kernel (or a heavy workflow), not
         # implementation breadth.  A local irreducible law needs this audit;
@@ -1231,7 +1345,7 @@ class ApplyMixin:
             raise SystemExit("[evo] eval launch lost its engine-prepared RUN")
         if data.get("mode") == "completed":
             if str(run.get("evidence_status") or "") == "complete":
-                # R8: the terminal sealed package is immutable; the validator
+                # The terminal sealed package is immutable; the validator
                 # enforced byte identity, so this launch only confirms and
                 # re-absorbs (adopting a quarantined pre-launch package).
                 node["status"] = "evaluating"
@@ -1265,8 +1379,33 @@ class ApplyMixin:
         run = self.store.get_run(self.st, str(task["subject"].get("run") or ""))
         if run is None:
             raise SystemExit("[evo] stage launch lost its engine-prepared RUN")
+        # The launch happened: a busy-resources escalation still waiting for
+        # the user's word is moot and closes here, or it would sit open as a
+        # decision about a wait that ended.
+        for gate in self.st.get("gates", []):
+            subj = gate.get("subject") or {}
+            if gate.get("kind") == "escalation" and gate.get("status") in ("open", "paused")                     and subj.get("reason") == "resources_busy" and subj.get("task") == task["id"]:
+                gate["status"] = "cancelled"
+                gate["resolved_at"] = eutil.utc_now()
+                gate["note"] = f"superseded: the launch for {run['id']} happened"
+                gate["held_by"] = []
+                self.store.event("engine", "gate_cancelled", gate=gate["id"],
+                                 reason="launch_happened_after_busy_wait", task=task["id"])
+        # What the launch actually did is a record beside the run and the node:
+        # how many accelerators it holds, and what it changed from the plan
+        # (fewer devices, another batch, another precision). Never a veto and
+        # never a comparability judgment - the resource axes carry that.
+        devices = data.get("devices")
+        if isinstance(devices, int) and not isinstance(devices, bool) and devices > 0:
+            run["devices"] = devices
+        deviation = str(data.get("deviation") or "").strip()
+        if deviation:
+            run["launch_deviation"] = deviation[:300]
+            node.setdefault("launch_deviations", []).append({
+                "run": run["id"], "stage": str(task["subject"].get("stage") or ""),
+                "devices": run.get("devices"), "note": deviation[:300], "at": eutil.utc_now()})
         if run.get("repeat_measure_attempt"):
-            # R9-002: the repeat lane's authoritative seed is the pending
+            # The repeat lane's authoritative seed is the pending
             # buy-back seed, not a preplanned replica lane
             replica_seed = node.get("repeat_pending_seed")
         else:
@@ -1277,7 +1416,7 @@ class ApplyMixin:
                              f"got {data.get('seed')!r}")
         if data.get("mode") == "completed":
             if str(run.get("evidence_status") or "") == "complete":
-                # R8: same terminal-package immutability as the eval branch.
+                # Same terminal-package immutability as the eval branch.
                 node["status"] = "executing"
                 run["absorbed"] = False
                 self._absorb_run(run)
@@ -1293,7 +1432,7 @@ class ApplyMixin:
             self._absorb_run(run)
         else:
             if str(run.get("evidence_status") or "") != "complete":
-                # R9: never redirect a terminal-sealed RUN's ledger pointer -
+                # Never redirect a terminal-sealed RUN's ledger pointer -
                 # a stale background card after a pre-launch reconcile could
                 # otherwise re-ingest different bytes over the sealed package.
                 run["ledger_file"] = data.get("ledger_file")
@@ -1304,7 +1443,7 @@ class ApplyMixin:
                 run["absorbed"] = False
                 self._absorb_run(run)
             else:
-                # R8 audit: a launch card reopened after a hold (its RUN reset
+                # A launch card reopened after a hold (its RUN reset
                 # to prepared meanwhile) skipped every slot check - accepting
                 # it here could put a second background stage on a single-slot
                 # platform. The card was minted under a slot check; re-prove
@@ -1338,7 +1477,7 @@ class ApplyMixin:
             node["effect_contract_status"] = summary.get("effect_contract_status")
             node["scientific_promotion_status"] = summary.get("scientific_promotion_status")
             if str(outcome.get("verdict") or "") == "screened_out":
-                # R7: a stage-gate stop never has an evaluation_summary, so
+                # A stage-gate stop never has an evaluation_summary, so
                 # promotion fell to None/agent phrasing. The unified rule
                 # (promotion_status) counts screened_out as decided-against:
                 # the pre-registered continuation criterion was missed.
@@ -1362,8 +1501,40 @@ class ApplyMixin:
         node["result_doc"] = task["outputs"][1]
         if outcome.get("checkpoint"):
             node["checkpoint"] = outcome["checkpoint"]
-        node["mechanism_status"] = ((outcome.get("mechanism") or {}).get("status")
-                                    if isinstance(outcome.get("mechanism"), dict) else None)
+        # Two facts. The causal status (did the kernel cause the gain) comes
+        # from the engine's settlement: `deferred` for every model claim until
+        # a targeted ablation settles it, `not_applicable` where there is no
+        # kernel question. The probe's answer (does the trained model use the
+        # part, by the frozen rule over sealed observations) is written beside
+        # it as information - it decides nothing.
+        summary = node.get("evaluation_summary") if isinstance(node.get("evaluation_summary"), dict) else {}
+        outcome_mechanism = outcome.get("mechanism") if isinstance(outcome.get("mechanism"), dict) else {}
+        node["mechanism_status"] = (str(summary.get("mechanism_contract_status") or "")
+                                    or (outcome_mechanism.get("status") if node.get("role") in ("baseline", "platform")
+                                        else None) or None)
+        probe_status = str(summary.get("probe_contract_status") or "")
+        if probe_status and probe_status != "not_registered":
+            node["probe_result"] = {"status": probe_status, "at": eutil.utc_now(),
+                                    "evidence": str(outcome_mechanism.get("evidence") or ""),
+                                    "note": str(outcome_mechanism.get("note") or "")[:300]}
+            # A probe reading is knowledge in its own right, ambiguous or not:
+            # "the model wins and does not use the part" is a phenomenon the
+            # next idea can cite, and the ablation designer's first lead.
+            words = {"confirmed": "uses the part", "refuted": "does not use the part",
+                     "unclear": "gives no clear reading on the part"}.get(probe_status, probe_status)
+            probe_meta = (evalid._idea_meta(self.ctx(), node) or {}).get("mechanism_probe") or {}
+            wins = ", ".join(str(c) for c in (summary.get("target_wins") or [])) or "no claimed cell"
+            node["probe_result"]["observation"] = self.store.add_observation(self.st, {
+                "statement": (f"{node['id']} (verdict {summary.get('verdict') or node.get('verdict') or '-'}, "
+                              f"won {wins}) {words} by its registered probe: "
+                              f"{str(probe_meta.get('signal') or 'registered signal')[:120]}"),
+                "where": f"{node['id']} probe ({str(probe_meta.get('mode') or 'probe')})",
+                "measurement": str(outcome_mechanism.get("note") or "")[:200] or "see the probe block of the metrics",
+                "evidence": str(outcome_mechanism.get("evidence") or node.get("eval_metrics_path") or ""),
+                "node": node["id"], "round": node.get("round"), "status": "open",
+                "source": "engine", "kind": "probe_reading"})
+            self.store.event("engine", "observation_recorded", id=node["probe_result"]["observation"],
+                             node=node["id"], kind="probe_reading")
         # Only this node's still-open infrastructure ERs may be dispositioned:
         # the ledger is engine-owned, so a conclusion cannot close (or forge a
         # playbook entry for) another node's failure even if a validator path
@@ -1377,29 +1548,16 @@ class ApplyMixin:
                     "surface": str(row.get("surface") or "") or None,
                     "fix": str(row.get("fix") or "") or None,
                 })
-        if (node.get("mechanism_probe_required") and node.get("mechanism_status") != "confirmed") \
-                or node.get("attribution_waived"):
-            # A real performance gain remains recorded, but a refuted or
-            # unverified load-bearing channel is not the frozen M->E scientific
-            # claim and therefore cannot seed the research frontier under it.
-            # An unclear probe is a different state: nothing was decided
-            # against, the channel simply was not settled, so it downgrades to
-            # pending_evidence rather than being written off.
-            settled_against = (node.get("attribution_waived")
-                               or node.get("mechanism_status") == "refuted")
-            node["scientific_promotion_status"] = (
-                "blocked" if settled_against
-                else "pending_evidence" if node.get("scientific_promotion_status") == "met"
-                else node.get("scientific_promotion_status") or "pending_evidence")
         if node.get("experiment_purpose") == "targeted_ablation":
             node["ablation_result"] = dict(outcome.get("ablation_result") or {})
+            self._settle_parent_mechanism_from_ablation(node)
         if node.get("role") == "platform" and outcome.get("enabled_services"):
             # dynamic service registry: consumer specs may now bind
             # requires_services to these names
             node["enabled_services"] = outcome["enabled_services"]
             self.store.event("engine", "platform_services_enabled", node=node["id"],
                              services=[str((s or {}).get("name")) for s in outcome["enabled_services"]])
-        # R7: count REGISTERED predictions once each, never the raw array -
+        # Count REGISTERED predictions once each, never the raw array -
         # duplicate/invented rows passed the validator's registered-id loop
         # unvisited and inflated the cross-round calibration record.
         registered_ids = {str(p.get("id") or "")
@@ -1425,7 +1583,7 @@ class ApplyMixin:
                                   for p in (outcome.get("unreached_predictions") or [])
                                   if isinstance(p, dict)} & registered_ids),
             }
-        # R9 (external audit r6): conclusion ORDER is a fact the graph never
+        # Conclusion ORDER is a fact the graph never
         # recorded - the calibration "recent cohort" borrowed node insertion
         # order, which reverses whenever a later-created node concludes first
         # (routine with parallel lanes and slow external RUNs).
@@ -1442,7 +1600,7 @@ class ApplyMixin:
                 "source_conclusion_digest": node["conclusion_seal"]["digest"],
                 "source_conclusion_revision": node["conclusion_revision"],
             })
-        # v9: phenomenon ledger - validated observations become OB### records
+        # Phenomenon ledger - validated observations become OB### records
         # that future sketches can anchor diagnoses on and ideas can cite as
         # assumption sources. This is the supply line from execution back into
         # ideation (oral-tier method work is overwhelmingly phenomenon-first).
@@ -1459,7 +1617,7 @@ class ApplyMixin:
             lane = self.store.get_lane(self.st, node["lane"])
             if lane and lane["status"] != "abandoned":
                 lane["status"] = "done"
-                # R11 matrix sweep (M6): lane->done retires the lane's own
+                # Lane->done retires the lane's own
                 # undecided proposals in the same transition (mirror of the
                 # abandoned arm's cascade) - the lazy pre-present cancellation
                 # covered abandon_request only by coincidence of surfacing
@@ -1475,6 +1633,348 @@ class ApplyMixin:
                                          reason="lane_done", lane=lane.get("id"))
         self.store.event("engine", "node_concluded", node=node["id"], verdict=node["verdict"],
                          scores=node.get("scores", {}))
+        # Advice that rides on the ACCEPTED output: the doors that matter at
+        # this exact moment, so the agent learns them when they are usable.
+        advice: list[str] = []
+        if node.get("role") not in ("baseline", "platform") \
+                and str(node.get("experiment_purpose") or "candidate") == "candidate":
+            kernels = ", ".join(str(k) for k in (node.get("kernel_ids") or [])) or "its kernel"
+            mech = str(node.get("mechanism_status") or "")
+            if mech == "deferred" and node.get("scientific_promotion_status") == "met":
+                advice.extend(self._open_inheritance_tax(node, kernels))
+            elif mech in ("confirmed", "refuted", "unclear"):
+                advice.append(
+                    f"{node['id']}'s mechanism settled {mech} by its frozen rule. If the FORMULA behind "
+                    "that rule is wrong (a unit mismatch, an imported constant - not a threshold you "
+                    f"dislike), the symmetric channel is: write a proposal and run evo correct-instrument "
+                    f"--node {node['id']} --proposal <file>; an independent session judges it and the "
+                    "user decides. A wrong formula in a PASSING gate goes through the same door.")
+        self._accept_advice = advice
+
+    def _open_inheritance_tax(self, node: dict, kernels: str, *, opened_by: str = "conclude") -> list[str]:
+        """A program-level win whose mechanism was never instrumented: open the
+        targeted ablation now, while the checkpoints are warm. The design card
+        and the gates do the rest; here the engine only makes sure the question
+        is asked. `opened_by` records which engine moment opened it: the
+        parent's conclusion, or a round going running with the tax pending.
+        Returns the advice lines that ride on the ACCEPTED output."""
+        nid = str(node.get("id") or "")
+        multiple = econfig.ablation_budget_multiple(self.cfg)
+        summary = node.get("evaluation_summary") or {}
+        won = ", ".join(str(c) for c in (summary.get("target_wins") or [])) or "its claimed cells"
+        if not econfig.is_research(self.cfg):
+            # Engineering mode inherits programs on their measured numbers;
+            # mechanism attribution is a research question, so the engine
+            # spends nothing on it by itself. The door stays open to people.
+            return [f"{nid} settled at program level with its mechanism DEFERRED (engineering mode: the "
+                    f"engine opens no ablation; evo ablate --parent {nid} --question \"...\" stays open "
+                    "to people). Inherit the program; do not cite its kernel as an established cause."]
+        if multiple <= 0:
+            return [f"{nid} settled at program level with its mechanism DEFERRED and stays that way: "
+                    "evidence_policy.ablation.budget_multiple is 0, so the engine opens no ablation. "
+                    "Inherit the program; do not cite its kernel as an established cause. To settle it "
+                    "later: evo amend --path .evo/config.json --from <edited copy> --reason \"...\" "
+                    f"raising the multiple, then evo ablate --parent {nid} --question \"...\"."]
+        question = (f"Is {kernels} the cause of the gain {nid} measured on {won}? The effect settled "
+                    f"at program level with the mechanism deferred; settle it with changed-component "
+                    f"runs against {nid} as the untreated arm, sized within the allowance "
+                    f"({multiple:g} x what {nid} cost).")
+        try:
+            lane = self.open_instrumental_lane(
+                purpose="targeted_ablation", parent=nid, text=question,
+                brief_title="Targeted ablation (inheritance tax on a program-level win)",
+                name=f"ablate-{nid.lower()}", actor="engine", opened_by=opened_by)
+        except SystemExit as exc:
+            reason = str(exc).replace("[evo] ", "", 1)
+            earlier = node.get("ablation_pending") if isinstance(node.get("ablation_pending"), dict) else {}
+            node["ablation_pending"] = {"reason": reason[:400], "at": eutil.utc_now(),
+                                        "question": question,
+                                        "attempts": int(earlier.get("attempts") or 0) + 1}
+            self.store.event("engine", "ablation_deferred_to_next_round", node=nid, reason=eutil.clip_words(reason, 240))
+            return [f"{nid} settled at program level with its mechanism DEFERRED. The engine could not "
+                    f"open its ablation now ({reason[:160]}); it is recorded as pending: the engine tries "
+                    f"again when the next round goes running (or the hold lifts), and the open_round card "
+                    f"lists it until then (evo ablate --parent {nid} opens it mid-round). Until it settles, "
+                    f"inherit the program, never the story."]
+        node["ablation_lane"] = lane["id"]
+        node.pop("ablation_pending", None)
+        return [f"{nid} settled at program level with its mechanism DEFERRED, so the engine opened ablation "
+                f"lane {lane['id']} on it (the inheritance tax: {multiple:g} x what {nid} cost is "
+                f"pre-authorized; a larger design waits for the user). Its design card is next in line. "
+                f"Until it settles, inherit the program, never the story."]
+
+    def _refuted_kernel_reading(self, parent: dict, ablation: dict) -> tuple[str, list[str], str]:
+        """What a refuted kernel means for the parent's gain, by how much the
+        parent changed - three different follow-ups:
+        `paradigm`: a root / full rebuild - the program minus the kernel carries
+        the gain; the paradigm works, try another kernel inside it.
+        `unattributed`: a local change - the parent differed from its comparator
+        by this kernel alone, so the measured gain is not the change's; re-measure
+        before building on it and do not count it as progress.
+        `shell`: the parent also changed other components - one of them carries
+        the gain; the engine lists them (program IR, by content signature) as
+        candidates for a follow-up ablation."""
+        pid, aid = str(parent.get("id") or ""), str(ablation.get("id") or "")
+        kernels = ", ".join(str(k) for k in (parent.get("kernel_ids") or [])) or "its kernel"
+        meta = evalid._idea_meta(self.ctx(), parent) or {}
+        scope = str(meta.get("change_scope") or "")
+        if parent.get("role") == "root" or scope == "full_program":
+            return ("paradigm", [],
+                    f"{pid}'s gain does not come from {kernels} (ablation {aid} found no effect); the paradigm "
+                    f"carries it. {aid} is the program without that story - build on it and try another "
+                    f"kernel inside the paradigm.")
+        if scope == "local":
+            return ("unattributed", [],
+                    f"{pid} differs from its comparator by {kernels} alone, and ablation {aid} found that "
+                    f"{kernels} does not carry the gain: the measured improvement is unattributed (seed luck or "
+                    "recipe drift). Re-measure before building on it (repeat measure door) and do not count it "
+                    "as progress.")
+        code_parent = self.node(str(parent.get("code_parent") or "")) or {}
+        base_meta = evalid._idea_meta(self.ctx(), code_parent) if code_parent else {}
+        base_sigs = set(eprogram.program_operator_signatures(base_meta).values()) if base_meta else set()
+        kernel_sigs = eprogram.kernel_operator_signatures(meta)
+        candidates: list[str] = []
+        for row in ((meta.get("program") or {}).get("operators") or []):
+            if not isinstance(row, dict) or not row.get("id"):
+                continue
+            sig = eprogram.operator_signature(row)
+            if sig in kernel_sigs or sig in base_sigs:
+                continue
+            candidates.append(f"{row.get('id')} ({row.get('kind') or 'operator'})")
+        candidates = candidates[:12]
+        listed = "; ".join(candidates) if candidates else "the components that differ from the code parent"
+        return ("shell", candidates,
+                f"{pid}'s gain does not come from {kernels} (ablation {aid} found no effect); it sits in the "
+                f"other components {pid} changed - candidates: {listed}. Follow up with evo ablate --parent "
+                f"{pid} --question \"which of these carries the gain\" when the next bet depends on it.")
+
+    def _settle_parent_mechanism_from_ablation(self, node: dict) -> None:
+        """An ablation that changed the parent's kernel settles the parent's
+        mechanism from the same observations: observed effect -> confirmed,
+        no effect -> refuted. An inconclusive result settles nothing: the
+        parent stays as it was (deferred) with the attempt on record, and the
+        doors (evo ablate, a targeted_ablation lane in the next portfolio)
+        stay open to people - the engine does not mint a second tax lane by
+        itself. Nothing re-runs and nothing about parenthood changes: the
+        causal status is knowledge written beside the parent. What a refuted
+        kernel changes is what a child may carry (the ablation's control
+        version becomes the recommended code parent) and what a lane may cite
+        as a premise."""
+        result = node.get("ablation_result") if isinstance(node.get("ablation_result"), dict) else {}
+        meta = evalid._idea_meta(self.ctx(), node) or {}
+        contract = meta.get("ablation") if isinstance(meta.get("ablation"), dict) else {}
+        settles = contract.get("settles_parent_mechanism") is True
+        parent = self.node(str((node.get("parents") or [""])[0] or ""))
+        if parent is None:
+            return
+        # This ablation was the parent's OPEN inheritance-tax lane: the lane
+        # has concluded, so the parent no longer points at it (the pointer
+        # means "open"); the lane and who opened it stay on the settlement
+        # row and in the event so the follow-up doors bind cleanly.
+        opened_by = None
+        lane_id = str(node.get("lane") or "")
+        if lane_id and str(parent.get("ablation_lane") or "") == lane_id:
+            parent.pop("ablation_lane", None)
+            opened_by = parent.pop("ablation_lane_opened_by", None)
+            egraph.touch(parent)
+            self.store.event("engine", "ablation_lane_concluded", parent=parent.get("id"), lane=lane_id,
+                             ablation=node.get("id"), opened_by=opened_by,
+                             settles_parent_mechanism=settles)
+        if not result or not settles:
+            return
+        effect = str(result.get("effect") or "")
+        old_status = str(parent.get("mechanism_status") or "")
+        new_status = {"observed": "confirmed", "not_observed": "refuted"}.get(effect, old_status)
+        if new_status != old_status:
+            parent["mechanism_status"] = new_status
+            label = f"{new_status} via {node.get('id')}"
+        else:
+            label = (f"unclear via {node.get('id')}" if effect == "inconclusive"
+                     else f"{old_status or '-'} via {node.get('id')}")
+        if new_status == "refuted":
+            # The kernel did not carry the gain. When the ablation's control arm
+            # was the parent's program with the kernel simply removed, that
+            # trained node is the natural thing to build on next and is
+            # recorded as the control; a stand-in control (frozen, random) is a
+            # diagnostic only, and children remove the kernel themselves. What
+            # the gain then means depends on how much the parent changed, and
+            # the engine writes that reading down as an observation to follow up.
+            reading, candidates, statement = self._refuted_kernel_reading(parent, node)
+            clean = contract.get("control_is_clean_program") is True
+            parent["refuted_kernel"] = {"kernels": list(parent.get("kernel_ids") or []),
+                                        "ablation": node.get("id"),
+                                        "control": node.get("id") if clean else None,
+                                        "reading": reading, "candidates": candidates,
+                                        "at": eutil.utc_now()}
+            summary = parent.get("evaluation_summary") if isinstance(parent.get("evaluation_summary"), dict) else {}
+            cells = summary.get("cells") if isinstance(summary.get("cells"), dict) else {}
+            measurement = ", ".join(
+                f"{cid} {float(row.get('delta')):+g} vs {row.get('reference_node') or '-'}"
+                for cid, row in sorted(cells.items())
+                if isinstance(row, dict) and cid in (summary.get("target_wins") or [])
+                and isinstance(row.get("delta"), (int, float))) \
+                or ("wins on " + ", ".join(str(c) for c in (summary.get("target_wins") or [])) if summary.get("target_wins")
+                    else "see the parent's evaluation summary")
+            oid = self.store.add_observation(self.st, {
+                "statement": statement, "where": f"{parent.get('id')} vs its comparator; ablation {node.get('id')}",
+                "measurement": measurement,
+                "evidence": str(node.get("result_doc") or (result.get("evidence") or "")),
+                "node": parent.get("id"), "round": parent.get("round"), "status": "open",
+                "source": "engine", "kind": f"{reading}_gain"})
+            parent["refuted_kernel"]["observation"] = oid
+            self.store.event("engine", "observation_recorded", id=oid, node=parent.get("id"),
+                             kind=f"{reading}_gain", ablation=node.get("id"))
+        elif new_status == "confirmed":
+            parent.pop("refuted_kernel", None)
+        parent.setdefault("mechanism_settlements", []).append({
+            "ablation": node.get("id"), "node": node.get("id"), "lane": node.get("lane"),
+            "opened_by": opened_by, "from": old_status, "to": new_status,
+            "effect": result.get("effect"), "supports": result.get("supports"),
+            "label": label, "at": eutil.utc_now()})
+        parent["ablation_attempts"] = int(parent.get("ablation_attempts") or 0) + 1
+        parent.pop("ablation_pending", None)
+        egraph.touch(parent)
+        self.store.event("engine", "parent_mechanism_settled", parent=parent.get("id"),
+                         ablation=node.get("id"), effect=effect,
+                         mechanism_from=old_status, mechanism_to=new_status,
+                         control=node.get("id") if new_status == "refuted" else None)
+
+    def posthoc_claim_settlement(self, node: dict, assessment: dict) -> dict:
+        """What a post-hoc claim settles to, in the one shape every surface
+        records and prints (the filing record, the gate report, the approved
+        assessment): verdict / effect / wins / losses under the claim's lines,
+        and - judged under the node's LIVE mechanism, never a re-run of the
+        original probe - the scientific promotion approval would install."""
+        mechanism = str(node.get("mechanism_status") or assessment.get("mechanism_contract_status") or "")
+        promotion = evalid.promotion_status(
+            str(assessment.get("verdict") or ""),
+            {"status": assessment.get("effect_contract_status")},
+            fidelity_settled=not node.get("needs_fidelity") or not node.get("fidelity_pending"),
+            real_win=bool(assessment.get("real_win")))
+        return {"verdict": assessment.get("verdict"),
+                "effect_contract_status": assessment.get("effect_contract_status"),
+                "real_win": bool(assessment.get("real_win")),
+                "target_cells": assessment.get("target_cells"), "target_wins": assessment.get("target_wins"),
+                "target_losses": assessment.get("target_losses"), "deliverable": assessment.get("deliverable"),
+                "mechanism_status": mechanism, "scientific_promotion_status": promotion}
+
+    @staticmethod
+    def posthoc_claim_refusal(node: dict, record: dict) -> str | None:
+        """Why approving this claim would be refused now, or None. The claim
+        was priced against ONE conclusion: a node that is no longer concluded,
+        or whose conclusion was re-sealed since the claim was filed (a recovery
+        re-analysed it), has different data behind it - the exit is a fresh
+        claim. The gate report prints this before the decision; the decision
+        path checks it before it records anything."""
+        filed_against = str(((record.get("proposal_seal") or {}).get("upstream") or [""])[0] or "")
+        current = str((node.get("conclusion_seal") or {}).get("digest") or "")
+        if node.get("status") != "concluded" or not current or filed_against != current:
+            return (f"post-hoc claim {record.get('id')} was filed against a conclusion of {node.get('id')} "
+                    f"that is no longer the live one (node status {node.get('status')}); decision not applied - "
+                    f"reject this gate and re-file with evo claim --node {node.get('id')} --proposal <file>")
+        return None
+
+    def _apply_posthoc_claim(self, node: dict, record: dict, *, gate: dict, note: str | None,
+                             actor: str) -> None:
+        """The user accepted a post-hoc claim: it becomes the claim inheritance
+        reads for this node, labeled as such. The original assessment, verdict
+        and effect status stay as they were settled."""
+        refusal = self.posthoc_claim_refusal(node, record)
+        if refusal:
+            raise SystemExit("[evo] " + refusal)
+        proposal = eutil.read_json(eutil.rpath(self.store.repo, str(record.get("proposal_path") or "")), {}) or {}
+        settled = self.posthoc_claim_settlement(node, evalid.assess_posthoc_claim(self.ctx(), node, proposal))
+        mechanism, promotion = settled["mechanism_status"], settled["scientific_promotion_status"]
+        old_promotion = node.get("scientific_promotion_status")
+        node["active_claim"] = record["id"]
+        node["posthoc_assessment"] = {"claim": record["id"], **settled}
+        node["scientific_promotion_status"] = promotion
+        node.setdefault("posthoc_claims", []).append({
+            "id": record["id"], "gate": gate.get("id"), "at": eutil.utc_now(),
+            "promotion_from": old_promotion, "promotion_to": promotion, "mechanism_status": mechanism,
+            "proposal_digest": str((record.get("proposal_seal") or {}).get("digest") or "")})
+        settlement = record.get("settlement") if isinstance(record.get("settlement"), dict) else {}
+        settlement.update(settled)
+        record["settlement"] = settlement
+        record["status"] = "approved"
+        record["applied_at"] = eutil.utc_now()
+        egraph.touch(node)
+        self.store.event(actor, "posthoc_claim_approved", claim=record["id"], node=node["id"],
+                         verdict=settled.get("verdict"), mechanism=mechanism,
+                         promotion_from=old_promotion, promotion_to=promotion, note=note)
+        egraph.recompute_rollups(self.g, self.cfg)
+        egraph.render_views(self.store, self.g, self.cfg, self.st)
+        for t in self.st.get("tasks", []):
+            if t.get("type") == "open_round" and t.get("status") == "open":
+                self._refresh_open_round_task(t)
+
+    def _apply_instrument_review(self, task: dict) -> None:
+        """The independent judge ruled on a claimed formula error. FORMULA_ERROR
+        opens the user's gate; the other two verdicts close the request and
+        leave the node exactly as it was."""
+        subj = task.get("subject") or {}
+        record = next((c for c in self.st.get("corrections", [])
+                       if str(c.get("id") or "") == str(subj.get("correction") or "")), None)
+        if record is None:
+            raise SystemExit("[evo] instrument review accepted for an unknown correction (engine bug)")
+        review = eutil.read_text(eutil.rpath(self.store.repo, task["outputs"][0]))
+        m = REVIEW_VERDICT_RE.search(review)
+        verdict = m.group(1) if m else "INSUFFICIENT"
+        record["review_path"] = task["outputs"][0]
+        record["review_seal"] = self._seal(
+            [("instrument_review", task["outputs"][0])],
+            upstream=[str((record.get("proposal_seal") or {}).get("digest") or "")])
+        record["review_verdict"] = verdict
+        record["review_session"] = str(task.get("session") or "")
+        self.store.event("agent", "instrument_review_verdict", correction=record["id"],
+                         node=record.get("node"), verdict=verdict)
+        if verdict != "FORMULA_ERROR":
+            record["status"] = "closed_by_review"
+            record["closed_at"] = eutil.utc_now()
+            return
+        record["status"] = "awaiting_user"
+        original = record.get("original") or {}
+        corrected = record.get("corrected") or {}
+        gate = self.store.new_gate(
+            self.st, "instrument_correction",
+            {"node": record.get("node"), "correction": record["id"],
+             "from": original.get("status"), "to": corrected.get("status"),
+             "proposal_digest": str((record.get("proposal_seal") or {}).get("digest") or "")},
+            f"Node {record.get('node')}: an independent judge ruled that the mechanism instrument had a "
+            f"FORMULA ERROR. Approve to re-settle the mechanism from the SAME sealed observations under "
+            f"the corrected rule ({original.get('status')} -> {corrected.get('status')}); reject to keep "
+            "the original settlement. Nothing is rerun either way.")
+        record["gate"] = gate.get("id")
+
+    def _apply_instrument_correction(self, node: dict, record: dict, *, gate: dict,
+                                     note: str | None, actor: str) -> None:
+        """Re-settle one node's PROBE answer from sealed observations under the
+        corrected rule. The original OUTCOME stays sealed as history; the
+        probe result written beside the node is recomputed by the same rule
+        machinery that settled it the first time. Parenthood does not move:
+        the probe is information, the causal status belongs to the ablation."""
+        corrected = record.get("corrected") or {}
+        probe = dict(node.get("probe_result") or {}) if isinstance(node.get("probe_result"), dict) else {}
+        old_status = str(probe.get("status") or "")
+        new_status = str(corrected.get("status") or "")
+        probe.update({"status": new_status, "corrected_by": record["id"], "corrected_at": eutil.utc_now()})
+        node["probe_result"] = probe
+        node.setdefault("mechanism_corrections", []).append({
+            "id": record["id"], "from": old_status, "to": new_status,
+            "gate": gate.get("id"), "at": eutil.utc_now(),
+            "proposal_digest": str((record.get("proposal_seal") or {}).get("digest") or ""),
+            "review_digest": str((record.get("review_seal") or {}).get("digest") or ""),
+        })
+        record["status"] = "applied"
+        record["applied_at"] = eutil.utc_now()
+        egraph.touch(node)
+        self.store.event(actor, "instrument_correction_applied", correction=record["id"],
+                         node=node["id"], probe_from=old_status, probe_to=new_status, note=note)
+        egraph.recompute_rollups(self.g, self.cfg)
+        egraph.render_views(self.store, self.g, self.cfg, self.st)
+        for t in self.st.get("tasks", []):
+            if t.get("type") == "open_round" and t.get("status") == "open":
+                self._refresh_open_round_task(t)
 
     def _apply_close_round(self, task: dict) -> None:
         st = self.st
@@ -1494,7 +1994,7 @@ class ApplyMixin:
         if retire_path and eutil.rpath(self.store.repo, retire_path).exists():
             for r in self._spec_from(retire_path) or []:
                 if not isinstance(r, dict):
-                    continue  # validator guarantees dict rows; belt for legacy files
+                    continue  # validator guarantees dict rows; belt for hand-edited files
                 node = self.node(r.get("node"))
                 if node and node.get("role") != "baseline":
                     node["retire_reason"] = r.get("reason")
@@ -1502,7 +2002,7 @@ class ApplyMixin:
                     if r.get("reason") == "pruned":
                         eartifact.invalidate_for_node(self.store, self.reg, node["id"], "producer pruned")
                     elif r.get("reason") == "archived":
-                        # R11-011: BOTH retirement forms relax the producer's
+                        # BOTH retirement forms relax the producer's
                         # working-byte duties, so both gate new consumers
                         # behind revive (the graph-parent door already did;
                         # the artifact-only door let an archived producer's

@@ -64,14 +64,13 @@ Training seeds and ablation are separate frozen contracts:
   earlier seed-lane evidence, then restarts the entire seed set; it never mixes
   results from two implementations in one aggregate.
 - A `targeted_ablation` copies the approved idea's `ablation` object exactly.
-  It always uses one changed-component run and, if it trains, one recorded seed
-  even when ordinary candidates use preplanned repeats. Every stage is
-  `fixed/single`; sequential stages may express real handoffs in the one
-  workflow, but none may adaptively search or produce multiple models. After
-  implementation, a no-compute controlled-change audit checks the exact factor
-  and held constants before the workflow gate. (These four rules are ablation's
-  alone - the validators behind them read the `ablation` object, which no other
-  purpose carries.)
+  Its training replication is the approved design's `costly_runs`: one run is
+  `single` with one recorded seed; more than one is `preplanned` with exactly
+  that many seeds and `mean|median` aggregation, every seed traversing every
+  stage. Every stage is `fixed/single`; sequential stages may express real
+  handoffs in the one workflow, but none may adaptively search or produce
+  multiple models. After implementation, a no-compute controlled-change audit
+  checks the exact factor and held constants before the workflow gate.
 - A `diagnostic_probe` copies the approved `probe` object exactly (engine
   pre-filled); planned stage+eval budgets must fit inside `probe.budget`.
   Prefer an evaluation-only plan (`stages: []`) on existing artifacts.
@@ -80,9 +79,11 @@ Training seeds and ablation are separate frozen contracts:
   on comparable evaluation. It cannot contain a sweep, scaling, nested
   mechanism probe, or seed cross-product. Do not rerun the parent: its existing
   result is the reference.
-- For all three instrumental purposes the workflow gate is MANUAL in every
-  autonomy mode, full_auto included: instrumental compute is never released
-  without the user, whatever its cost class.
+- Probe and maintenance workflow gates are MANUAL in every autonomy mode,
+  full_auto included. A targeted ablation's gate follows the allowance the
+  user pre-authorized (`evidence_policy.ablation.budget_multiple` x the
+  parent's own cost): inside it the ordinary autonomy policy applies, above
+  it the user decides.
 
 ## Resource and trace contract
 Every stage and the standard evaluation declare finite caps in `budget.limits`.
@@ -119,15 +120,20 @@ the engine validates the reported content and ingests it into
 `.evo/runs/<RUN>/evidence/` before publishing any later handoff or evaluation
 input. Do not design downstream consumers around mutable landing filenames.
 
-Usage above `cap * stage_budget_tolerance` (top-level config key, >= 1.0,
-default 1.0 = strict, outside the bootstrap contract digest; changes affect
-future ingestions only) invalidates the evidence; every recorded number stays
-the actual measurement, and a within-band overage is disclosed via a
-`budget_overage_within_tolerance` event. Derive every `budget.limits` value
-from a worst-case estimate (worst case x1.3 rule), never from optimism - the
-band is an escape valve for mis-derived caps, not a planning allowance.
-Adaptive or algorithmically-multiple stages also declare `ledger_file`; it
-records ordered choices/components, observations and the stopping event.
+Usage above a declared cap parks the evidence (the RUN's execution stands,
+nothing is rerun); every recorded number stays the actual measurement. Caps
+are notebook numbers: derive each `budget.limits` value from a worst-case
+estimate (worst case x1.3) and state the basis in the spec, and when real
+timing later proves a cap mis-derived, correct it on record - `evo amend` the
+spec's `budget.limits` with the reason, then `evo run-reconcile` the parked
+RUN so the same evidence is adopted. The same notebook covers the rest of
+the spec until production launches: the evidence plan, the cost class, the
+training replication, the smoke and rehearsal steps, any stage or evaluation
+command that has not run yet. What launched is history (a code fix is an
+implementation revision); the node's identity (role, parents, level, program
+digest, kernel ids, workdir) never changes. Adaptive or algorithmically-multiple
+stages also declare `ledger_file`; it records ordered choices/components,
+observations and the stopping event.
 
 ## Optional scientific continuation gate
 Use a continuation gate only for a cheap measurement of a **necessary,
@@ -175,7 +181,7 @@ idea is still validated. Add the planning fields:
 ```json
 {
   "title": "<short node title>",
-  "code_parent": "<required by node-role rules>",
+  "code_parent": "<required by node-role rules; when a model parent's kernel was REFUTED by its ablation, that parent's control version (the ablation node) is also legal here and is the program to build on>",
   "experiment_class": "train|finetune|inference|api|data|analysis",
   "cost_class": "light|medium|heavy",
   "workdir": "workareas/<node_slug>",
@@ -209,6 +215,14 @@ idea is still validated. Add the planning fields:
     {"name": "imports", "cmd": "...", "timeout_s": 120},
     {"name": "tiny_end_to_end", "cmd": "...", "timeout_s": 900,
      "must_exist": ["probe_execution.smoke_artifact when applicable"]}
+  ],
+  "cost_estimate": {
+    "per_unit": {"gpu_hours": 9.5},
+    "basis": ">=20 chars: what the forecast rests on - the rehearsal's measured pace, a prior run of this size, scale reasoning; say what it excludes"
+  },
+  "refuted_kernel_disposition": [
+    {"parent": "N###", "action": "built_on_control|removed|replaced|reclaimed",
+     "note": ">=20 chars: ONLY when a model parent's kernel was refuted by its ablation - what this node did about that kernel"}
   ],
   "rehearsal": {
     "command": "<one command that runs the WHOLE workflow tiny (a few steps per stage + the real evaluation) on the real platform>",
@@ -307,7 +321,7 @@ Notes:
 - Omit `training_replication` for non-training experiment classes. A trained
   baseline that already exists uses `source:existing_artifacts`; a workflow
   uses `source:workflow`.
-- Omit `probe_execution` when the idea has an attribution waiver or no probe.
+- Omit `probe_execution` when the idea registers no probe.
   `same_run` names the stage that writes the real JSON (or `evaluation` for an
   evaluation-only node). `existing_artifact` points to an already valid JSON.
   `eval_intervention` is one capped eval-only arm and may not invoke training.
@@ -334,10 +348,42 @@ Notes:
   otherwise. Stage decomposition may implement the mapped operators but cannot
   rename DO#/KC#/OP# ids, change refs or rewrite satisfaction after approval.
 - Top-level `train`, `experiment_role`, `main_training_paths` and
-  `extra_train_arms` are not part of the v9.2 schema.
+  `extra_train_arms` are not part of the schema.
+- After acceptance this file is notebook material within limits: caps, the
+  smoke plan, the rehearsal command, `cost_class`, `evidence_plan`,
+  `training_replication`, `service_snapshot_waiver` and the commands of stages
+  that have not launched yet may be corrected with `evo amend --path <this
+  spec> --from <edited copy> --reason ...` (a `cost_class` change before launch
+  re-derives the node's fidelity duty). The engine-owned copies of the idea
+  (`effect_case`, `ablation`, `probe`, `maintenance`, `evaluation_scope`,
+  `theory_obligations`) are corrected on the idea meta and propagated here - an
+  `ablation.costly_runs` change rewrites `training_replication` to one complete
+  seed run per costly run. Identity fields, the evaluation protocol and any
+  launched stage are history; each refusal names its door.
 - Live human/robot collection, indefinite deployment and cross-organization
   orchestration are outside this engine. Use a finite, already-accessible
   dataset/replay instead.
+
+`cost_estimate` (recommended for every node that spends): your declared caps
+are a promise; the estimate is your forecast of what one full run will really
+cost, per resource unit the project tracks, with the basis it rests on. Use
+the rehearsal's measured pace where you have it (it ran the real launch
+configuration for a few steps), a prior run of this size, or scale reasoning
+- and say what the forecast excludes. The engine prints it on the workflow
+gate next to the declared caps, what the rehearsal actually took, and the
+user's node ceiling; it never extrapolates on its own. A declared cap or an
+estimate above the ceiling puts the gate in front of a person in every
+autonomy mode; nothing else about the estimate is judged. Correct it before
+launch with `evo amend` when the rehearsal teaches you better.
+
+`refuted_kernel_disposition` is owed only when a model parent's kernel was
+refuted by its ablation (the FRONTIER row says `refuted (via N###; build on
+N###)` or `refuted (via N###; remove ...)`). Say in one line what this node
+did about that kernel: `built_on_control` (then `code_parent` is the control
+version), `removed`, `replaced` (say what with) or `reclaimed` (it is this
+idea's own bet again and the ablation will test it again). The workflow gate
+prints the line and the fidelity audit checks the code against it; the
+engine records, people verify.
 
 ## Output contract
 {{OUTPUTS}}

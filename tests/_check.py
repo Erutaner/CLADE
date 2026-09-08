@@ -1,6 +1,6 @@
 """Shared counted-check protocol for every fast suite.
 
-Rules this file exists to enforce (v10.2a test audit):
+Rules this file exists to enforce:
 - No bare ``assert`` in suites: under ``python -O`` asserts vanish and a suite
   silently becomes a no-op while still printing "passed".
 - No ``check(True, ...)`` / ``ok(True, ...)``: a check that cannot fail is not

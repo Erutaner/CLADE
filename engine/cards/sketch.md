@@ -217,6 +217,17 @@ core-synthesis, `synthesis_relation.non_decomposability` is a design hypothesis,
 not a substitute for `novelty.non_reducibility` or the independent tournament.
 Across this set, exact novelty kernel/bearer duplicates are illegal.
 
+Claim granularity follows change granularity. A large rebuild makes a
+PROGRAM-level claim - this program beats its comparator at matched budget -
+and its kernel is settled later, by the ablation the engine opens after a
+program-level win (research mode; engineering mode inherits on the numbers).
+What must never happen is a support shell that carries the gain in disguise:
+any engineering piece you expect to move the number on its own (a training
+step, a kernel, a re-batching rule, a stabilizer) is not shell. Either it is
+this candidate's kernel or it is a candidate of its own; a shell that could
+plausibly explain the effect makes every mechanism verdict downstream
+uninterpretable, and a reviewer who finds one in the build will say so.
+
 ## Output contract
 
 {{OUTPUTS}}

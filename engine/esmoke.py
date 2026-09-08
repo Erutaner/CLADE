@@ -11,6 +11,7 @@ import sys
 from pathlib import Path
 
 import egraph
+import econfig
 import eutil
 
 
@@ -40,15 +41,14 @@ def run_smoke(store, node_id: str) -> dict:
             all_pass = False
             continue
         shape_errs = []
-        for field, want in (("must_exist", str), ("must_contain", dict)):
-            rows = step.get(field)
-            if rows is not None and (not isinstance(rows, list)
-                                     or any(not isinstance(x, want) for x in rows)):
-                shape_errs.append(f"{field} must be a list of "
-                                  f"{'strings' if want is str else 'objects with file+text'}")
-        if any(not str((mc or {}).get("file") or "") for mc in (step.get("must_contain") or [])
-               if isinstance(mc, dict)):
-            shape_errs.append("every must_contain entry needs a 'file'")
+        rows = step.get("must_exist")
+        if rows is not None and (not isinstance(rows, list) or any(not isinstance(x, str) for x in rows)):
+            shape_errs.append("must_exist must be a list of strings")
+        try:
+            must_contain = econfig.smoke_must_contain(step)
+        except ValueError as exc:
+            must_contain = []
+            shape_errs.append(str(exc))
         name = str(step.get("name") or f"step{i}")
         cmd = str(step.get("cmd") or "")
         cwd = eutil.rpath(store.repo, str(step["cwd"])) if step.get("cwd") else workdir
@@ -97,7 +97,7 @@ def run_smoke(store, node_id: str) -> dict:
                     rec["detail"] = f"required artifact missing: {p}"
                     break
         if rec["status"] == "pass":
-            for mc in step.get("must_contain") or []:
+            for mc in must_contain:
                 fp = mc.get("file"); txt = str(mc.get("text") or "")
                 target = (cwd / fp) if not Path(fp).is_absolute() else Path(fp)
                 alt = eutil.rpath(store.repo, fp)

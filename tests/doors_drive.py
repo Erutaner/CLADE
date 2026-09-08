@@ -1,19 +1,22 @@
-"""v11.1 doors drive: full-lifecycle E2E for the composite paths the unit
-suites cannot reach - the exact class where R1/R2 found four green-test
-deadlocks.
+"""Doors drive: full-lifecycle E2E for the composite paths the unit suites
+cannot reach - the class where green unit walls hide deadlocks.
 
-    python tests/v111_doors_drive.py
+    python tests/doors_drive.py
 
 Own workspace (tests/out/proj_doors), research mode + git + sota, scaling
 budgeted, wildcat cadence 7 (past the scenario rounds). Scenarios:
   R001  parent candidate registering follow-up scaling (positive verdict)
-  R002  scaling follow-up lane (carbon copy, manual idea gate, comparator=parent)
+  R002  scaling follow-up lane (carbon copy, manual idea gate, comparator=parent);
+        the copy's deferred mechanism opens the tax, the reviewer declines it
   R003  exploratory scout (no predictions/SOTA/probe; observations only;
         off both frontiers; promotion not_applicable)
   R004  confirmatory re-run of the scout's kernel (full rigor, kernel-dup
         exemption, lands on the record)
   R005  repeat-measure: on-the-line eval -> protected gate -> approve ->
-        bundle duty block -> 2-run aggregate settles ONCE -> doctor clean
+        bundle duty block -> 2-run aggregate settles ONCE; then the
+        inheritance tax: the deferred win's conclusion opens its ablation lane
+        inside the round -> design -> review -> gate(s) -> one run -> conclude
+        -> the parent's mechanism is confirmed via the ablation -> doctor clean
 
 Every stage runs the real scheduler/validators; drives are exclusive
 (never run in parallel with mock/stress - shared tests/out).
@@ -38,6 +41,7 @@ from mock_drive import (                                  # noqa: E402
     stage, dyn_sections, planned_resource_measurements, L2_DIMS, rmtree, make_repo)
 import econfig     # noqa: E402
 import egraph      # noqa: E402
+import evalid      # noqa: E402
 
 PY = sys.executable
 PKG = HERE.parent
@@ -104,7 +108,7 @@ def run_node_pipeline(d, lid, *, parent, score, stages_key, manual_gates,
         M.w_eval(d, out, nid, score)
         sub_ok(d, out)
         out = nx(d, "conclude")
-        # R10-020 fixture sync: observation evidence must bind an existing
+        # Observation evidence must bind an existing
         # source; the node id exists only here, so resolve the sentinel now
         for row in observations:
             if row.get("evidence") == "__node_eval_metrics__":
@@ -234,6 +238,23 @@ def main():
                                 stages_key="scale-up", manual_gates=True)
     ok(d.node(fu_node).get("verdict") == "improved",
        f"the follow-up concluded against its parent comparator: {d.node(fu_node).get('verdict')}")
+    # The copy registers no instrument of its own, so its mechanism settles
+    # deferred and the engine opens the tax inside R002. The causal reviewer
+    # may decline it (the story was settled on the original kernel): the lane
+    # abandons before any gate or compute and the round is free to close.
+    fu_abl = d.node(fu_node).get("ablation_lane")
+    ok(fu_abl and d.node(fu_node).get("mechanism_status") == "deferred"
+       and d.lane(fu_abl).get("status") == "ablation_design" and d.lane(fu_abl).get("round") == "R002",
+       f"a deferred win in R002 opened its ablation lane in R002: {fu_abl}")
+    out = nx(d, "design_ablation")
+    M.w_design_ablation(d, out, fu_abl)
+    sub_ok(d, out)
+    out = nx(d, "review_ablation")
+    M.w_review_ablation(d, out, fu_abl, verdict="REJECT_NOT_WORTH_COST")
+    sub_ok(d, out)
+    ok(d.lane(fu_abl).get("status") == "abandoned" and d.lane(fu_abl).get("node") is None
+       and d.node(fu_node).get("mechanism_status") == "deferred",
+       "a declined tax abandons the lane before compute and leaves the mechanism deferred")
     drive_close(d, "R002")
 
     # ------------------------------------------------------------- R003 ----
@@ -315,8 +336,8 @@ def main():
     section("DOORS R005: repeat-measure - on-the-line eval buys exactly one repeat")
     cf_score = float(econfig.result_value(d.node(cf_node)["scores"]["auc"]))
     # R005 serves the starved D1 direction from a single-lane round: the one
-    # starvation-forced lane rides outside the focus share cap (v11.4
-    # reconciliation) - this drive is the e2e proof of that composition.
+    # starvation-forced lane rides outside the focus share cap - this drive
+    # is the e2e proof of that composition.
     open_round(d, "R005", [exploit_lane("edge", cf_node, focus="D1")])
     evidence_refresh(d)
     lid_e, mech_e = drive_lane_to_plan(d, "edge", dims=L2_DIMS)
@@ -356,7 +377,7 @@ def main():
        f"the offer names the registered cell and the true delta: {subj}")
     rm = d.node(e_node).get("repeat_measure") or {}
     ok(rm.get("result_key") == "auc", f"approval stamped the duty onto the node: {rm}")
-    # R9-002: approval hands the repeat to the ENGINE - the node re-enters the
+    # Approval hands the repeat to the ENGINE - the node re-enters the
     # workflow as a first-class repeat lane with the fresh seed.
     ok(rm.get("engine_run") is True
        and d.node(e_node).get("repeat_pending_seed") == rm.get("seed"),
@@ -392,7 +413,7 @@ def main():
     ok(rrun.get("repeat_measure_attempt") is True and rrun.get("replica_seed") == rm.get("seed"),
        f"the repeat eval RUN carries the fresh seed in its slot: {rrun.get('id')}")
     run2_val = round(on_line + 0.012, 4)
-    # R10-012: the repeat eval lands at the evaluation's OWN declared landing
+    # The repeat eval lands at the evaluation's OWN declared landing
     # (one resolution rule for every attempt); identity is enforced, and the
     # base leftover bytes there were archived when the repeat RUN was prepared
     raw2_rel = str(rrun.get("declared_metrics_file"))
@@ -450,19 +471,143 @@ def main():
        "the aggregate settled the repeat exactly once")
     out = nx(d, "conclude")
     w_conclude(d, out, e_node)
-    sub_ok(d, out)
+    accepted = sub_ok(d, out)
     ok(d.node(e_node).get("verdict") == "improved",
        f"verdict settled on the two-run mean: {d.node(e_node).get('verdict')}")
     rm_gates = [g for g in d.state()["gates"] if g.get("kind") == "repeat_measure"
                 and (g.get("subject") or {}).get("node") == e_node]
     ok(len(rm_gates) == 1, f"exactly one offer ever existed for the node: {len(rm_gates)}")
+
+    # ------------------------------------------------- R005: inheritance tax ----
+    section("DOORS R005 (cont.): deferred win -> engine-opened ablation -> parent settled")
+    e_now = d.node(e_node)
+    ok(e_now.get("mechanism_status") == "deferred" and e_now.get("scientific_promotion_status") == "met",
+       f"the waiver left the mechanism deferred on a promoted win: {e_now.get('mechanism_status')}")
+    abl_lid = e_now.get("ablation_lane")
+    advice = accepted.get("advice") or []
+    ok(bool(abl_lid) and any(abl_lid in line for line in advice)
+       and "inheritance tax" in " ".join(advice),
+       f"the ACCEPTED advice names the ablation lane the engine opened: {advice}")
+    abl = d.lane(abl_lid)
+    ok(abl.get("experiment_purpose") == "targeted_ablation" and abl.get("status") == "ablation_design"
+       and abl.get("parents") == [e_node] and abl.get("round") == "R005"
+       and abl.get("name") == f"ablate-{e_node.lower()}",
+       f"the lane rides inside R005 on the winner: {abl}")
+    ok((d.repo / abl["brief_md"]).is_file()
+       and e_node in (d.repo / abl["brief_md"]).read_text(encoding="utf-8"),
+       "the engine-authored brief exists and names the parent")
+    ok(any(ev.get("opened_by") == "conclude" and ev.get("lane") == abl_lid
+           for ev in d.events("instrumental_lane_injected")),
+       "the intake event says the conclusion opened it")
+    ok(egraph.mechanism_label(e_now) == f"deferred (ablation {abl_lid} open)",
+       f"the frontier label shows the open ablation: {egraph.mechanism_label(e_now)}")
+
+    out = nx(d, "design_ablation")
+    task = next(t for t in d.state()["tasks"] if t["id"] == out["task"])
+    ok(task["subject"].get("lane") == abl_lid, f"the design card is for the engine's lane: {task['subject']}")
+    bundle = (d.repo / out["bundle"]).read_text(encoding="utf-8")
+    ok("Ablation allowance and sizing" in bundle and f"x what {e_node} cost" in bundle,
+       "the design bundle states the allowance in the parent's own units")
+    M.w_design_ablation(d, out, abl_lid)          # reads PARENT from the lane; settles_parent_mechanism=True
+    sub_ok(d, out)
+    out = nx(d, "review_ablation")
+    M.w_review_ablation(d, out, abl_lid, verdict="ACCEPT")
+    sub_ok(d, out)
+    inside, allowance_lines = evalid.ablation_design_within_allowance(d.eng().ctx(), d.lane(abl_lid))
+    ok(inside, f"a one-run design on this parent is inside the 2x allowance: {allowance_lines}")
+    surface = d.next()
+    idea_gate_was_manual = surface.get("kind") == "gate"
+    if idea_gate_was_manual:
+        st_gate = next(g for g in d.state()["gates"] if g["id"] == surface["gate"])
+        ok(st_gate.get("kind") == "idea_approval" and (st_gate.get("subject") or {}).get("lane") == abl_lid,
+           f"the surface before planning is the ablation's idea gate: {st_gate}")
+        gate_card = (d.repo / surface["card"]).read_text(encoding="utf-8")
+        ok("inside the pre-authorized allowance" in gate_card and "settles the parent's mechanism: True" in gate_card,
+           "the gate report shows the allowance verdict and the write-back promise")
+        d.decide(surface["gate"], True, note="doors drive: user approves the one-run causal design")
+        surface = d.next()
+    ok(surface.get("kind") == "task" and surface.get("type") == "plan_node",
+       f"after the idea decision the plan card presents: {surface}")
+    idea_gate = next(g for g in d.state()["gates"] if g.get("kind") == "idea_approval"
+                     and (g.get("subject") or {}).get("lane") == abl_lid)
+    ok(idea_gate.get("status") == "approved"
+       and (("auto-approved" in str(idea_gate.get("decision_note"))) != idea_gate_was_manual),
+       f"the idea gate's decision record matches how it was decided: {idea_gate.get('decision_note')}")
+
+    out = surface
+    a_stage = stage("changed_component_run", uri=f"oss://mock/{abl_lid}/one-run",
+                    key=f"ablation|{abl_lid}|factor=counterfactual-objective")
+    M.w_plan(d, out, abl_lid, role="variant", workdir=f"workareas/{abl_lid.lower()}-ablation",
+             stages=[a_stage], code_parent=e_node, level=0)
+    sub_ok(d, out)
+    a_node = d.lane(abl_lid)["node"]
+    ok(d.node(a_node).get("parents") == [e_node] and egraph.level_label(d.node(a_node)) == "diagnostic",
+       f"the ablation node hangs off the winner as a diagnostic: {d.node(a_node).get('parents')}")
+    out = nx(d, "implement")
+    M.do_implement(d, out, a_node)
+    sub_ok(d, out)
+    out = nx(d, "smoke")
+    ok(d.smoke(a_node)["status"] == "pass", "the ablation smoke passes")
+    sub_ok(d, out)
+    out = nx(d, "ablation_fidelity")
+    M.w_ablation_fidelity(d, out, a_node)
+    sub_ok(d, out)
+    surface = d.next()
+    workflow_gate_was_manual = surface.get("kind") == "gate"
+    if workflow_gate_was_manual:
+        st_gate = next(g for g in d.state()["gates"] if g["id"] == surface["gate"])
+        ok(st_gate.get("kind") == "workflow_approval", f"the spend gate before launch: {st_gate.get('kind')}")
+        d.decide(surface["gate"], True, note="doors drive: user approves the audited one-run spend")
+        surface = d.next()
+    ok(surface.get("kind") == "task" and surface.get("type") == "stage_launch",
+       f"the one changed-component run launches: {surface}")
+    spec_inside, spec_lines = evalid.ablation_spec_within_allowance(
+        d.eng().ctx(), d.node(a_node), json.loads((d.repo / d.node(a_node)["spec"]).read_text(encoding="utf-8")))
+    ok(spec_inside == (not workflow_gate_was_manual),
+       f"the workflow gate was manual exactly when the spec exceeded the allowance: {spec_lines}")
+    out = surface
+    metrics_rel = f"{d.node(a_node)['workdir']}/ablation_stage_metrics.json"
+    M.write_stage_result(d, a_node, "changed_component_run", metrics_rel, {"loss": 0.12})
+    M.w_launch(d, out, "changed_component_run", mode="completed", metrics_rel=metrics_rel)
+    sub_ok(d, out)
+    out = nx(d, "evaluate")
+    e_score = float(econfig.result_value(d.node(e_node)["scores"]["auc"]))
+    M.w_eval(d, out, a_node, round(e_score + 0.005, 4), logloss=0.55, latency=100.0)
+    sub_ok(d, out)
+    out = nx(d, "conclude")
+    w_conclude(d, out, a_node)                    # ablation_result effect observed -> supports X1
+    sub_ok(d, out)
+
+    a_done = d.node(a_node)
+    ok(a_done.get("ablation_result", {}).get("effect") == "observed"
+       and a_done.get("ablation_result", {}).get("supports") == "X1"
+       and d.lane(abl_lid)["status"] == "done",
+       f"the causal settlement follows the pre-registered map and closes the lane: {a_done.get('ablation_result')}")
+    e_settled = d.node(e_node)
+    ok(e_settled.get("mechanism_status") == "confirmed",
+       f"the observed effect confirms the parent's mechanism: {e_settled.get('mechanism_status')}")
+    settlement = (e_settled.get("mechanism_settlements") or [{}])[-1]
+    ok(settlement.get("ablation") == a_node and settlement.get("from") == "deferred"
+       and settlement.get("to") == "confirmed" and "promotion_to" not in settlement,
+       f"the parent records who settled it and how: {settlement}")
+    ok(e_settled.get("scientific_promotion_status") == "met",
+       f"promotion recomputed on the confirmed story: {e_settled.get('scientific_promotion_status')}")
+    frontier_md = (d.repo / ".evo/views/FRONTIER.md").read_text(encoding="utf-8")
+    e_rows = [line for line in frontier_md.splitlines() if line.startswith(f"| {e_node} ")]
+    ok(bool(e_rows) and all(f"via {a_node}" in line for line in e_rows),
+       f"FRONTIER shows the parent confirmed via its ablation: {e_rows}")
+    ok(any(ev.get("parent") == e_node and ev.get("ablation") == a_node
+           for ev in d.events("parent_mechanism_settled")),
+       "the write-back is an event")
+    ok(d.node(a_node).get("scientific_promotion_status") == "not_applicable",
+       "the diagnostic itself earns no promotion")
     drive_close(d, "R005")
 
     # ----------------------------------------------------------- doctor ----
     problems, _ = M.edoctor.diagnose(d.store())
     ok(problems == [], f"doctor clean after all four door lifecycles: {problems[:6]}")
     print(f"\nDOORS GREEN: {M.CHECKS} checks passed (scaling follow-up + exploratory scout "
-          f"+ confirmatory re-run + repeat-measure, full lifecycles, real validators)")
+          f"+ confirmatory re-run + repeat-measure + inheritance tax, full lifecycles, real validators)")
 
 
 if __name__ == "__main__":

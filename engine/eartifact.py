@@ -34,7 +34,7 @@ def available(reg: dict) -> list[dict]:
 
 
 def find_by_uri(reg: dict, uri: str) -> dict | None:
-    # R7 audit: identity is the canonical path, not the raw spelling -
+    # Identity is the canonical path, not the raw spelling -
     # `a/./b` and `a/b` are the same landing on every supported filesystem.
     wanted = eutil.norm_uri(str(uri or ""))
     for a in all_artifacts(reg):
@@ -44,7 +44,7 @@ def find_by_uri(reg: dict, uri: str) -> dict | None:
 
 
 def find_overlapping(reg: dict, uri: str) -> dict | None:
-    """R11-004: registry identity is the OVERLAP relation, not string
+    """Registry identity is the OVERLAP relation, not string
     equality - a registered directory product and a later child path inside
     it denote one physical object (record_generation digests the whole
     tree). Exact lookups stay `find_by_uri`; every collision/uniqueness
@@ -68,7 +68,7 @@ def find_available_by_stage_key(reg: dict, stage_key: str) -> dict | None:
 
 
 def find_all_available_by_stage_key(reg: dict, stage_key: str) -> list[dict]:
-    """R11-018: the reuse duty judges EVERY available match for a key -
+    """The reuse duty judges EVERY available match for a key -
     first-hit semantics let one consumed row silence the check for every
     remaining equivalent product."""
     if not str(stage_key or "").strip():
@@ -129,7 +129,7 @@ def _append_history(artifact: dict, *, change: str, reason: str, at: str) -> Non
 
 
 def content_custody(store, uri: str) -> tuple[str, bool]:
-    """R8 (external audit r5): (content_digest, locally_checkable).
+    """(content_digest, locally_checkable).
 
     A repo-local product URI is stat-able and hashable at registration; a
     schemed URI (oss://, s3://, ...) is not - its custody is the producer
@@ -173,7 +173,7 @@ def register(store, st: dict, reg: dict, *, node: str, stage: str, stage_key: st
         "name": name,
         "kind": kind,
         "uri": uri,
-        # R8: a locally-checkable product that does not exist is a GHOST -
+        # A locally-checkable product that does not exist is a GHOST -
         # registering it available handed later consumers a name with no
         # bytes behind it, discovered only when their stage crashed.
         "status": ("invalid" if checkable and not digest else "available"),
@@ -188,7 +188,7 @@ def register(store, st: dict, reg: dict, *, node: str, stage: str, stage_key: st
         "created_at": created_at,
         "produced_at": created_at,
     }
-    # R8: same crash-window rule as egraph.new_node - artifacts.json can be
+    # Same crash-window rule as egraph.new_node - artifacts.json can be
     # written before the state commit marker; an existing row under the id
     # the committed counter allocates NOW is uncommitted debris, replaced.
     reg["artifacts"] = [a for a in reg.get("artifacts", []) if str(a.get("id")) != str(art["id"])]
@@ -267,9 +267,9 @@ def revive_for_node(store, reg: dict, node: str, *,
 
     Workflow-restart staleness is intentionally not revivable.  Passing the
     active implementation digest is the fail-closed form used by recovery code:
-    legacy or old-generation artifacts without an exact match remain stale.
+    old-generation artifacts without an exact match remain stale.
 
-    R8 audit: registry metadata alone must not certify availability -
+    registry metadata alone must not certify availability -
     retirement legitimately relaxed working-byte duties, so the URI may have
     been cleaned up or rewritten since. Locally checkable artifacts are
     re-hashed against the registered content digest; missing/drifted ones
@@ -337,7 +337,7 @@ def check_registry(reg: dict, graph_ids: set[str]) -> list[str]:
         elif uri in seen_uris:
             errs.append(f"ARTIFACT_URI_DUP: {aid} and {seen_uris[uri]} share uri {uri}")
         else:
-            # R11-004: uniqueness is the OVERLAP relation - a directory
+            # Uniqueness is the OVERLAP relation - a directory
             # product and a row inside it digest the same physical bytes
             container = next((other_id for other_uri, other_id in seen_uris.items()
                               if eutil.paths_overlap(uri, other_uri)), None)
@@ -364,7 +364,7 @@ def artifacts_block(reg: dict) -> list[str]:
 
 
 def artifacts_receipts(reg: dict) -> dict:
-    """Machine receipt for what artifacts_block just rendered (R11-010).
+    """Machine receipt for what artifacts_block just rendered.
 
     Keyed by artifact id; the generation/digest pin lets acceptance-time
     validation detect that the registry moved under an open card (the card

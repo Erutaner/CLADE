@@ -1,15 +1,13 @@
-"""R7-batch fix regressions (v11.3).
+"""Generation-commit and landing regressions.
 
-Covers the load-bearing mechanics of the R7 audit fixes that are unit-testable
-without a full engine drive:
+Unit-testable mechanics of the state commit and the landing rules:
   - generation commit: torn save_all rolls BACK, committed generation rolls
-    FORWARD, normal/state-only saves leave no debris (R7-006/007/014/017/018/
-    019/022/024 root fix)
-  - norm_uri canonicalization + landing-lease equivalence (R7-016)
-  - v_close_round refuses an already-closed round (R7-020)
-  - _archive_repeat_measure clears settled repeats on restart (R7-012)
+    FORWARD, normal/state-only saves leave no debris
+  - norm_uri canonicalization + landing-lease equivalence
+  - v_close_round refuses an already-closed round
+  - _archive_repeat_measure clears settled repeats on restart
   - _ingest_run_landings re-reads a snapshotted field ONLY when explicitly
-    resupplied (R7-010)
+    resupplied
 """
 import json
 import shutil
@@ -31,12 +29,12 @@ def _mk_repo() -> Path:
     root = Path(tempfile.mkdtemp(prefix="r7fix_"))
     (root / ".evo").mkdir(parents=True)
     (root / ".evo" / "state.json").write_text(
-        json.dumps({"evo_version": "10", "state_revision": 5}), encoding="utf-8")
+        json.dumps({"evo_version": "1", "state_revision": 5}), encoding="utf-8")
     (root / ".evo" / "graph.json").write_text(
-        json.dumps({"version": "10", "nodes": [{"id": "N001", "status": "concluded"}]}),
+        json.dumps({"version": "1", "nodes": [{"id": "N001", "status": "concluded"}]}),
         encoding="utf-8")
     (root / ".evo" / "artifacts.json").write_text(
-        json.dumps({"version": "10", "artifacts": []}), encoding="utf-8")
+        json.dumps({"version": "1", "artifacts": []}), encoding="utf-8")
     return root
 
 
@@ -114,7 +112,7 @@ def generation_commit_concurrent_marker() -> None:
         # sibling process crashes mid-commit: graph replaced, state not
         shutil.copy2(root / ".evo" / "graph.json", root / ".evo" / "graph.json.bak")
         (root / ".evo" / "graph.json").write_text(
-            json.dumps({"version": "10", "nodes": [{"id": "N001", "status": "evaluated"}]}),
+            json.dumps({"version": "1", "nodes": [{"id": "N001", "status": "evaluated"}]}),
             encoding="utf-8")
         (root / ".evo" / "commit_pending.json").write_text(
             json.dumps({"target_revision": 6,
@@ -143,7 +141,7 @@ def norm_uri_rules() -> None:
           "backslashes normalize")
     check(eutil.norm_uri("s3://bucket/./x") == "s3://bucket/./x", "scheme URIs stay verbatim")
     check(eutil.norm_uri("") == "", "empty stays empty")
-    # R10-002 semantics change: case handling follows the HOST FILESYSTEM
+    # Case handling follows the HOST FILESYSTEM
     # (probed, not inferred from the OS family) - on a case-insensitive
     # volume `A/b.json` and `a/b.json` are one physical landing and must
     # compare equal; on case-sensitive hosts they stay distinct.
@@ -219,7 +217,7 @@ def ingest_field_level_refresh() -> None:
         eabsorb.AbsorbMixin._ingest_run_landings(stub, run)
         check(run["metrics_file"] == prefix + "metrics_file_metrics.json"
               and not run.get("metrics_file_snapshot_revision"),
-              "without an explicit resupply the snapshot is NOT re-read (R7-010)")
+              "without an explicit resupply the snapshot is NOT re-read")
         run["evidence_refresh_fields"] = ["metrics_file"]
         eabsorb.AbsorbMixin._ingest_run_landings(stub, run)
         check(int(run.get("metrics_file_snapshot_revision") or 0) == 2,
@@ -241,7 +239,7 @@ def main() -> None:
     close_round_idempotent()
     repeat_measure_archived()
     ingest_field_level_refresh()
-    done("V11.3 R7 FIX REGRESSIONS")
+    done("COMMIT / LANDING REGRESSIONS")
 
 
 if __name__ == "__main__":

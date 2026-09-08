@@ -8,7 +8,10 @@ Closing a round settles retirements and any newly exposed bottlenecks. The
 engine computes frontier movement, stagnation and progress itself; your
 strategic judgment for the NEXT round is delivered through the next
 open_round's portfolio (which receives the frontier rollups) and through the
-dossier addendum below - not through a report nobody reads.
+dossier addendum below - not through a report nobody reads. The field map
+(`.evo/views/FIELD_MAP.md`) lists, per cell, our best and its holder, the
+published cap, the gap and every node that claimed the cell with its verdict -
+read it before retiring a lineage that still holds a cell.
 
 ## Do
 1. Write `.evo/rounds/{{ROUND}}/RETIRE.json` (write `[]` if nothing retires):

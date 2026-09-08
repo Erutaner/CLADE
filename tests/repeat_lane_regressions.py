@@ -1,26 +1,24 @@
-"""R9-batch fix regressions (v11.4).
+"""Repeat-lane regressions.
 
-Unit-level pins for the ninth-round fixes (the doors drive R005 exercises the
-full engine-run repeat lifecycle end to end; these pin the load-bearing
-mechanics):
-  - G1  _terminal_blockers: the one predicate behind "project done" reads
-  - G4  _landing_claims: ONE canonical claim set per attempt (metrics, ledger,
-        probe artifact, seed-resolved products) + the repeat-lane variant
-  - G6  kernel identity dual-accept (re-classification / renumbering keep
-        identity; stored legacy hashes keep matching)
-  - G7  a load-bearing kernel reference must cite an EXECUTABLE operator
-  - cfg  lanes_per_round_max = 0 is refused at the config layer
-  - sup  an interrupted autonomy-change record is closed on re-run
-  - W3   one landing-resolution rule for every attempt (R10-012)
-  - W3   _repeat_run_pending truth table
-  - W3   _advance_stage: the repeat lane never re-enters the preplanned loop
-  - W3   metric door three states (pending / sealed-pinned / legacy)
-  - W3   stage_metrics_of keys the repeat lane by seed (no shadowing)
-  - W3   erun invariants admit the repeat lane's missing replica ordinal
+Unit-level pins (the doors drive exercises the full engine-run repeat
+lifecycle end to end; these pin the load-bearing mechanics):
+  - _terminal_blockers: the one predicate behind "project done" reads
+  - _landing_claims: ONE canonical claim set per attempt (metrics, ledger,
+    probe artifact, seed-resolved products) + the repeat-lane variant
+  - kernel identity: re-classification / renumbering keep identity
+  - a load-bearing kernel reference must cite an EXECUTABLE operator
+  - lanes_per_round_max = 0 is refused at the config layer
+  - an interrupted autonomy-change record is closed on re-run
+  - one landing-resolution rule for every attempt
+  - _repeat_run_pending truth table
+  - _advance_stage: the repeat lane never re-enters the preplanned loop
+  - metric door three states (pending / sealed-pinned / waived)
+  - stage_metrics_of keys the repeat lane by seed (no shadowing)
+  - erun invariants admit the repeat lane's missing replica ordinal
 
 Not re-pinned here (covered elsewhere): observation/inheritance axis split
-(v10_frontier_semantics_unit), identity re-classification fixture
-(v111_feature_unit), approval arming + doctor repeat exemptions + waive
+(frontier_semantics_unit), identity re-classification fixture
+(repeat_and_carbon_copy_unit), approval arming + doctor repeat exemptions + waive
 guards (doors drive R005 + CLI paths).
 """
 import json
@@ -47,7 +45,7 @@ def _tmp() -> Path:
     return Path(tempfile.mkdtemp(prefix="r9fix_"))
 
 
-# ------------------------------------------------------------------ G1 ----
+# ---- terminal blockers ----
 def terminal_blockers_three_kinds() -> None:
     st = {
         "recoveries": [{"id": "RC1", "status": "planned"}],
@@ -67,13 +65,13 @@ def terminal_blockers_three_kinds() -> None:
     stub._repeat_run_pending = eabsorb.AbsorbMixin._repeat_run_pending
     out = esched.Engine._terminal_blockers(stub)
     kinds = sorted((b["kind"], str(b.get("id"))) for b in out)
-    check(("recovery", "RC1") in kinds, "an active recovery case blocks the terminal verdict (G1)")
+    check(("recovery", "RC1") in kinds, "an active recovery case blocks the terminal verdict")
     check(("run_active", "RUN1") in kinds and ("run_active", "RUN2") in kinds,
           "launch_unknown and running RUNs both block (external work may exist)")
     check(("run_obligation", "RUN3") in kinds,
           "a terminal RUN with an open evidence obligation blocks")
     check(("repeat_obligation", "N9") in kinds,
-          "an approved, unsettled repeat measurement blocks the terminal verdict (R10-013)")
+          "an approved, unsettled repeat measurement blocks the terminal verdict")
     check(all(str(b.get("id")) != "RUN4" for b in out),
           "a settled RUN does not block")
     st["recoveries"][0]["status"] = "applied"
@@ -83,7 +81,7 @@ def terminal_blockers_three_kinds() -> None:
           "nothing pending -> no blockers (the done read point may proceed)")
 
 
-# ------------------------------------------------------------------ G4 ----
+# ---- landing claims ----
 _CLAIM_SPEC = {
     "training_replication": {"mode": "preplanned", "runs": 2, "seeds": [7, 8],
                              "aggregation": "mean", "source": "workflow"},
@@ -106,13 +104,13 @@ def landing_claims_full_set() -> None:
         declared_metrics_file="work/m_seed-7.json",
         declared_ledger_file="work/l_seed-7.jsonl")
     check("work/m_seed-7.json" in claims and "work/l_seed-7.jsonl" in claims,
-          "declared metrics and ledger are claimed (G4)")
+          "declared metrics and ledger are claimed")
     check("probes/probe_seed-7.json" in claims,
           "the producer probe artifact is claimed for the matching seed")
     check("work/ckpt_seed-7.bin" in claims,
           "seed-resolved declared products are claimed")
     check("oss://bucket/ckpt.bin" in claims,
-          "remote product URIs are claimed too (R10-002: registry law makes a "
+          "remote product URIs are claimed too (registry law makes a "
           "producer URI globally unique, so live attempts serialize on it)")
     check("probes/probe_seed-8.json" not in claims and "work/ckpt_seed-8.bin" not in claims,
           "the sibling seed's landings belong to the sibling attempt")
@@ -127,13 +125,13 @@ def landing_claims_repeat_variant() -> None:
         stub, {"id": "N1"}, "stage", stage="train", replica_seed=9,
         declared_metrics_file="work/m.json", repeat=True)
     check("work/ckpt.bin" in claims,
-          "the repeat lane claims the SAME spec-resolved product landing (R10-012: "
+          "the repeat lane claims the SAME spec-resolved product landing ("
           "one resolution rule; the prepare-time archive protects the base bytes)")
     check(all("probe" not in c for c in claims),
           "the repeat lane claims no probe artifacts (probe authority stays with the base)")
 
 
-# ------------------------------------------------------------------ G6 ----
+# ---- kernel identity ----
 _KERNEL_CAND = {
     "novelty": {"kind": "composition", "bearer": "the reweighting head",
                 "kernel": [{"id": "KC1", "kind": "state_relation",
@@ -148,30 +146,26 @@ _KERNEL_CAND = {
 }
 
 
-def identity_dual_accept() -> None:
+def identity_invariance() -> None:
     base = json.loads(json.dumps(_KERNEL_CAND))
     new_hash = eprogram.kernel_fingerprint(base)
-    old_hash = eprogram.legacy_kernel_fingerprint(base)
     reclassified = json.loads(json.dumps(base))
     reclassified["novelty"]["kind"] = "irreducible"
     check(eprogram.kernel_fingerprint(reclassified) == new_hash,
-          "re-classifying the same computation keeps its identity (G6)")
-    check(eprogram.legacy_kernel_fingerprint(reclassified) != old_hash,
-          "the legacy algorithm did fold the classification in (why dual-accept exists)")
+          "re-classifying the same computation keeps its identity")
     renumbered = json.loads(json.dumps(base))
     renumbered["program"]["operators"][0]["id"] = "OP9"
     renumbered["novelty"]["kernel"][0]["operator_refs"] = ["OP9"]
     check(eprogram.kernel_fingerprint(renumbered) == new_hash,
           "consistent renumbering keeps identity (refs resolve to content signatures)")
-    check(eprogram.kernel_identity_matches(old_hash, base)
-          and eprogram.kernel_identity_matches(new_hash, base),
-          "stored hashes from either era keep matching (no migration)")
+    check(eprogram.kernel_identity_matches(new_hash, base),
+          "a stored hash keeps matching its computation")
     check(not eprogram.kernel_identity_matches("deadbeef", base)
           and not eprogram.kernel_identity_matches("", base),
           "a foreign or empty stored hash never matches")
 
 
-# ------------------------------------------------------------------ G7 ----
+# ---- executable kernel ----
 def kernel_core_must_be_executable() -> None:
     cand = json.loads(json.dumps(_KERNEL_CAND))
     cand["change_scope"] = "component"
@@ -183,7 +177,7 @@ def kernel_core_must_be_executable() -> None:
     errs = eprogram.candidate_errors(cand, where="cand", min_level=0, research=False,
                                      search_origin="repair", model_parent_count=1)
     check(any(e.startswith("PROGRAM_KERNEL_OPERATOR_UNREACHABLE") for e in errs),
-          "a core citing a never-executable operator is refused (G7)")
+          "a core citing a never-executable operator is refused")
     cand["novelty"]["kernel"][0]["operator_refs"] = ["OP1"]
     errs = eprogram.candidate_errors(cand, where="cand", min_level=0, research=False,
                                      search_origin="repair", model_parent_count=1)
@@ -230,9 +224,9 @@ def supervision_interrupted_record_closes() -> None:
         shutil.rmtree(root, ignore_errors=True)
 
 
-# ------------------------------------------------------------------ W3 ----
+# ---- repeat lane ----
 def repeat_landing_resolution_unified() -> None:
-    # R10-012 reconciliation: there is deliberately NO repeat-specific landing
+    # There is deliberately NO repeat-specific landing
     # derivation - every attempt resolves through resolve_seed_template, so
     # the frozen command, the expected landings, the product acceptance and
     # the registration can never disagree.
@@ -262,9 +256,9 @@ def probe_expectations_repeat_exempt() -> None:
 def repeat_pending_predicate() -> None:
     f = eabsorb.AbsorbMixin._repeat_run_pending
     check(f({"repeat_measure": {"engine_run": True}, "repeat_pending_seed": 9}) == 9,
-          "an armed approval exposes the pending seed (R9-002)")
+          "an armed approval exposes the pending seed")
     check(f({"repeat_measure": {"engine_run": True}}) is None,
-          "no pending seed -> nothing owed (already executed or legacy)")
+          "no pending seed -> nothing owed (already executed)")
     check(f({"repeat_measure": {"waived": True}, "repeat_pending_seed": 9}) is None,
           "a waived approval owes nothing")
     check(f({"repeat_measure": {}, "repeat_measure_done": True,
@@ -286,7 +280,7 @@ def _advance_stub(node: dict, events: list) -> SimpleNamespace:
         _register_stage_artifacts=lambda *a, **k: None,
         store=SimpleNamespace(event=lambda actor, name, **kw: events.append(name)),
     )
-    # R11-001: _advance_stage routes registration through the deferral
+    # _advance_stage routes registration through the deferral
     # helper; bind the REAL one so repeat lanes exercise deferral semantics.
     stub._register_or_defer_stage_products = (
         lambda *a, **k: eabsorb.AbsorbMixin._register_or_defer_stage_products(stub, *a, **k))
@@ -302,7 +296,7 @@ def advance_stage_repeat_no_reloop() -> None:
     eabsorb.AbsorbMixin._advance_stage(_advance_stub(node, events), node, run,
                                        gate_decision=None)
     check(node["status"] == "workflow_done" and node["stage_cursor"] == 1,
-          "the repeat lane finishes to workflow_done (R9-002)")
+          "the repeat lane finishes to workflow_done")
     check(node["replica_index"] == 1 and "workflow_replica_finished" not in events,
           "the repeat lane NEVER re-enters the preplanned seed loop")
     rows = node.get("replicas_completed") or []
@@ -347,7 +341,7 @@ def metric_door_three_states() -> None:
         errs = evalid.metric_evidence_errors(ctx, "auc", block(0.82, "repeat_raw.json"),
                                              node=pending_node)
         check(any(e.startswith("EVAL_REPEAT_RUN_PENDING") for e in errs),
-              "an engine-run approval refuses aggregation before the repeat RUN settles (W3)")
+              "an engine-run approval refuses aggregation before the repeat RUN settles")
 
         settled = {"id": "N1", "repeat_measure": rm, "eval_run": "RUN1",
                    "repeat_eval_run": "RUN9"}
@@ -373,16 +367,6 @@ def metric_door_three_states() -> None:
         check(any(e.startswith("EVAL_REPEAT_MEASURE_BASE_MISMATCH") for e in errs),
               "the base row stays pinned to the sealed first measurement too")
 
-        legacy_rm = {k: v for k, v in rm.items() if k != "engine_run"}
-        legacy = {"id": "N1", "repeat_measure": legacy_rm, "eval_run": "RUN1"}
-        errs = evalid.metric_evidence_errors(ctx, "auc", block(0.82, "missing_artifact.json"),
-                                             node=legacy)
-        check(any(e.startswith("EVAL_REPEAT_SOURCE_MISSING") for e in errs),
-              "a legacy (pre-engine-run) approval keeps the checkable-citation rule")
-        errs = evalid.metric_evidence_errors(ctx, "auc", block(0.82, "repeat_raw.json"),
-                                             node=legacy)
-        check(not any("EVAL_REPEAT" in e for e in errs),
-              "a legacy aggregate with an existing citation still passes untouched")
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
@@ -423,7 +407,7 @@ def invariants_admit_repeat_lane() -> None:
 
     errs = [e for e in erun.invariant_errors(fresh(repeat=True))
             if e.startswith("RUN_POSITION")]
-    check(errs == [], "the repeat lane's missing replica ordinal is legal (R9-002)")
+    check(errs == [], "the repeat lane's missing replica ordinal is legal")
     errs = [e for e in erun.invariant_errors(fresh(repeat=False))
             if e.startswith("RUN_POSITION")]
     check(len(errs) == 1 and "replica_index" in errs[0],
@@ -434,7 +418,7 @@ def main() -> None:
     terminal_blockers_three_kinds()
     landing_claims_full_set()
     landing_claims_repeat_variant()
-    identity_dual_accept()
+    identity_invariance()
     kernel_core_must_be_executable()
     config_rejects_zero_lane_ceiling()
     supervision_interrupted_record_closes()
@@ -446,7 +430,7 @@ def main() -> None:
     metric_door_three_states()
     stage_metrics_keys_repeat_lane()
     invariants_admit_repeat_lane()
-    done("V11.4 R9 FIX REGRESSIONS")
+    done("REPEAT LANE REGRESSIONS")
 
 
 if __name__ == "__main__":

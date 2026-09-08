@@ -1,5 +1,5 @@
 """Infrastructure facts: machine-readable knowledge about WHERE this project runs,
-trains, stores data and checkpoints, and how jobs are submitted/watched (v8).
+trains, stores data and checkpoints, and how jobs are submitted/watched.
 
 The `infra` bootstrap task distills the user's knowledge base (config project.docs)
 plus the repo into .evo/profile/INFRA_FACTS.json. Every fact carries `src` paths so
@@ -16,8 +16,8 @@ import eutil
 
 REQUIRED_BLOCKS = ("workspace", "compute", "data", "artifact_store", "evaluation")
 
-# v10.1: fields whose VALUES the engine never reads (workspace.agent_runs_on,
-# workspace.code_lives_at, data.access_pattern) are no longer mandatory prose.
+# Fields whose VALUES the engine never reads (workspace.agent_runs_on,
+# workspace.code_lives_at, data.access_pattern) are not mandatory prose.
 # The blocks themselves, their [src] grounding and every mechanically consumed
 # field (slots, uri_template, result keys, service names/pinning) keep their
 # full duty; agents may still record the optional fields for the user's review.
@@ -96,7 +96,7 @@ def validate_facts(store, facts: Any) -> list[str]:
         if not isinstance(keys, list) or not keys or any(not str(k).strip() for k in keys) \
                 or len(set(str(k) for k in keys)) != len(keys):
             errs.append("INFRA_EVAL_RESULT_KEYS: evaluation.result_keys must be a non-empty unique list of metrics.json keys")
-    # optional LLM block (v8): serving endpoints / API access / token budget for
+    # Optional LLM block: serving endpoints / API access / token budget for
     # inference- and api-class experiments. Optional, but if present it must be
     # substantive and sourced like every other block.
     llm = facts.get("llm")
@@ -105,7 +105,7 @@ def validate_facts(store, facts: Any) -> list[str]:
             errs.append("INFRA_LLM: optional 'llm' block must be an object")
         else:
             # Only the block's existence gates requires_services=["llm"]; its
-            # kind/invoke_pattern values had no engine reader (v10.1 optional).
+            # kind/invoke_pattern values have no engine reader (optional).
             src = llm.get("src")
             if not isinstance(src, list) or not src:
                 errs.append("INFRA_LLM_SRC: llm.src must list >= 1 source path")
@@ -113,7 +113,7 @@ def validate_facts(store, facts: Any) -> list[str]:
                 bad = [s for s in src if not eutil.rpath(store.repo, str(s)).exists()]
                 if bad:
                     errs.append(f"INFRA_LLM_SRC_UNRESOLVED: llm.src paths do not exist: {bad[:3]}")
-    # optional SERVICES registry (v8): non-LLM runtime dependencies experiments
+    # Optional SERVICES registry: non-LLM runtime dependencies experiments
     # lean on - a SPARQL/graph endpoint (KGQA), a vector store, an execution
     # sandbox, a simulator. Specs declare requires_services against these names;
     # the integrated bootstrap canary must have called each one.

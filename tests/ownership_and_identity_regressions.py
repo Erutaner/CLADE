@@ -1,25 +1,23 @@
-"""R10-batch fix regressions (v11.5).
+"""Ownership and identity regressions.
 
-Unit pins for the tenth-round root-cause reconciliations (the drive suites
-exercise the composed paths; these pin the load-bearing mechanics):
-  - R10-001  a terminal failed/cancelled CURRENT attempt routes through the
-             failure channel regardless of launch timing (_run_is_current_attempt)
-  - R10-002  landing identity is an overlap relation (directory vs child,
-             host-aware case folding) and remote product URIs are claimed
-  - R10-003  DONE is written only through the blocker-guarded verdict writer
-  - R10-006  a kernel core must cite at least one operator on the executable
-             path to a registered output (OFF_PATH)
-  - R10-007  fingerprint v2 carries iteration + depends_on; three-generation
-             identity accept keeps stored hashes matching
-  - R10-011  a reachable training artifact cannot hide an inference path that
-             can never execute (DEPLOY_UNREACHABLE / fired INFER_PATH)
-  - R10-012  one landing-resolution rule for every attempt (pinned in the
-             v114 suite's updated repeat tests)
-  - R10-013  the repeat lane records a stop decision without applying it
-  - R10-018  the deployed inference path may not read typed supervision
-  - R10-019  extension-axis accounting must equal the configure-time freeze
-  - R10-020  observation evidence must bind an existing source
-  - R10-016  the repeat-origin replacement gate discloses the third exit
+Unit pins (the drive suites exercise the composed paths; these pin the
+load-bearing mechanics):
+  - a terminal failed/cancelled CURRENT attempt routes through the failure
+    channel regardless of launch timing (_run_is_current_attempt)
+  - landing identity is an overlap relation (directory vs child, host-aware
+    case folding) and remote product URIs are claimed
+  - DONE is written only through the blocker-guarded verdict writer
+  - a kernel core must cite at least one operator on the executable path to
+    a registered output (OFF_PATH)
+  - the kernel fingerprint carries iteration + depends_on
+  - a reachable training artifact cannot hide an inference path that can
+    never execute (DEPLOY_UNREACHABLE / fired INFER_PATH)
+  - one landing-resolution rule for every attempt
+  - the repeat lane records a stop decision without applying it
+  - the deployed inference path may not read typed supervision
+  - extension-axis accounting must equal the configure-time freeze
+  - observation evidence must bind an existing source
+  - the repeat-origin replacement gate discloses the third exit
 """
 import json
 import shutil
@@ -43,7 +41,7 @@ def _tmp() -> Path:
     return Path(tempfile.mkdtemp(prefix="r10fix_"))
 
 
-# ------------------------------------------------------------- R10-001 ----
+# ---- current attempt ----
 _CUR_SPEC = {
     "training_replication": {"mode": "single", "runs": 1, "seeds": [1009],
                              "aggregation": "none", "source": "workflow"},
@@ -65,7 +63,7 @@ def current_attempt_predicate() -> None:
     node = {"id": "N1", "status": "stage_ready", "stage_cursor": 0, "replica_index": 0}
     stub = _cur_stub([run])
     check(stub._run_is_current_attempt(run, node),
-          "a pre-launch attempt is CURRENT while the node still owns its position (R10-001)")
+          "a pre-launch attempt is CURRENT while the node still owns its position")
     node_exec = dict(node, status="executing")
     check(stub._run_is_current_attempt(run, node_exec),
           "launch timing does not change ownership")
@@ -98,10 +96,10 @@ def current_attempt_predicate() -> None:
           "the repeat evaluation attempt is current while its lane is owed")
 
 
-# ------------------------------------------------------------- R10-002 ----
+# ---- landing overlap ----
 def landing_overlap_relation() -> None:
     check(eutil.paths_overlap("out/shared", "out/shared/model.pt"),
-          "a directory product overlaps its child file (R10-002)")
+          "a directory product overlaps its child file")
     check(eutil.paths_overlap("out/shared/model.pt", "out/shared"),
           "ancestry is symmetric")
     check(not eutil.paths_overlap("out/sharedX", "out/shared"),
@@ -126,7 +124,7 @@ def lease_holder_overlap() -> None:
                        _ensure_run_claims=lambda run: None)
     holder = eabsorb.AbsorbMixin._landing_lease_holder(stub, "out/shared/model.pt")
     check(holder is not None and holder["id"] == "RUN1",
-          "a live directory claim leases every child path (R10-002)")
+          "a live directory claim leases every child path")
     check(eabsorb.AbsorbMixin._landing_lease_holder(stub, "out/other.pt") is None,
           "disjoint paths stay free")
     remote = SimpleNamespace(st={"runs": [
@@ -141,7 +139,7 @@ def lease_holder_overlap() -> None:
           "a live remote product URI is leased exactly (registry uniqueness law)")
 
 
-# ------------------------------------------------------------- R10-003 ----
+# ---- terminal verdict ----
 def terminal_verdict_guarded() -> None:
     st = {"phase": "running", "rounds": [], "recoveries": [],
           "runs": [{"id": "RUN1", "status": "running", "evidence_status": "pending"}]}
@@ -158,7 +156,7 @@ def terminal_verdict_guarded() -> None:
     stub._closed_rounds = lambda: 0
     out = esched.Engine._terminal_verdict(stub, "all rounds finished", event="evolution_done")
     check(out.get("kind") == "waiting" and st.get("phase") == "running",
-          "a live RUN defers the verdict AND the phase stays alive (R10-003)")
+          "a live RUN defers the verdict AND the phase stays alive")
     check("evolution_done" not in events, "no premature terminal event")
     st["runs"][0]["status"] = "finished"
     st["runs"][0]["evidence_status"] = "complete"
@@ -169,7 +167,7 @@ def terminal_verdict_guarded() -> None:
           "with the world settled the verdict lands through the same writer")
 
 
-# ------------------------------------------- R10-006 / 011 / 018 (IR) ----
+# ---- program IR ----
 def _cand(operators, kernel_refs, objects=None):
     return {
         "change_scope": "component",
@@ -201,7 +199,7 @@ def kernel_core_off_path_refused() -> None:
                                      research=False, search_origin="repair",
                                      model_parent_count=1)
     check(any(e.startswith("PROGRAM_KERNEL_OPERATOR_OFF_PATH") for e in errs),
-          "a core citing only an executable-but-inert side branch is refused (R10-006)")
+          "a core citing only an executable-but-inert side branch is refused")
     errs = eprogram.candidate_errors(_cand(ops, ["OP1", "OP3"]), where="c", min_level=0,
                                      research=False, search_origin="repair",
                                      model_parent_count=1)
@@ -223,7 +221,7 @@ def artifact_cannot_hide_dead_inference() -> None:
         _cand(ops, ["OP1"], objects)["program"], where="p", require_learning=True)
     check("OP2" not in fired, "the inference row never fires (its read has no producer)")
     check(any(e.startswith("PROGRAM_INFER_PATH") for e in errs),
-          "a declared-but-never-firing inference row does not satisfy the path duty (R10-011)")
+          "a declared-but-never-firing inference row does not satisfy the path duty")
     check(any(e.startswith("PROGRAM_DEPLOY_UNREACHABLE") for e in errs),
           "a reachable training artifact cannot stand in for the deployed prediction")
 
@@ -240,7 +238,7 @@ def inference_may_not_read_supervision() -> None:
     errs, *_rest = eprogram._program_graph_errors(
         _cand(ops, ["OP2"], objects)["program"], where="p", require_learning=True)
     check(any(e.startswith("PROGRAM_INFER_SUPERVISION") for e in errs),
-          "the deployed inference path may not consume typed supervision (R10-018)")
+          "the deployed inference path may not consume typed supervision")
     ops_ok = [_op("OP1", "update", "train", ["O1", "O2"], ["O3"]),
               _op("OP2", "estimator", "infer", ["O1", "O3"], ["O4"])]
     errs, *_rest = eprogram._program_graph_errors(
@@ -249,7 +247,7 @@ def inference_may_not_read_supervision() -> None:
           "training may read supervision; a label-free inference path passes")
 
 
-# ------------------------------------------------------------- R10-007 ----
+# ---- fingerprint ----
 def fingerprint_carries_execution_fields() -> None:
     base_ops = [_op("OP1", "update", "train", ["O1"], ["O2"],
                     iteration={"kind": "fixed_point", "state_objects": ["O2"],
@@ -260,7 +258,7 @@ def fingerprint_carries_execution_fields() -> None:
     other = json.loads(json.dumps(cand))
     other["program"]["operators"][0]["iteration"]["max_steps"] = 100
     check(eprogram.kernel_fingerprint(cand) != eprogram.kernel_fingerprint(other),
-          "changing a core operator's loop bound changes its identity (R10-007)")
+          "changing a core operator's loop bound changes its identity")
     dep = json.loads(json.dumps(cand))
     dep["program"]["operators"][1]["depends_on"] = ["OP1"]
     dep["novelty"]["kernel"][0]["operator_refs"] = ["OP2"]
@@ -268,12 +266,9 @@ def fingerprint_carries_execution_fields() -> None:
     base2["novelty"]["kernel"][0]["operator_refs"] = ["OP2"]
     check(eprogram.kernel_fingerprint(base2) != eprogram.kernel_fingerprint(dep),
           "changing a core operator's declared schedule changes its identity")
-    v2, v1, legacy = eprogram.kernel_fingerprints(cand)
-    check(len({v2, v1, legacy}) == 3 or v2 != legacy,
-          "three generations are distinct spellings for an execution-field program")
-    for stored in (v2, v1, legacy):
-        check(eprogram.kernel_identity_matches(stored, cand),
-              "every stored generation keeps matching its verbatim computation")
+    v2 = eprogram.kernel_fingerprint(cand)
+    check(eprogram.kernel_identity_matches(v2, cand),
+          "a stored hash keeps matching its verbatim computation")
     renumbered = json.loads(json.dumps(cand))
     for row in renumbered["program"]["operators"]:
         row["id"] = "OP" + str(int(row["id"][2:]) + 10)
@@ -282,14 +277,14 @@ def fingerprint_carries_execution_fields() -> None:
           "consistent renumbering keeps the v2 identity (refs resolve to content)")
     plain = _cand([_op("OP1", "update", "train", ["O1"], ["O2"]),
                    _op("OP2", "estimator", "infer", ["O2"], ["O3"])], ["OP1"])
-    pv2, pv1, _pl = eprogram.kernel_fingerprints(plain)
+    pv2 = eprogram.kernel_fingerprint(plain)
     missing_vs_empty = json.loads(json.dumps(plain))
     missing_vs_empty["program"]["operators"][0]["depends_on"] = []
     check(eprogram.kernel_fingerprint(missing_vs_empty) == pv2,
           "an absent and an empty schedule are one spelling (no gratuitous drift)")
 
 
-# ------------------------------------------------------------- R10-013 ----
+# ---- repeat stop ----
 _ADV_SPEC = {
     "training_replication": {"mode": "single", "runs": 1, "seeds": [1009],
                              "aggregation": "none", "source": "workflow"},
@@ -322,12 +317,12 @@ def repeat_lane_records_stop_without_applying() -> None:
           and run.get("scientific_gate") == decision,
           "the stop decision is recorded verbatim on the RUN (doctor drift audit)")
     check("repeat_stage_gate_observed" in events,
-          "the observation is announced instead of applied (R10-013)")
+          "the observation is announced instead of applied")
     check(node["status"] == "workflow_done" and node.get("repeat_pending_seed") == 1010,
           "the purchased lane runs to completion; the obligation stays visible")
 
 
-# ------------------------------------------------------------- R10-019 ----
+# ---- extension axis ----
 def extension_axis_accounting_frozen() -> None:
     root = _tmp()
     try:
@@ -343,12 +338,12 @@ def extension_axis_accounting_frozen() -> None:
         row = {"method": "runtime_profiler", "description": "d" * 45}
         drifted = frozen.get("energy_wh") and row["method"] != frozen["energy_wh"]
         check(bool(drifted),
-              "a NODE_SPEC method differing from the configure-time freeze is drift (R10-019)")
+              "a NODE_SPEC method differing from the configure-time freeze is drift")
     finally:
         shutil.rmtree(root, ignore_errors=True)
 
 
-# ------------------------------------------------------------- R10-020 ----
+# ---- observation evidence ----
 def observation_evidence_binds_sources() -> None:
     root = _tmp()
     try:
@@ -360,13 +355,13 @@ def observation_evidence_binds_sources() -> None:
                               reg={"artifacts": [{"id": "AR001", "uri": "oss://b/x",
                                                   "status": "available"}]})
         f = evalid._observation_evidence_bound
-        check(f(ctx, "runs/m.json"), "an existing repo path binds (R10-020)")
+        check(f(ctx, "runs/m.json"), "an existing repo path binds")
         check(f(ctx, "see RUN7 sealed metrics"), "a RUN id with sealed metrics binds")
         ctx.st["runs"].append({"id": "RUN8", "metrics_file": "runs/m.json",
                                "status": "finished", "evidence_status": "invalid"})
-        check(not f(ctx, "see RUN8"), "an engine-refused (invalid-evidence) RUN binds nothing (R11-006)")
+        check(not f(ctx, "see RUN8"), "an engine-refused (invalid-evidence) RUN binds nothing")
         ctx.reg["artifacts"].append({"id": "AR002", "uri": "oss://b/stale", "status": "stale"})
-        check(not f(ctx, "AR002"), "a stale artifact row binds nothing (sweep G-7)")
+        check(not f(ctx, "AR002"), "a stale artifact row binds nothing")
         check(f(ctx, "registered AR001"), "a registered artifact id binds")
         check(f(ctx, "oss://b/x"), "a registered artifact URI binds")
         check(not f(ctx, "runs/RUN999/missing_metrics.json"),
@@ -377,7 +372,7 @@ def observation_evidence_binds_sources() -> None:
         shutil.rmtree(root, ignore_errors=True)
 
 
-# ------------------------------------------------------------- R10-016 ----
+# ---- replacement gate ----
 def repeat_spend_gate_discloses_third_exit() -> None:
     class FakeStore:
         def new_gate(self, state, kind, subject, message):
@@ -397,7 +392,7 @@ def repeat_spend_gate_discloses_third_exit() -> None:
         "operation": "eval", "source_run": "RUN9", "failure_class": "unknown"}}
     gate = eng._repeat_spend_gate(node, "eval")
     check("waive-repeat" in str(gate.get("message") or gate.get("summary")),
-          "a repeat-origin replacement gate discloses the third exit (R10-016)")
+          "a repeat-origin replacement gate discloses the third exit")
     eng2 = object.__new__(esched.Engine)
     eng2.store = FakeStore()
     eng2.st = {"gates": [], "runs": [{"id": "RUN5"}]}
@@ -421,7 +416,7 @@ def main() -> None:
     extension_axis_accounting_frozen()
     observation_evidence_binds_sources()
     repeat_spend_gate_discloses_third_exit()
-    done("V11.5 R10 FIX REGRESSIONS")
+    done("OWNERSHIP / IDENTITY REGRESSIONS")
 
 
 if __name__ == "__main__":

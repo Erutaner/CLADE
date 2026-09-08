@@ -1,15 +1,13 @@
-"""Behavior regressions for the R9 (external audit r6) fix batch and its
-repair pass.
+"""Journal and reopen-pump regressions.
 
-    python tests/v113_fix_regressions.py
+    python tests/journal_and_pump_regressions.py
 
-The r6 batch shipped with zero test coverage; its half-applied edits survived
-a fully green wall. Every check here exercises a repaired behavior DIRECTLY
-(the v11.1 postmortem rule: composite/validator paths must run, not just
-grep): crash-ghost read filtering on all three journals, the deep_read
-evidence watermark, retraction write ordering, the parked-task reopen pump,
-the landing-lease scheduler probe, the harness-trials era gate, snapshot
-publishing over read-only files, and retired-platform recovery closure.
+Every check here exercises a behavior DIRECTLY (composite/validator paths
+must run, not just grep): crash-ghost read filtering on all three journals,
+the deep_read evidence watermark, retraction write ordering, the parked-task
+reopen pump, the landing-lease scheduler probe, the raw-side harness-trials
+duty, snapshot publishing over read-only files, and retired-platform recovery
+closure.
 """
 from __future__ import annotations
 
@@ -91,7 +89,7 @@ def test_lesson_ghost_filter_on_production_path() -> None:
 # ------------------------------------------- deep_read evidence watermark --
 
 def test_deep_read_stamps_evidence_watermark() -> None:
-    """R9 made every consumer read only the accepted prefix; deep_read appends
+    """Every consumer reads only the accepted prefix; deep_read appends
     validated evidence rows, so its acceptance must advance the watermark or
     those rows are invisible (and citing them a validation error)."""
     with tempfile.TemporaryDirectory() as td:
@@ -111,14 +109,14 @@ def test_deep_read_stamps_evidence_watermark() -> None:
         check(evalid.accepted_ledger_rows(stub.st, "evidence", rows) == rows,
               "the just-accepted E### rows are visible to accepted-prefix readers")
         check((stub.st.get("ledger_accept") or {}).get("mech", {}).get("count") == 0,
-              "mech watermark still stamped alongside (R7 behavior preserved)")
+              "mech watermark still stamped alongside")
 
 
 # ---------------------------------------------- retraction write ordering --
 
 def test_retraction_flushes_before_state_commit() -> None:
     """Fail-closed direction: the un-suppressing retraction lands BEFORE
-    save_all; the suppressor rows land after (unchanged R7 rule)."""
+    save_all; the suppressor rows land after."""
     order: list[str] = []
     stub = SimpleNamespace(
         st={}, g={}, reg={},
@@ -126,7 +124,7 @@ def test_retraction_flushes_before_state_commit() -> None:
             save_all=lambda st, g, reg: order.append("save_all"),
             add_error_resolution=lambda rec: order.append("resolution"),
             retract_error_resolutions=lambda node, recovery, reason: order.append("retract"),
-            # R11-008 stub sync: the outbox dedup reads the journal
+            # the outbox dedup reads the journal
             errors=lambda st=None: []),
         _pending_error_resolutions=[{"resolves": "ER001", "outbox_key": "k1"}],
         _pending_resolution_retractions=[{"node": "N1", "recovery": "REC1", "reason": "r"}])
@@ -135,7 +133,7 @@ def test_retraction_flushes_before_state_commit() -> None:
           f"retractions flush before the state commit, suppressors after: {order}")
     check(not stub._pending_error_resolutions and not stub._pending_resolution_retractions,
           "both staging buffers drained")
-    # R11-008: the committed state carried the row as an outbox until the
+    # The committed state carried the row as an outbox until the
     # append landed; the NEXT save (nothing pending, journal now has the key)
     # clears it.
     check(stub.st.get("resolution_outbox") == [{"resolves": "ER001", "outbox_key": "k1"}],
@@ -221,7 +219,7 @@ def test_landing_lease_probe() -> None:
 
 # ------------------------------------------------ harness-trials era gate --
 
-def test_harness_trials_era_gate() -> None:
+def test_harness_trials_raw_duty() -> None:
     with tempfile.TemporaryDirectory() as td:
         repo = Path(td)
         (repo / ".evo").mkdir()
@@ -233,13 +231,9 @@ def test_harness_trials_era_gate() -> None:
         errs = evalid.evaluation_result_errors(ctx, spec, "metrics.json", where="t")
         check(any("EVAL_HARNESS_TRIALS" in e for e in errs),
               f"fresh production keeps the raw-side trials duty: {errs}")
-        errs2 = evalid.evaluation_result_errors(ctx, spec, "metrics.json", where="t",
-                                                enforce_harness_trials=False)
-        check(not any("EVAL_HARNESS_TRIALS" in e for e in errs2),
-              f"doctor's historical replay does not re-litigate sealed pre-R9 raw files: {errs2}")
 
 
-def test_invented_usage_carveout_for_trials() -> None:
+def test_invented_usage_includes_trials() -> None:
     with tempfile.TemporaryDirectory() as td:
         repo = Path(td)
         (repo / ".evo").mkdir()
@@ -249,14 +243,14 @@ def test_invented_usage_carveout_for_trials() -> None:
         st = {"runs": [{"id": "RUN001", "metrics_file": "raw.json"}]}
         ctx = evalid.Ctx(store, st, {}, {"nodes": []}, reg={})
         node = {"id": "N1", "eval_run": "RUN001"}
-        ok = evalid.normalized_raw_binding_errors(
+        invented = evalid.normalized_raw_binding_errors(
             ctx, node, {"_usage": {"gpu_hours": 1.0, "trials_completed": 3}})
-        check(not any("USAGE_INVENTED" in e for e in ok),
-              f"trials_completed may be supplied when the sealed raw predates the duty: {ok}")
+        check(any("USAGE_INVENTED" in e for e in invented),
+              f"an execution fact the producer never reported is an invention, trials included: {invented}")
         bad = evalid.normalized_raw_binding_errors(
             ctx, node, {"_usage": {"gpu_hours": 1.0, "made_up_unit": 9}})
         check(any("USAGE_INVENTED" in e for e in bad),
-              f"every OTHER absent-from-raw usage key is still an invention: {bad}")
+              f"every absent-from-raw usage key is an invention: {bad}")
 
 
 # ------------------------------------------- snapshot publish, read-only ---
@@ -319,11 +313,11 @@ def main() -> None:
     test_reopen_pump_cancels_stale_and_reopens_one()
     test_reopen_pump_cancels_terminal_subject()
     test_landing_lease_probe()
-    test_harness_trials_era_gate()
-    test_invented_usage_carveout_for_trials()
+    test_harness_trials_raw_duty()
+    test_invented_usage_includes_trials()
     test_publish_snapshot_over_readonly_files()
     test_retired_platform_keeps_recovery_edges()
-    done("V11.3 FIX REGRESSIONS")
+    done("JOURNAL / PUMP REGRESSIONS")
 
 
 if __name__ == "__main__":

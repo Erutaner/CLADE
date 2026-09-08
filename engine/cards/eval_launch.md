@@ -19,10 +19,10 @@ the engine has ingested and sealed the RUN.
    if you PROVED none exists, `{{EVO}} run-confirm-not-launched --run {{RUN_ID}}
    --note ...` resets the intent cleanly before any fresh launch.
    Run the node spec's exact `eval.run` command against the delivered artifact.
-   Respect `eval.budget.limits` (`_usage` exceeding cap x the
-   `stage_budget_tolerance` validity band invalidates the evidence; report the
-   real number regardless), pinned judge/protocol, and every method frozen
-   in `eval.resource_accounting`.
+   Respect `eval.budget.limits` (`_usage` above the declared cap parks the
+   evidence until the cap is corrected on record with `evo amend` and the RUN
+   reconciled; report the real number regardless), pinned judge/protocol, and
+   every method frozen in `eval.resource_accounting`.
 2. The evaluator's raw metrics JSON must contain:
    - every configured evaluation-cell `result_key` in the accepted scalar,
      fixed-evaluation interval, or preplanned-replication form;

@@ -1,11 +1,11 @@
 #!/usr/bin/env python3
-"""End-to-end regressions for the DESIGN_V10 §7 fixes that need a live engine:
+"""End-to-end regressions that need a live engine:
 
-F1  bounded typed-repair loop (fix_cycles -> escalation -> reset)
-F2  honest-unknown root cause is submittable
-F8  malformed active hold fails closed
-F14 evidence_min_new_per_round is the enforced per-round count
-F19 retired node tolerates a deleted worktree; revive re-proves the closure
+  - bounded typed-repair loop (fix_cycles -> escalation -> reset)
+  - honest-unknown root cause is submittable
+  - malformed active hold fails closed
+  - evidence_min_new_per_round is the enforced per-round count
+  - retired node tolerates a deleted worktree; revive re-proves the closure
 
 One coherent mini-drive on a fresh project (reusing mock_drive's canned-agent
 helpers), so every check exercises the REAL scheduler/validator path.
@@ -36,17 +36,17 @@ def ok(cond, message):
 
 
 def fresh_project() -> M.D:
-    repo = Path(__file__).resolve().parent / "out" / "v10_defect_regressions"
+    repo = Path(__file__).resolve().parent / "out" / "live_engine_regressions"
     if repo.exists():
         M.rmtree(repo)
     M.make_repo(repo, with_git=True)
     proc = subprocess.run(
         [M.PY, str(M.PKG / "engine" / "evo.py"), "--repo", str(repo), "init",
-         "--project-name", "defect-regressions", "--goal", "pin the v10 defect fixes"],
+         "--project-name", "defect-regressions", "--goal", "pin the live-engine contracts"],
         capture_output=True, text=True, encoding="utf-8", errors="replace")
     ok(proc.returncode == 0, f"CLI init failed: {proc.stderr}")
     # F14 needs a per-round evidence count the when-gap floor could never
-    # produce. budgets are inside the frozen contract digest (R7), so the
+    # Produce. budgets are inside the frozen contract digest, so the
     # discriminating value is set at CONFIGURE time - before the sign-off -
     # instead of edited into a frozen file mid-run.
     orig_cfg_main = M.w_config_main
@@ -68,8 +68,8 @@ def fresh_project() -> M.D:
     return M.D(repo)
 
 
-def f8_malformed_hold_fails_closed(d: M.D):
-    M.section("F8: an active covering hold without an id is corrupt control state")
+def malformed_hold_fails_closed(d: M.D):
+    M.section("an active covering hold without an id is corrupt control state")
     st = d.state()
     g = d.graph()
     st_copy = json.loads(json.dumps(st))
@@ -82,10 +82,10 @@ def f8_malformed_hold_fails_closed(d: M.D):
         ok("corrupt" in str(exc), f"typed fail-closed message expected, got: {exc}")
 
 
-def f14_evidence_min_new_source(d: M.D):
+def evidence_min_new_source(d: M.D):
     """The opening round's evidence refresh must carry the configured per-round
-    count when it is positive (v9.2 always used the when-gap floor)."""
-    M.section("F14: evidence_min_new_per_round is the per-round contract")
+    count when it is positive, not only the when-gap floor."""
+    M.section("evidence_min_new_per_round is the per-round contract")
     cfg_path = d.repo / ".evo" / "config.json"
     cfg = json.loads(cfg_path.read_text(encoding="utf-8"))
     # the discriminating value was set at configure time (see _fresh_project):
@@ -108,9 +108,9 @@ def f14_evidence_min_new_source(d: M.D):
     M.sub_ok(d, out)
 
 
-def f1_bounded_repair_loop(d: M.D) -> str:
+def bounded_repair_loop(d: M.D) -> str:
     """implement -> smoke-fail cycles must exhaust into an escalation gate."""
-    M.section("F1: typed implementation-repair loop is bounded")
+    M.section("typed implementation-repair loop is bounded")
     lid, mech = M.drive_lane_to_plan(d, "f1-lane", dims=M.L2_DIMS,
                                      mech_papers=("E001", "E005"))
     M.drive_mature_redteam(d, lid, mech_ids=mech, score=0.712)
@@ -155,7 +155,7 @@ def f1_bounded_repair_loop(d: M.D) -> str:
     d.decide(gate["id"], True, note="reviewed; retry with a reset repair budget")
     ok(int(d.node(nid).get("fix_cycles") or 0) == 0,
        "escalation approval resets the repair budget")
-    # R7: approval RESTORES the fix intent - the node goes straight back to
+    # Approval RESTORES the fix intent - the node goes straight back to
     # implementation with the recorded errors as the fix brief. (The old flow
     # re-ran the same deterministic smoke failure once just to re-arm the fix
     # pass, and under max_attempts<=1 that approve->fail->gate loop never
@@ -190,9 +190,9 @@ def f1_bounded_repair_loop(d: M.D) -> str:
     return nid
 
 
-def f2_unknown_root_cause(d: M.D, nid: str):
+def unknown_root_cause(d: M.D, nid: str):
     """A regressed node may honestly blame no registered assumption."""
-    M.section("F2: root_cause note='unknown' is a legal terminal answer")
+    M.section("root_cause note='unknown' is a legal terminal answer")
     out = M.nx(d, "stage_launch")
     stg = d.state()["tasks"][-1]["subject"]["stage"]
     M.w_launch(d, out, stg, job="job-f2")
@@ -218,13 +218,13 @@ def f2_unknown_root_cause(d: M.D, nid: str):
     with_root_cause("unknown")
     r = d.submit(out["task"])
     ok(r["kind"] == "accepted",
-       f"the literal honest-unknown must be submittable (F2), got {r}")
+       f"the literal honest-unknown must be submittable, got {r}")
     ok(d.node(nid)["verdict"] == "regressed", "the node concluded regressed")
 
 
-def f19_retired_workdir_and_revive(d: M.D, nid: str):
+def retired_workdir_and_revive(d: M.D, nid: str):
     """Pruning tolerates a deleted worktree; revive re-proves the closure."""
-    M.section("F19: retired nodes relax to snapshot-only; revive re-proves")
+    M.section("retired nodes relax to snapshot-only; revive re-proves")
     M.drive_close(d, "R001", retire=[{"node": nid, "reason": "pruned",
                                       "note": "l" * 70}])
     node = d.node(nid)
@@ -234,7 +234,7 @@ def f19_retired_workdir_and_revive(d: M.D, nid: str):
     ok(not wd.exists(), "the pruned worktree is gone")
     # The old membership assertion here ({task,gate,waiting,done}) admitted
     # EVERY possible compute_next return - the only falsifier was an exception,
-    # which fails the suite anyway. The regression F19 guards is a stall, so
+    # which fails the suite anyway. The regression this guards is a stall, so
     # assert PROGRESS: the sweep must surface actionable work, and a second
     # sweep must be deterministic about it.
     out = d.next()
@@ -257,8 +257,8 @@ def f19_retired_workdir_and_revive(d: M.D, nid: str):
        "a refused revival leaves the node retired")
 
 
-def f21_worktree_gitdir_pointer_excluded():
-    """v10.1 walker regression: a linked-worktree `.git` FILE (gitdir pointer)
+def worktree_gitdir_pointer_excluded():
+    """Closure-walker regression: a linked-worktree `.git` FILE (gitdir pointer)
     and any file named like a prune dir must stay out of the execution
     closure - its bytes are git-owned and legally change on worktree repair."""
     import tempfile
@@ -274,19 +274,19 @@ def f21_worktree_gitdir_pointer_excluded():
         (root / "cache.pyc").write_bytes(b"\x00")
         rels = [rel for _p, rel in evalid._workarea_files(root, [])]
         ok(rels == ["src/model.py"],
-           f"F21: worktree .git pointer / .evo / .pyc excluded from closure walk: {rels}")
+           f"worktree .git pointer / .evo / .pyc excluded from closure walk: {rels}")
         # nested node workarea: the whole subtree belongs to the other node
         (root / "workareas" / "n2").mkdir(parents=True)
         (root / "workareas" / "n2" / "train.py").write_text("y = 2", encoding="utf-8")
         nested = [(root / "workareas" / "n2").resolve()]
         rels = [rel for _p, rel in evalid._workarea_files(root, nested)]
         ok(rels == ["src/model.py"],
-           f"F21: nested node workarea pruned from the closure walk: {rels}")
+           f"nested node workarea pruned from the closure walk: {rels}")
 
 
-def d1_task_abandonment_has_real_semantics():
-    """v10.2a livelock: 'abandoning' a task whose subject is a round (or
-    nothing) was a silent no-op, so the scheduler recreated an identical task
+def task_abandonment_has_real_semantics():
+    """Livelock guard: 'abandoning' a task whose subject is a round (or
+    nothing) must not be a silent no-op, or the scheduler recreates an identical task
     with attempts=0 - under full_auto + on_stuck=abandon the escalation gate
     auto-rejected and the loop ran forever with unbounded task/gate growth."""
     M.section("D1: abandoning a subjectless task must change the world")
@@ -312,7 +312,7 @@ def d1_task_abandonment_has_real_semantics():
     eng._abandon_task_subject(close, "attempts exhausted")
     ok(eng.st["round_status"] == "running" and not eng.st["rounds"]
        and any(ev == "close_round_task_cancelled" for _a, ev, _d in events),
-       f"R8: with an ACTIVE lane the force-close is refused - the doomed close is "
+       f"with an ACTIVE lane the force-close is refused - the doomed close is "
        f"cancelled (scheduler re-mints it once the lanes finish): {events}")
     done_lane = {"id": "L001", "round": "R003", "status": "done"}
     close2 = {"id": "T2", "type": "close_round", "status": "cancelled",
@@ -357,15 +357,15 @@ def d1_task_abandonment_has_real_semantics():
 
 def main():
     d = fresh_project()
-    f21_worktree_gitdir_pointer_excluded()
-    d1_task_abandonment_has_real_semantics()
-    f8_malformed_hold_fails_closed(d)
-    f14_evidence_min_new_source(d)
-    nid = f1_bounded_repair_loop(d)
-    f2_unknown_root_cause(d, nid)
-    f19_retired_workdir_and_revive(d, nid)
+    worktree_gitdir_pointer_excluded()
+    task_abandonment_has_real_semantics()
+    malformed_hold_fails_closed(d)
+    evidence_min_new_source(d)
+    nid = bounded_repair_loop(d)
+    unknown_root_cause(d, nid)
+    retired_workdir_and_revive(d, nid)
     d.doctor_clean("end of defect regressions")
-    print(f"V10 DEFECT REGRESSIONS GREEN: {CHECKS} checks passed")
+    print(f"LIVE ENGINE REGRESSIONS GREEN: {CHECKS} checks passed")
 
 
 if __name__ == "__main__":

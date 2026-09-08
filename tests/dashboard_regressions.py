@@ -1,10 +1,10 @@
-"""v12.1 regressions - dashboard redesign.
+"""Dashboard regressions.
 
 Static pins (always run): the page keeps every anchor the engine drives and
 the mock/stress drives assert (tab markup, canvas id, payload marker, verdict
-colour bindings, glossary vocabulary, escaping helpers), plus the v12.1
-additions (vital-signs band, attention strip, per-cell records, level of
-detail, minimap, measured text budgets).
+colour bindings, glossary vocabulary, escaping helpers), plus the
+vital-signs band, attention strip, per-cell records, level of detail,
+minimap and measured text budgets.
 
 Visual audit (runs only when a headless Chrome/Edge binary and a rendered
 mock repository are both present; otherwise reported as skipped): renders the
@@ -61,7 +61,7 @@ def static_pins() -> None:
                    "pre-registered stop audit", "training-seed contract", "targeted ablation",
                    "cheap evidence plan", "causal settlement", "fitText"):
         check(needle in TPL, f"auditable evidence surface kept: {needle}")
-    # v12.1 additions
+    # overview surfaces
     check('id="kpis"' in TPL and 'id="strip"' in TPL and 'id="records"' in TPL and 'id="topAlerts"' in TPL,
           "vital-signs band, attention strip and records strip exist")
     check('id="minimap"' in TPL and "function minimapDraw" in TPL and "function clampView" in TPL,
@@ -142,7 +142,7 @@ def visual_audit() -> None:
         return
     payload = re.search(r"const DATA = (.*); /\*END-DATA\*/", repo_html.read_text(encoding="utf-8")).group(1)
     page = edash._fill_template("visual audit", payload)
-    work = HERE / "out" / "v121_visual"
+    work = HERE / "out" / "dashboard_visual"
     work.mkdir(parents=True, exist_ok=True)
     for name, size, setup in STATES:
         doc = page.replace("<head>", "<head>" + PROBE_HEAD, 1).replace(
@@ -167,7 +167,7 @@ def visual_audit() -> None:
 def main() -> None:
     static_pins()
     visual_audit()
-    done("V12.1 DASHBOARD REGRESSIONS")
+    done("DASHBOARD REGRESSIONS")
 
 
 if __name__ == "__main__":

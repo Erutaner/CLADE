@@ -11,13 +11,13 @@ Design constraints (why this file looks the way it does):
     fights the user's interaction.
   - Layout is computed in the browser (layered DAG by generation, barycenter
     ordering) from an embedded JSON snapshot; Python only assembles facts.
-  - Visual language (v9, refined in v12.1): a natural-history PHYLOGENY
+  - Visual language: a natural-history PHYLOGENY
     plate - generations as era strata, lineages as tapered organic branches
     (width = subtree size), extinct lineages carry the dagger and fade like
     fossils, the frontier is the gold-crowned living tip, platform edges are
-    dashed symbiont links. v12.1 adds a vital-signs band (headline KPIs +
+    dashed symbiont links. A vital-signs band (headline KPIs +
     trend), an attention strip (gates, stagnation, floors, resource pressure)
-    and a per-cell records strip above the tabs; every card text is measured
+    and a per-cell records strip sit above the tabs; every card text is measured
     and truncated against its neighbours so nothing overprints, and the legend
     collapses so overlays never collide on narrow screens.
 """
@@ -42,12 +42,11 @@ def rendered_marker_path(store):
 
 def marker_value(st: dict, g: dict, reg: dict, cfg: dict, *,
                  fingerprint: str | None = None) -> str:
-    """R9 audit: the page embeds the live policy/tempo projection, but the
-    staleness marker hashed only state/graph/registry - a config-only preset
-    change therefore never re-rendered, and the browser showed the old tempo
-    for as long as an ordinary card stayed open. The marker now carries every
-    authoritative input the page displays: the state triple AND the config
-    projection."""
+    """The page embeds the live policy/tempo projection, so the staleness
+    marker carries every authoritative input the page displays: the state
+    triple AND the config projection. A marker over state/graph/registry
+    alone would never re-render a config-only preset change, and the browser
+    would show the old tempo for as long as an ordinary card stayed open."""
     import hashlib
     fp = fingerprint or eutil.state_fingerprint(st, g, reg)
     pol = hashlib.sha256(json.dumps(
@@ -198,7 +197,7 @@ def _assessment_view(raw) -> dict:
     out = _copy_fields(raw, (
         "verdict", "display_delta_pct", "claim_kind", "overall_contract_pass",
         "project_goal_attained", "effect_contract_status", "mechanism_contract_status",
-        "scientific_promotion_status", "configured_min_target_groups_improved",
+        "probe_contract_status", "scientific_promotion_status", "configured_min_target_groups_improved",
     ))
     scalar_fields = ("cell", "metric", "result_key", "reference_node", "new", "reference",
                      "delta", "lower", "upper", "status", "goal_threshold", "goal_lower",
@@ -250,26 +249,31 @@ def _assessment_view(raw) -> dict:
     if effect.get("status") or effect["targets"] or effect["guardrails"] \
             or resources.get("axes") or resources.get("status"):
         out["effect_contract"] = effect
+    # The causal status (ablation) and the probe's answer (information) are
+    # two blocks; the probe block carries the rule and its bounded observations.
     mechanism_raw = raw.get("mechanism_contract") \
         if isinstance(raw.get("mechanism_contract"), dict) else {}
-    mechanism = {}
-    if mechanism_raw:
-        mechanism = _copy_fields(mechanism_raw, (
+    mechanism = _copy_fields(mechanism_raw, ("status", "reason", "source")) if mechanism_raw else {}
+    probe_raw = raw.get("probe_contract") if isinstance(raw.get("probe_contract"), dict) else {}
+    probe = {}
+    if probe_raw and str(probe_raw.get("status") or "") not in ("", "not_registered"):
+        probe = _copy_fields(probe_raw, (
             "status", "field", "aggregation", "aggregate", "comparison", "threshold",
             "lower", "upper", "reason"))
-        raw_mechanism_values = mechanism_raw.get("values") \
-            if isinstance(mechanism_raw.get("values"), list) else []
-        mechanism_values = [value for raw_value in raw_mechanism_values
-                            if (value := _finite(raw_value)) is not None]
-        mechanism["observation_count"] = len(mechanism_values)
-        mechanism["values"] = mechanism_values[:32]
-        mechanism["truncated"] = len(mechanism_values) > 32
-    for row in ([effect, resources, mechanism] + list(effect["targets"].values()) +
+        raw_probe_values = probe_raw.get("values") if isinstance(probe_raw.get("values"), list) else []
+        probe_values = [value for raw_value in raw_probe_values
+                        if (value := _finite(raw_value)) is not None]
+        probe["observation_count"] = len(probe_values)
+        probe["values"] = probe_values[:32]
+        probe["truncated"] = len(probe_values) > 32
+    for row in ([effect, resources, mechanism, probe] + list(effect["targets"].values()) +
                 list(effect["guardrails"].values()) + list(resources["axes"].values())):
         if row.get("reason") is not None:
             row["reason"] = _text(row.get("reason"), 480)
     if mechanism:
         out["mechanism_contract"] = mechanism
+    if probe:
+        out["probe_contract"] = probe
     return out
 
 
@@ -284,7 +288,7 @@ def _focus_view(cfg: dict, st: dict) -> dict:
     # the engine will accept.
     lanes = [row for row in (st.get("lanes") or []) if isinstance(row, dict)
              and econfig.lane_purpose(row) not in econfig.INSTRUMENTAL_PURPOSES
-             # (final audit C1) mirror candidate_lanes_for_mix exactly: a scout
+             #  mirror candidate_lanes_for_mix exactly: a scout
              # neither dilutes the share nor discharges a starved direction.
              and econfig.lane_purpose(row) not in econfig.EXPLORATORY_PURPOSES]
     current_round = str(st.get("current_round") or "")
@@ -488,7 +492,7 @@ def _infrastructure_view(store, cfg: dict, st: dict, g: dict, running_stages: di
 
 
 def _cell_records_with_provisional(g: dict, cfg: dict, st: dict | None) -> list[dict]:
-    """v11.1 P6: the dashboard's record rows carry the winner's-curse label too."""
+    """The dashboard's record rows carry the winner's-curse label too."""
     rows = egraph.cell_records(g, cfg)
     idx = egraph.by_id(g)
     eligible = [n for n in g.get("nodes", []) if egraph.observation_eligible(n, cfg)]
@@ -599,7 +603,14 @@ def _data(store, g: dict, cfg: dict, st: dict, reg: dict, *,
                 "descendants", "descendants_improved", "best_descendant_primary")),
             "evaluation": _assessment_view(n.get("evaluation_summary")),
             "mechanism_status": n.get("mechanism_status"),
+            "probe_result": n.get("probe_result") if isinstance(n.get("probe_result"), dict) else None,
+            "mechanism_label": egraph.mechanism_label(n),
             "scientific_promotion_status": n.get("scientific_promotion_status"),
+            "promotion_label": egraph.promotion_label(n),
+            "ablation_lane": egraph.open_ablation_lane(n, st),
+            "ablation_lane_opened_by": n.get("ablation_lane_opened_by"),
+            "ablation_pending": _copy_fields(n.get("ablation_pending"), ("reason",)),
+            "active_claim": n.get("active_claim"),
             "frontiers": {"inheritance": n["id"] in frontier_set,
                           "scientific": research_mode and n["id"] in frontier_set,
                           "performance": n["id"] in performance_set},
@@ -669,8 +680,7 @@ def _data(store, g: dict, cfg: dict, st: dict, reg: dict, *,
         "evidence_policy": {
             "training_replication": _copy_fields(evidence_policy.get("training_replication"),
                                                   ("mode", "planned_runs", "aggregation")),
-            "ablation": _copy_fields(evidence_policy.get("ablation"),
-                                      ("mode", "max_costly_runs_per_node")),
+            "ablation": _copy_fields(evidence_policy.get("ablation"), ("budget_multiple",)),
             "scaling_mode": evidence_policy.get("scaling_mode") or "off",
         },
         "slots": infrastructure["slots"],
@@ -685,9 +695,11 @@ def _data(store, g: dict, cfg: dict, st: dict, reg: dict, *,
         "cell_records": _cell_records_with_provisional(g, cfg, st),
         "noise_floors_effective": {
             str(c.get("id") or ""): {"width": econfig.noise_floor(cfg, str(c.get("id") or ""), st),
-                                     "source": econfig.noise_floor_source(cfg, str(c.get("id") or ""), st)}
+                                     "source": econfig.noise_floor_source(cfg, str(c.get("id") or ""), st),
+                                     "win_band": econfig.decision_floor(cfg, str(c.get("id") or ""), st)}
             for c in egraph.decision_cells(cfg)
             if econfig.noise_floor_source(cfg, str(c.get("id") or ""), st) != "none"},
+        "noise_floor_multiple": econfig.noise_floor_multiple(cfg),
         "evaluation_contract": contract,
         "focus_service": _focus_view(cfg, st),
         "resources": resources,
@@ -759,7 +771,7 @@ _TEMPLATE = """<!doctype html>
   --enabled:#54b8e0; --baseline:#7fa3e8; --pending:#8f8a7d; --retired:#5b564c;
   --promising:#b58cf5;
   --dominant:#3cc9b0;
-  --specialist:#38bdf8; --tradeoff:#f59e0b;
+  --specialist:#38bdf8; --tradeoff:#f59e0b; --partial:#9ca3af;
   --frontier:#d9b45b; --performance:#c084fc; --accent:#d9b45b; --scout:#d68fb8;
   --serif:Georgia,'Iowan Old Style','Palatino Linotype','Book Antiqua','Times New Roman',serif;
   --sans:-apple-system,"Segoe UI",Roboto,"Helvetica Neue",Arial,sans-serif;
@@ -1101,7 +1113,7 @@ const DATA = @@DATA@@; /*END-DATA*/
 "use strict";
 const VC = {improved:"var(--improved)",baseline:"var(--baseline)",regressed:"var(--regressed)",
   inconclusive:"var(--inconclusive)",promising:"var(--promising)",dominant:"var(--dominant)",
-  specialist:"var(--specialist)",tradeoff:"var(--tradeoff)",failed:"var(--failed)",
+  specialist:"var(--specialist)",tradeoff:"var(--tradeoff)",partial:"var(--partial)",failed:"var(--failed)",
   screened_out:"var(--screened-out)",enabled:"var(--enabled)",pending:"var(--pending)",retired:"var(--retired)"};
 const GLYPH = {baseline:"▣",root:"◆",variant:"●",hybrid:"⬢",platform:"▦"};
 const ROLE_TAXON = {baseline:"progenitor",root:"new phylum",variant:"species",hybrid:"cross",platform:"symbiont"};
@@ -1147,6 +1159,7 @@ const GLOSS={
   dominant:"At least as good everywhere and better somewhere, compared to its reference.",
   specialist:"Better on some tasks and worse on others; kept under that label.",
   tradeoff:"Gains in one area paid for by losses in another.",
+  partial:"Some claimed cells rose, but the claim's own vote (the configured share of its groups) did not pass; not a parent as claimed - a post-hoc claim can re-scope it.",
   noninferior:"Not meaningfully worse than the reference within the declared margin.",
   pending:"Waiting; not yet measured or judged.",
   enabled:"A platform node whose shared service is up and usable by other nodes.",
@@ -1187,7 +1200,7 @@ const GLOSS={
   uncertain:"The evidence is too noisy to call either way.",
   unknown:"The evidence is too noisy or incomplete to call either way.",
   unclear:"The evidence is too noisy or incomplete to call either way.",
-  unverified:"Reported but not yet checked by the engine.",
+  deferred:"The mechanism was never instrumented on this node: the effect settled at program level and the causal question stays open until a targeted ablation answers it.",
   pending_evidence:"A verdict is waiting on measurements that have not arrived yet."};
 const W=226,H=80,GX=314,GY=108,SVGNS="http://www.w3.org/2000/svg";
 const $=s=>document.querySelector(s);
@@ -1213,7 +1226,7 @@ const words=s=>String(s==null?"":s).replace(/_/g," ");
 const when=s=>String(s||"").replace("T"," ").slice(0,19);
 const statusClass=s=>["passed","healthy","met","improved","noninferior","confirmed","ready","attained","dominant","yes"].includes(String(s))?"ok":
   ["failed","invalid","exhausted","blocked","refuted","regressed","not_met","no"].includes(String(s))?"fail":
-  ["pressure","stale","uncertain","unknown","inconclusive","unclear","unverified","pending_evidence","tradeoff","specialist"].includes(String(s))?"warn":"info";
+  ["pressure","stale","uncertain","unknown","inconclusive","unclear","pending_evidence","tradeoff","specialist","partial"].includes(String(s))?"warn":"info";
 const tag=(value,label)=>{const tip=GLOSS[String(value)];
   return "<span class='statusTag "+statusClass(value)+"'"+(tip?" title='"+esc(tip)+"'":"")+">"+
     esc(label||words(value||"unknown"))+"</span>"};
@@ -1386,7 +1399,7 @@ $("#strip").classList.toggle("empty",!$("#topAlerts").children.length&&!$("#reco
 /* ---------- legend (collapsible field guide) ---------- */
 (function legend(){
   const rows=[["improved",VC.improved,"improved"],["baseline",VC.baseline,"baseline"],["regressed",VC.regressed,"regressed"],
-    ["specialist",VC.specialist,"specialist"],["tradeoff",VC.tradeoff,"tradeoff"],["inconclusive",VC.inconclusive,"inconclusive"],
+    ["specialist",VC.specialist,"specialist"],["tradeoff",VC.tradeoff,"tradeoff"],["partial",VC.partial,"partial"],["inconclusive",VC.inconclusive,"inconclusive"],
     ["promising",VC.promising,"promising"],["dominant",VC.dominant,"dominant"],["screened out",VC.screened_out,"screened_out"],
     ["failed",VC.failed,"failed"],["platform enabled",VC.enabled,"enabled"],["pending",VC.pending,"pending"]];
   const box=$("#legend");
@@ -1413,10 +1426,10 @@ $("#strip").classList.toggle("empty",!$("#topAlerts").children.length&&!$("#reco
     ["the map",["node","era","round","lane","origin","baseline","seed","extinct"]],
     ["lane intents",["intent","exploit","reform","wildcat","moonshot","hybrid","platform"]],
     ["frontiers and records",["frontier","inheritance_frontier","performance_frontier","record","noise_floor","display_metric","platform_edge"]],
-    ["verdict colors",["improved","regressed","inconclusive","failed","screened_out","promising","dominant","specialist","tradeoff","noninferior","pending","enabled"]],
+    ["verdict colors",["improved","regressed","inconclusive","failed","screened_out","promising","dominant","specialist","tradeoff","partial","noninferior","pending","enabled"]],
     ["runs and checks",["RUN","smoke","rehearsal","canary","repeat","evidence_seal","scout","probe","ablation","maintenance"]],
     ["process and gates",["phase","round_status","gate","hold","escalation","stagnation","level","slots","resources_health","target","guardrail","cell","graph_cycle"]],
-    ["status words",["passed","healthy","met","confirmed","ready","invalid","exhausted","blocked","refuted","not_met","pressure","stale","uncertain","unverified","pending_evidence"]]];
+    ["status words",["passed","healthy","met","confirmed","ready","invalid","exhausted","blocked","refuted","deferred","not_met","pressure","stale","uncertain","pending_evidence"]]];
   let h="<div class='kicker'>Field guide &middot; plain language</div><h2>Glossary<button class='close' title='close glossary'>&times;</button></h2>"+
     "<div class='sub'>Each term on this dashboard, in one sentence.</div>";
   SECTIONS.forEach(s=>{h+="<h3>"+esc(s[0])+"</h3><div class='gl'>";
@@ -1482,7 +1495,8 @@ function renderEvaluation(){
     (n.frontiers.inheritance?tag("met",INHERIT_MARK+" inheritance"):"")+(n.frontiers.performance?tag("info","P◆ performance"):"")+"</div>"+
     "<div class='miniKv'><div class='k'>claim scope</div><div class='v'>"+esc(ev.claim_kind||"not assessed")+"</div>"+
     "<div class='k'>effect contract</div><div class='v'>"+esc(ev.effect_contract_status||"-")+"</div>"+
-    "<div class='k'>mechanism contract</div><div class='v'>"+esc(ev.mechanism_contract_status||n.mechanism_status||"-")+"</div>"+
+    "<div class='k'>causal status (ablation)</div><div class='v'>"+esc(n.mechanism_status||ev.mechanism_contract_status||"-")+"</div>"+
+    "<div class='k'>probe answer (information)</div><div class='v'>"+esc((n.probe_result&&n.probe_result.status)||ev.probe_contract_status||"none registered")+"</div>"+
     "<div class='k'>absolute project goal</div><div class='v'>"+(ev.project_goal_attained==null?"not assessed":(ev.project_goal_attained?"attained":"not yet"))+"</div></div></article>";
   h+="<article class='infoCard'><h3>display-only cell</h3><div class='bigStatus'>"+esc(CONTRACT.display_cell||"-")+" · "+
     esc(display.result_key||DATA.project.primary||"result")+" &nbsp; "+fmt(n.primary)+"</div><p class='muted'>"+
@@ -1497,8 +1511,8 @@ function renderEvaluation(){
     fmt((CONTRACT.decision||{}).min_target_groups_goal_met)+"</div><div class='k'>frozen assumptions</div><div class='v'>"+
     ((CONTRACT.assumptions||[]).length?esc(CONTRACT.assumptions.join(" / ")):"none declared")+"</div></div></article>";
 
-  const effect=ev.effect_contract||{},effectTargets=effect.targets||{},effectGuards=effect.guardrails||{},mechanism=ev.mechanism_contract||{};
-  const hasMechanism=Object.keys(mechanism).length>0&&mechanism.status!=="not_applicable",
+  const effect=ev.effect_contract||{},effectTargets=effect.targets||{},effectGuards=effect.guardrails||{},mechanism=ev.probe_contract||{},causal=ev.mechanism_contract||{};
+  const hasMechanism=Object.keys(mechanism).length>0&&mechanism.status!=="not_applicable",hasCausal=Object.keys(causal).length>0&&causal.status!=="not_applicable",
     hasEffectRows=Object.keys(effectTargets).length>0||Object.keys(effectGuards).length>0,
     effectResourceStatus=((effect.resources||{}).status||""),
     hasEffect=hasEffectRows||!!effect.reason||(!!effect.status&&effect.status!=="not_applicable")||(!!effectResourceStatus&&effectResourceStatus!=="not_applicable");
@@ -1517,12 +1531,13 @@ function renderEvaluation(){
         tag(x.status||"unknown")+(x.reason?"<div class='faint'>"+esc(x.reason)+"</div>":"")+"</td></tr>";});
       h+="</tbody></table></div>";
     }else if(hasEffect){h+="<div class='statusLine'>"+tag(effect.status||effectResourceStatus||"unknown")+"</div>";}
+    if(hasCausal){h+="<div class='callout'><b>Causal status (ablation):</b> "+tag(n.mechanism_status||causal.status||"unknown")+(causal.reason?"<br><span class='muted'>"+esc(causal.reason)+"</span>":"")+"</div>";}
     if(hasMechanism){
-      if(!mechanism.field){h+="<div class='callout'><b>Mechanism:</b> "+tag(mechanism.status||"unknown")+(mechanism.reason?"<br><span class='muted'>"+esc(mechanism.reason)+"</span>":"")+"</div>";}
+      if(!mechanism.field){h+="<div class='callout'><b>Probe (information):</b> "+tag(mechanism.status||"unknown")+(mechanism.reason?"<br><span class='muted'>"+esc(mechanism.reason)+"</span>":"")+"</div>";}
       else{const rule=mechanism.comparison==="between"?"between ["+fmt(mechanism.lower)+", "+fmt(mechanism.upper)+"]":(esc(mechanism.comparison||"threshold")+" "+fmt(mechanism.threshold));
         const probeValues=mechanism.values||[],probeCount=mechanism.observation_count||0;
-        h+="<div class='callout'><b>Mechanism:</b> "+esc(mechanism.field)+" · "+esc(mechanism.aggregation||"aggregate")+" = "+fmt(mechanism.aggregate)+" · n="+probeCount+
-        " · rule "+rule+" · "+tag(mechanism.status||ev.mechanism_contract_status||"unknown")+
+        h+="<div class='callout'><b>Probe (information):</b> "+esc(mechanism.field)+" · "+esc(mechanism.aggregation||"aggregate")+" = "+fmt(mechanism.aggregate)+" · n="+probeCount+
+        " · rule "+rule+" · "+tag(mechanism.status||ev.probe_contract_status||"unknown")+
         (probeValues.length?"<br><span class='muted'>numeric observations"+(mechanism.truncated?" (first "+probeValues.length+" of "+probeCount+")":"")+": "+probeValues.map(fmt).join(", ")+"</span>":"")+
         (mechanism.reason?"<br><span class='muted'>"+esc(mechanism.reason)+"</span>":"")+"</div>";}
     }
@@ -1794,7 +1809,9 @@ function openPanel(id,focusPanel){
   if(n.repeat_measure)kv("repeat measure",n.repeat_measure.waived?"waived - single-run verdict stands":(n.repeat_measure.done?"settled once on the 2-run aggregate ("+n.repeat_measure.cell+")":"APPROVED - awaiting the bought-back repeat ("+n.repeat_measure.cell+")"));
   if(n.focus){const focus=FOCUS_BY_ID[n.focus]||{};kv("user focus",n.focus+(focus.text?" · "+focus.text:""));}
   if(n.purpose==="targeted_ablation")kv("diagnostic performance eligibility",n.performance_frontier_eligible?"yes under current replication policy":"no - promote through a normal candidate");
-  kv("mechanism evidence",words(n.mechanism_status));kv("scientific promotion",words(n.scientific_promotion_status));
+  kv("mechanism evidence",n.mechanism_label||words(n.mechanism_status));kv("scientific promotion",n.promotion_label||words(n.scientific_promotion_status));
+  if(n.ablation_lane)kv("inheritance tax",n.ablation_lane+" open ("+({conclude:"opened by the engine at the parent's conclusion",open_round:"opened by the engine when the round went running (it was pending)",portfolio:"declared in the round portfolio",cli:"opened with evo ablate"}[n.ablation_lane_opened_by]||"opened by the engine")+")");
+  if(n.ablation_pending)kv("inheritance tax",n.ablation_pending.reason);
   const gaps=((n.evaluation||{}).effect_contract||{}).evidence_gaps||[];
   if(gaps.length)kv("unsettled because",gaps.join(" | "));
   kv("extinct",n.retired);kv("era",n.round);kv("lane",n.lane);kv("generation",n.gen);kv("branch",n.branch);

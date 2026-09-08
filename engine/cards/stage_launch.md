@@ -46,11 +46,25 @@ the frozen controller, resource caps and optional continuation gate in
    runs inside the workdir and writes beside its code, the file's real
    location is `<workdir>/<name>` - that workdir-qualified repo-relative path
    is what the landing must be (declare it that way in the spec).
+   Devices: use whatever accelerators are FREE right now, up to the user's
+   allowance (`resource_contract.max_devices`, when set; it counts every
+   accelerator our other running jobs already hold) - whichever cards are
+   idle, not particular ones. Fewer than you planned is fine; run anyway
+   unless the job genuinely cannot run (memory), and record `"devices": <n>`.
+   If you changed anything from the plan (fewer devices, another batch size,
+   another precision), add `"deviation": "<what and why>"` - it is written
+   beside the run and the node, never a veto and never a comparability
+   judgment (the resource axes carry that; a batch you changed shows up
+   there as tokens/FLOPs). If the machine is busy and nothing sensible fits,
+   write `"mode":"busy","note":"<what is occupied, what you checked>"` and
+   submit: the card stays open, no attempt is spent, and after
+   `resource_contract.busy_wait_minutes` of waiting the engine asks the user.
 4. A completed metrics JSON contains this run's `seed` for a preplanned
    workflow, numeric `summary`, actual `usage` for every
-   approved budget unit (usage exceeding cap x the `stage_budget_tolerance`
-   validity band invalidates the evidence; record the real number regardless),
-   and `stop_reason` for adaptive control. Do not write
+   approved budget unit (usage above a declared cap parks the evidence until
+   the cap is corrected on record with `evo amend` and the RUN reconciled;
+   record the real number regardless), and `stop_reason` for adaptive
+   control. Do not write
    `passed`, `KILL` or another self-authored workflow decision: when the stage has
    a continuation gate, the engine computes it from the pre-registered summary
    predicates.

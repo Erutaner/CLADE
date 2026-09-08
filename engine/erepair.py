@@ -1,4 +1,4 @@
-"""Holds and recovery orchestration (v10): scoped brakes, two-phase
+"""Holds and recovery orchestration: scoped brakes, two-phase
 RecoveryCase planning/application, projection invalidation and honest
 abandonment. Uses erecover primitives; owns the engine-side transitions.
 """
@@ -24,11 +24,9 @@ class RepairMixin:
             subject = task.get("subject") or {}
             if task.get("status") not in {"open", "paused"} or task.get("type") == "stage_watch":
                 continue
-            # F18: a recovery hold brakes exactly its reviewed impact set
-            # (base scope + plan-frozen expanded_members). v9.2 short-circuited
-            # every recovery hold into a global freeze, contradicting the
-            # documented scoped-brake design and making the computed impact
-            # set irrelevant for pausing.
+            # A recovery hold brakes exactly its reviewed impact set
+            # (base scope + plan-frozen expanded_members), never a global
+            # freeze - the computed impact set is what pausing is for.
             covered = erecover.hold_covers_subject(
                 hold, self.st, self.g, lane=subject.get("lane"), node=subject.get("node"),
                 run=subject.get("run"), round_=subject.get("round")) \
@@ -45,7 +43,7 @@ class RepairMixin:
                 continue
             # A task-subject gate (escalation) belongs to the task's OWNER:
             # resolve it exactly like the apply-time cancel path does, or an
-            # approved escalation reopens work inside the braked scope (G1).
+            # approved escalation reopens work inside the braked scope.
             gate_lane, gate_node = subject.get("lane"), subject.get("node")
             gate_task_id = str(subject.get("task") or "")
             in_consumers = bool(gate_task_id and gate_task_id in consumer_ids)
@@ -69,7 +67,8 @@ class RepairMixin:
             normalized = erecover.normalize_scope(scope)
             members = erecover.scope_members(normalized, self.st, self.g)
         except ValueError as exc:
-            raise SystemExit(f"[evo] invalid hold scope: {exc}") from exc
+            raise SystemExit(f"[evo] invalid hold scope: {exc}; --scope takes project | round:<id> | "
+                             "lane:<id> | node:<id> | run:<id>") from exc
         hid = self.store.next_id(self.st, "H")
         hold = {"id": hid, "scope": normalized, "members": members, "reason": str(reason),
                 "status": "active", "created_at": eutil.utc_now(), "released_at": None}
@@ -99,7 +98,7 @@ class RepairMixin:
                     self.st, self.g, lane=subject.get("lane"), node=subject.get("node"),
                     run=subject.get("run"), round_=subject.get("round"))
                 if not other:
-                    # R7 audit: a round task whose round CLOSED while it was
+                    # A round task whose round CLOSED while it was
                     # parked is stale forever - resurrecting a close_round
                     # accepted the same round twice (double closed rows,
                     # rounds_max double-count). Cancel it here, symmetrical
@@ -118,7 +117,7 @@ class RepairMixin:
                                              task=record.get("id"),
                                              reason="round closed while parked")
                             continue
-                    # R9 (external audit r6): the engine invariant is AT MOST ONE
+                    # The engine invariant is AT MOST ONE
                     # open agent task (doctor: MULTI_OPEN_TASKS). While this one
                     # was paused a sibling legitimately became the open task, so
                     # blindly reopening produced two competing authority cards.
@@ -129,7 +128,7 @@ class RepairMixin:
                             for t in self.st.get("tasks", [])):
                         record["queued_after_hold"] = True
                         continue
-                    # R8 audit: a launch card whose RUN went back to prepared
+                    # A launch card whose RUN went back to prepared
                     # while paused no longer holds its slot - reopening it
                     # without re-proving the slot let a single-slot platform
                     # accept two concurrent stages. Park it; the pump reopens
@@ -145,7 +144,7 @@ class RepairMixin:
                     record.pop("queued_after_hold", None)
                     if "updated_at" in record:
                         record["updated_at"] = eutil.utc_now()
-                    # R8 audit: a strategy-round consumer reopened after the
+                    # A strategy-round consumer reopened after the
                     # world moved must not present its pre-pause bytes.
                     if "type" in record and record.get("type") == "close_round":
                         self._refresh_close_round_task(record)
@@ -154,9 +153,11 @@ class RepairMixin:
     def release_hold(self, hold_id: str, note: str, *, actor: str = "user") -> dict:
         hold = next((row for row in self.st.get("holds", []) if row.get("id") == hold_id), None)
         if hold is None:
-            raise SystemExit(f"[evo] no hold {hold_id}")
+            raise SystemExit(f"[evo] no hold {hold_id}; 'evo next' names the active hold(s), "
+                             "'evo recover-status' those owned by a recovery")
         if hold.get("status") != "active":
-            raise SystemExit(f"[evo] hold {hold_id} is already {hold.get('status')}")
+            raise SystemExit(f"[evo] hold {hold_id} is already {hold.get('status')}; nothing to release - "
+                             "run 'evo next'")
         if not str(note or "").strip():
             raise SystemExit("[evo] releasing a hold needs --note")
         if hold.get("recovery"):
@@ -179,9 +180,13 @@ class RepairMixin:
                             if row.get("status") in {"planned", "repairing", "replaying", "fork_required"}), None)
         if active_case is not None:
             raise SystemExit(f"[evo] recovery {active_case.get('id')} is still {active_case.get('status')}; "
-                             "complete/abort it (or release its fork-required hold) before planning another")
+                             "finish it before planning another: 'evo recover-status' names the step "
+                             "(recover-apply / 'evo next'), or 'evo recover-abort --recovery "
+                             f"{active_case.get('id')} --reason ...' (a fork-required case is released by "
+                             f"'evo resume --hold {active_case.get('hold')} --note ...')")
         if boundary not in erecover.BOUNDARIES:
-            raise SystemExit(f"[evo] unsupported recovery boundary {boundary!r}")
+            raise SystemExit(f"[evo] unsupported recovery boundary {boundary!r}; --boundary takes one of "
+                             + "|".join(erecover.BOUNDARIES))
         if not str(reason or "").strip():
             raise SystemExit("[evo] recovery planning needs a concrete --reason")
         if boundary == "implementation":
@@ -193,7 +198,8 @@ class RepairMixin:
             scope = erecover.normalize_scope(target)
             members = erecover.scope_members(scope, self.st, self.g)
         except ValueError as exc:
-            raise SystemExit(f"[evo] invalid recovery target: {exc}") from exc
+            raise SystemExit(f"[evo] invalid recovery target: {exc}; --target takes project | round:<id> | "
+                             "lane:<id> | node:<id> | run:<id>") from exc
         required_scope = {
             "bootstrap": "project", "lane": "lane", "spec": "node",
             "implementation": "node", "evaluation": "node", "conclusion": "node",
@@ -206,7 +212,9 @@ class RepairMixin:
         run = self.store.get_run(self.st, members["runs"][0]) if boundary == "stage_evidence" \
             and len(members["runs"]) == 1 else None
         if boundary == "implementation" and (node is None or not node.get("implementation_seal")):
-            raise SystemExit("[evo] target has no active implementation authority to recover")
+            raise SystemExit("[evo] target has no active implementation authority to recover; the node's "
+                             "code is still changed inside its open implement task ('evo next' serves it), "
+                             "or pick --boundary spec")
         if boundary == "implementation" and repair_scope == "evaluation":
             if node.get("role") == "platform":
                 raise SystemExit("[evo] platform nodes have no evaluator implementation; "
@@ -224,12 +232,17 @@ class RepairMixin:
             eval_run = self.store.get_run(self.st, str((node or {}).get("eval_run") or "")) or {}
             if node is None or not node.get("eval_seal") or node.get("scientific_stop") or \
                     eval_run.get("adoption_status") != "adopted" or eval_run.get("evidence_status") != "complete":
-                raise SystemExit("[evo] target has no sealed standard-evaluation authority to recover")
+                raise SystemExit("[evo] target has no sealed standard-evaluation authority to recover; the "
+                                 "evaluation is still live (its evaluate task / eval RUN: 'evo next'), or "
+                                 "pick --boundary implementation|spec")
         if boundary == "conclusion" and (node is None or not node.get("conclusion_seal")
                                            or node.get("status") != "concluded"):
-            raise SystemExit("[evo] target has no active sealed conclusion to recover")
+            raise SystemExit("[evo] target has no active sealed conclusion to recover; only a concluded node "
+                             "has one - for a live node pick --boundary evaluation|implementation|spec")
         if boundary == "stage_evidence" and (run is None or run.get("status") != "finished"):
-            raise SystemExit("[evo] stage_evidence recovery needs one successfully finished RUN")
+            raise SystemExit("[evo] stage_evidence recovery needs one successfully finished RUN; target "
+                             "run:<id> with status finished (settle it first: 'evo run-update --run <id> "
+                             "--status succeeded|failed ...')")
         if boundary == "stage_evidence" and (
                 run.get("adoption_status") != "candidate"
                 or run.get("evidence_status") not in {"incomplete", "invalid"}
@@ -240,7 +253,9 @@ class RepairMixin:
         if boundary == "round" and not any(
                 row.get("id") == scope.get("id") and row.get("closed_at")
                 for row in self.st.get("rounds", [])):
-            raise SystemExit("[evo] round recovery annotates closed history only; the target round is not closed")
+            raise SystemExit("[evo] round recovery annotates closed history only; the target round is not "
+                             "closed - act on its lanes/nodes directly (--boundary lane|spec|...) or wait "
+                             "for the round to close")
         rid = self.store.next_id(self.st, "REC")
         specs = self._spec_index()
         hard = (erecover.hard_descendants(self.g, self.reg, specs, members["nodes"])
@@ -258,7 +273,7 @@ class RepairMixin:
             self.st, node_ids=members["nodes"], run_ids=(members["runs"] if scope["kind"] == "run" else ()))
         if boundary in {"implementation", "evaluation", "conclusion"} and \
                 operational.get("blocks_authority_change"):
-            # R8 audit: the generic hint offered two verbs that are TYPE-
+            # The generic hint offered two verbs that are TYPE-
             # impossible for some blocking shapes (run-reconcile needs
             # finished; stage_evidence needs finished+incomplete). Name the
             # settling verb per RUN, or the operator loops between two
@@ -297,15 +312,15 @@ class RepairMixin:
             external_effects=bool(operational.get("requires_compensation")),
             foundation_consumed=bool(self.g.get("nodes") or self.st.get("phase") != "bootstrap"),
             repair_scope=str(repair_scope or "workflow"))
-        # v9.2 intentionally implements only narrow suffix replay.  Earlier
-        # contracts need a new authority world, not a planner promise whose
-        # apply path does not exist.
+        # Replay is deliberately narrow: only the suffix after the accepted
+        # boundary. Earlier contracts need a new authority world, not a
+        # planner promise whose apply path does not exist.
         if boundary in {"bootstrap", "lane", "spec"}:
             fork = "fork_project" if boundary == "bootstrap" else \
                    "fork_lane" if boundary == "lane" else "fork_node"
             classification = {"supported": False, "boundary": boundary, "actions": [fork],
                               "replay_from": None,
-                              "reason": f"v10 does not rewrite accepted {boundary} authority in place",
+                              "reason": f"the engine does not rewrite accepted {boundary} authority in place",
                               "errors": []}
         baseline_consumed = bool(
             node is not None and node.get("role") == "baseline" and (
@@ -319,7 +334,7 @@ class RepairMixin:
                               "reason": "a baseline consumed by round history defines the project's comparison world"}
         hold = self.create_hold(scope, f"recovery {rid}: {reason}", actor="user", save=False)
         hold["recovery"] = rid
-        # R8 (external audit r5): the documented incident flow is "hold first,
+        # The documented incident flow is "hold first,
         # then recover-plan" - but apply refuses ANY other active hold on the
         # impact, so the operator's own preliminary brake always blocked its
         # own recovery. A preliminary user hold with the exact same scope is
@@ -402,7 +417,7 @@ class RepairMixin:
         # row cited is being invalidated here, so the rows must not keep
         # suppressing knowledge duties (or routing a superseded fix into every
         # future bundle). The re-conclusion writes fresh ones.
-        # R9 (external audit r6): staged, not eager - nothing lands if this
+        # Staged, not eager - nothing lands if this
         # transition raises before save(). The flush itself runs just BEFORE
         # the state commit (fail-closed: an orphan retraction re-asks a
         # disposition; the reverse gap silently kept stale suppressors alive).
@@ -416,12 +431,48 @@ class RepairMixin:
     # live state.  Every consumer today re-reads them only behind a
     # status=="concluded" guard, but "fail closed" must hold as STATE, not as
     # a property of who happens to read it.  Re-conclusion recomputes both.
-    def _clear_conclusion_projection(self, node: dict) -> None:
+    def _clear_conclusion_projection(self, node: dict, recovery_id: str | None = None) -> None:
         for field in ("verdict", "checkpoint", "mechanism_status", "prediction_stats",
                       "ablation_result", "effect_contract_status", "scientific_promotion_status",
                       "maintenance_parity", "maintenance_gain",
-                      "enabled_services"):
+                      "enabled_services",
+                      # a post-hoc claim was priced against the conclusion being cleared
+                      "active_claim", "posthoc_assessment"):
             node.pop(field, None)
+        self._supersede_posthoc_claims(node, recovery_id)
+
+    def _supersede_posthoc_claims(self, node: dict, recovery_id: str | None) -> None:
+        """A post-hoc claim is priced against ONE conclusion. When a recovery
+        re-analyses the node, an approved claim no longer drives anything
+        (`superseded_by_recovery`) and an undecided one loses its gate
+        (`cancelled_by_recovery`); the door stays open - re-file with
+        `evo claim` once the node has re-concluded."""
+        nid = str(node.get("id") or "")
+        rid = str(recovery_id or "") or None
+        for record in self.st.get("posthoc_claims", []):
+            if str(record.get("node") or "") != nid:
+                continue
+            status = str(record.get("status") or "")
+            if status == "approved":
+                record["status"] = "superseded_by_recovery"
+                record["closed_at"] = eutil.utc_now()
+                record["superseded_by"] = rid
+                self.store.event("engine", "posthoc_claim_superseded", claim=record.get("id"), node=nid,
+                                 recovery=rid, exit="re-file with evo claim once the node re-concludes")
+            elif status == "awaiting_user":
+                record["status"] = "cancelled_by_recovery"
+                record["closed_at"] = eutil.utc_now()
+                record["cancelled_by"] = rid
+                for gate in self.st.get("gates", []):
+                    if gate.get("kind") == "posthoc_claim" and gate.get("status") in ("open", "paused") \
+                            and str((gate.get("subject") or {}).get("claim") or "") == str(record.get("id") or ""):
+                        gate["status"] = "cancelled"
+                        gate["resolved_at"] = eutil.utc_now()
+                        gate["decision_note"] = (f"cancelled by recovery {rid or '-'}: the conclusion this claim "
+                                                 "priced is superseded; re-file with evo claim")
+                        gate["held_by"] = []
+                self.store.event("engine", "posthoc_claim_cancelled", claim=record.get("id"), node=nid,
+                                 recovery=rid, exit="re-file with evo claim once the node re-concludes")
 
     def _clear_evaluation_projection(self, node: dict) -> None:
         for field in ("scores", "score_evidence", "evaluation_summary", "effect_resources_realized",
@@ -542,7 +593,7 @@ class RepairMixin:
         self._materialize(task, extra_fields=self._portfolio_fields(rid),
                           **self._round_strategy_context(rid))
         task.pop("refresh_after_recovery", None)
-        # R9 (external audit r6): the CARD/BUNDLE on disk just changed, so the
+        # The CARD/BUNDLE on disk just changed, so the
         # presentation receipt is stale - leaving it made the next `evo next`
         # print "Card unchanged", and an agent still holding the old card in
         # context would keep working from a revoked frontier / an old tempo.
@@ -555,11 +606,14 @@ class RepairMixin:
             task,
             inputs=[(f".evo/rounds/{rid}/PORTFOLIO.json", "what this round planned"),
                     (".evo/views/FRONTIER.md", "frontier after this round"),
-                    (".evo/views/GRAPH.md", "full graph")],
+                    (".evo/views/GRAPH.md", "full graph"),
+                    (".evo/views/FIELD_MAP.md", "per-cell facts: our best, published cap, gap, who claimed the cell and what happened")]
+                   + ([(".evo/profile/FIELD_NOTES.md", "the agent's own per-cell judgment (live levers, dead forms, untried)")]
+                      if (self.store.profile_dir() / "FIELD_NOTES.md").exists() else []),
             extra_blocks=[("This round's lanes and outcomes", self._round_summary_block(rid)),
                           ("Frontiers, origin and per-cell records",
                            ebundle.frontier_block(self.g, self.cfg, self.st))])
-        task.pop("presented_at", None)      # R9: the card changed - never claim "unchanged"
+        task.pop("presented_at", None)      # The card changed - never claim "unchanged"
         task["updated_at"] = eutil.utc_now()
 
     def _refresh_derived_strategy_tasks(self, case: dict, *, include_close_round: bool) -> None:
@@ -646,11 +700,11 @@ class RepairMixin:
         node["eval_done"] = False
         node["evidence_heads"] = {}
         for field in ("eval_run", "probe_evidence_status", "evidence_pending_run",
-                      # R9-002: a retired authority owes no repeat lane either
+                      # A retired authority owes no repeat lane either
                       "repeat_pending_seed", "repeat_eval_run"):
             node.pop(field, None)
         self._clear_evaluation_projection(node)
-        self._clear_conclusion_projection(node)
+        self._clear_conclusion_projection(node, str(case.get("id") or "") or None)
         node["authority_retired_at"] = eutil.utc_now()
         node["authority_retired_by"] = case.get("id")
         self.store.event("engine", "recovery_authority_retired", recovery=case.get("id"),
@@ -660,9 +714,11 @@ class RepairMixin:
         """Exit a recovery honestly; never restore superseded authority bytes."""
         case = next((row for row in self.st.get("recoveries", []) if row.get("id") == recovery_id), None)
         if case is None:
-            raise SystemExit(f"[evo] no recovery {recovery_id}")
+            raise SystemExit(f"[evo] no recovery {recovery_id}; 'evo recover-status' lists cases")
         if case.get("status") not in {"planned", "fork_required", "repairing", "replaying"}:
-            raise SystemExit(f"[evo] recovery {recovery_id} is already terminal ({case.get('status')})")
+            raise SystemExit(f"[evo] recovery {recovery_id} is already terminal ({case.get('status')}); nothing "
+                             "to abort - 'evo recover-status' lists live cases; a new problem gets a new "
+                             "'evo recover-plan'")
         if not str(reason or "").strip():
             raise SystemExit("[evo] recover-abort needs an auditable --reason")
         applied = case.get("status") in {"repairing", "replaying"}
@@ -708,19 +764,20 @@ class RepairMixin:
             self._abandon_node(node, f"recovery {recovery_id} aborted: {reason}")
         elif abandon_node and node is not None and \
                 case.get("status") in {"planned", "fork_required"}:
-            # R9 (external audit r6): on a planned/fork case --abandon-node was
+            # On a planned/fork case --abandon-node was
             # SILENTLY IGNORED (the retirement body was applied-only), so
             # closing a terminal fork diagnosis released the hold and put the
             # damaged authority straight back on the frontier - the opposite
             # of what the operator asked for in the same command.
             if node.get("role") == "baseline":
-                raise SystemExit("[evo] the baseline cannot be abandoned by recover-abort; a damaged "
-                                 "baseline is a project fork (see the printed fork handoff)")
+                raise SystemExit("[evo] the baseline cannot be abandoned by recover-abort; repeat without "
+                                 "--abandon-node (the baseline stays) - a damaged baseline is a project "
+                                 "fork ('evo recover-status' reprints the fork handoff)")
             self._retire_recovery_authority_for_abandonment(node, case, str(reason))
             self._abandon_node(node, f"recovery {recovery_id} aborted: {reason}")
         elif abandon_node and node is None and members.get("lanes") and \
                 case.get("status") in {"planned", "fork_required"}:
-            # R7 audit: a lane-target fork case with NO node yet (sketch/idea
+            # A lane-target fork case with NO node yet (sketch/idea
             # stage) had no working retirement arm at all - the flag was
             # silently ignored, the hold released, and the damaged lane
             # returned to scheduling. Worse, the mid-round fork_lane handoff
@@ -740,7 +797,7 @@ class RepairMixin:
                         t["cancel_reason"] = f"owning lane abandoned: recovery {recovery_id} aborted"
                         t["held_by"] = []
                         t["updated_at"] = eutil.utc_now()
-        # R8 (external audit r5): an open_round paused with this recovery's
+        # An open_round paused with this recovery's
         # refresh marker must NOT come back verbatim - its strategy context
         # still cites the pre-recovery frontier/knowledge (the marker is only
         # consumed on recovery SUCCESS). Cancel it before the hold release
@@ -755,7 +812,7 @@ class RepairMixin:
                 t["updated_at"] = eutil.utc_now()
                 self.store.event("engine", "open_round_refreshed_after_abort",
                                  task=t.get("id"), recovery=recovery_id)
-        # R8 audit: an abandoning abort changed nodes/lanes/frontiers - the
+        # An abandoning abort changed nodes/lanes/frontiers - the
         # rendered views and any open strategy/close card must follow in the
         # same persisted step (the hold release below may reopen them).
         if self._graph_consumer_sig() != graph_sig_before:
@@ -767,19 +824,28 @@ class RepairMixin:
     def apply_recovery(self, recovery_id: str, confirm_digest: str) -> dict:
         case = next((row for row in self.st.get("recoveries", []) if row.get("id") == recovery_id), None)
         if case is None:
-            raise SystemExit(f"[evo] no recovery {recovery_id}")
+            raise SystemExit(f"[evo] no recovery {recovery_id}; 'evo recover-status' lists cases")
         if case.get("status") != "planned":
-            raise SystemExit(f"[evo] recovery {recovery_id} is {case.get('status')}, not planned")
+            raise SystemExit(f"[evo] recovery {recovery_id} is {case.get('status')}, not planned; recover-apply "
+                             "takes a planned case only - 'evo recover-status' names this case's step "
+                             "(repairing/replaying continue through 'evo next'; fork_required follows its "
+                             "printed handoff; 'evo recover-abort' ends it)")
         plan = eutil.read_json(eutil.rpath(self.store.repo, str(case.get("plan_path") or "")), None)
         if not isinstance(plan, dict):
-            raise SystemExit("[evo] recovery plan file is missing or malformed")
+            raise SystemExit("[evo] recovery plan file is missing or malformed; abort the case ('evo "
+                             f"recover-abort --recovery {recovery_id} --reason ...') and plan again with "
+                             "'evo recover-plan'")
         actual_digest = erecover.plan_digest(plan)
         if confirm_digest != case.get("plan_digest") or actual_digest != case.get("plan_digest"):
-            raise SystemExit("[evo] recovery plan digest mismatch; re-plan before applying")
+            raise SystemExit("[evo] recovery plan digest mismatch; pass --confirm exactly the digest 'evo "
+                             f"recover-status' prints for {recovery_id} (a rewritten plan file needs 'evo "
+                             f"recover-abort --recovery {recovery_id} --reason ...' and a fresh 'evo recover-plan')")
         precondition_errors = erecover.verify_head_preconditions(
             plan.get("head_preconditions") or {}, self.st, self.g, self.reg)
         if precondition_errors:
-            raise SystemExit("[evo] recovery plan is stale:\n  - " + "\n  - ".join(precondition_errors))
+            raise SystemExit("[evo] recovery plan is stale; abort it ('evo recover-abort --recovery "
+                             f"{recovery_id} --reason ...') and plan again with 'evo recover-plan':\n  - "
+                             + "\n  - ".join(precondition_errors))
         planned_members = plan.get("members") or {}
         current_hard = (erecover.hard_descendants(
             self.g, self.reg, self._spec_index(), planned_members.get("nodes") or [])
@@ -799,7 +865,7 @@ class RepairMixin:
             "task_exposures": [{"task": row.get("task"), "refs": row.get("refs") or []}
                                for row in value.get("task_exposures") or []],
         }
-        # R11 liveness audit (S1): every fresh card carries the full
+        # Every fresh card carries the full
         # shared-artifact receipt, so ANY task minted in the plan->apply
         # window that renders the recovered producer's artifact becomes a new
         # pending-consumer row - and the strict equality gate then refused
@@ -826,7 +892,8 @@ class RepairMixin:
                 pending_ok = True
         if current_hard != (plan.get("hard_impact") or {}) or not pending_ok or \
                 soft_signature(current_soft) != soft_signature(planned_soft):
-            raise SystemExit("[evo] recovery impact changed after planning; create and review a fresh plan")
+            raise SystemExit("[evo] recovery impact changed after planning; abort this case ('evo recover-abort "
+                             f"--recovery {recovery_id} --reason ...') and review a fresh 'evo recover-plan'")
         if pending_extension:
             self.store.event("engine", "recovery_pending_consumers_extended",
                              recovery=recovery_id, added=pending_extension)
@@ -851,7 +918,9 @@ class RepairMixin:
         boundary = str(case.get("boundary") or "")
         if boundary in {"implementation", "evaluation", "conclusion"} and \
                 (plan.get("operational_impact") or {}).get("blocks_authority_change"):
-            raise SystemExit("[evo] authority replay is blocked until RUN launch/evidence facts are reconciled")
+            raise SystemExit("[evo] authority replay is blocked until RUN launch/evidence facts are reconciled "
+                             "(run-update / run-bind / run-confirm-not-launched / run-reconcile; 'evo next' "
+                             "lists the unsettled RUNs)")
         own_hold = str(case.get("hold") or "")
         impact_lanes = set(str(x) for x in (planned_members.get("lanes") or []) if str(x))
         impact_nodes = set(str(x) for x in (planned_members.get("nodes") or []) if str(x))
@@ -877,7 +946,8 @@ class RepairMixin:
         if blocking_holds:
             raise SystemExit("[evo] recovery apply is blocked by additional active hold(s) "
                              + ", ".join(sorted(blocking_holds))
-                             + "; release them explicitly before changing authority")
+                             + "; release them first ('evo resume --hold <id> --note ...') before "
+                               "changing authority")
         if boundary not in {"frontier", "round"}:
             self._invalidate_recovery_consumers(plan, case)
         if boundary == "stage_evidence":
@@ -890,7 +960,7 @@ class RepairMixin:
             self._supersede_node_knowledge(node, case)
             self._archive_seal(node, "conclusion_seal")
             node["conclusion_seal"] = None
-            self._clear_conclusion_projection(node)
+            self._clear_conclusion_projection(node, recovery_id)
             revision = int(node.get("conclusion_revision") or 0) + 1
             node["outcome_path"] = f".evo/nodes/{node['id']}/OUTCOME_r{revision}.json"
             node["result_doc"] = f".evo/nodes/{node['id']}/NODE_RESULT_r{revision}.md"
@@ -907,7 +977,7 @@ class RepairMixin:
             node["eval_seal"] = None
             node["conclusion_seal"] = None
             self._clear_evaluation_projection(node)
-            self._clear_conclusion_projection(node)
+            self._clear_conclusion_projection(node, recovery_id)
             revision = int(node.get("eval_revision") or 0) + 1
             node["eval_metrics_path"] = f".evo/nodes/{node['id']}/eval/metrics_r{revision}.json"
             node["eval_report_path"] = f".evo/nodes/{node['id']}/eval/EVAL_REPORT_r{revision}.md"
@@ -922,7 +992,9 @@ class RepairMixin:
         elif boundary == "implementation" and node is not None:
             operational = plan.get("operational_impact") or {}
             if operational.get("blocks_authority_change"):
-                raise SystemExit("[evo] implementation recovery is blocked by unresolved RUN/evidence effects")
+                raise SystemExit("[evo] implementation recovery is blocked by unresolved RUN/evidence effects; "
+                                 "settle them first (run-update / run-bind / run-confirm-not-launched / "
+                                 "run-reconcile; 'evo next' lists the unsettled RUNs)")
             repair_scope = str(plan.get("repair_scope") or "workflow")
             self._cancel_recovery_suffix_tasks(node, boundary, recovery_id)
             self._supersede_node_knowledge(node, case)
@@ -934,9 +1006,9 @@ class RepairMixin:
             node["resource_receipt_seal"] = None
             node["resource_receipt_path"] = None
             node["resource_receipt_ready"] = False
-            self._clear_conclusion_projection(node)
+            self._clear_conclusion_projection(node, recovery_id)
             self._clear_evaluation_projection(node)
-            # R10-021: an implementation recovery changes the node's authority
+            # An implementation recovery changes the node's authority
             # generation - a repeat_measure approved against the PREVIOUS
             # generation (and its resume snapshot) must not survive it: the
             # fresh evaluation re-judges near-the-line and reopens its own
@@ -983,7 +1055,9 @@ class RepairMixin:
             self._refresh_derived_strategy_tasks(case, include_close_round=False)
             self._complete_recovery(case, "closed history annotated; not rewritten")
         else:
-            raise SystemExit(f"[evo] boundary {boundary!r} has no safe in-place apply path")
+            raise SystemExit(f"[evo] boundary {boundary!r} has no safe in-place apply path; abort this case "
+                             f"('evo recover-abort --recovery {recovery_id} --reason ...') - the replacement "
+                             "is built as a new lane/node via open_round")
         if (plan.get("operational_impact") or {}).get("requires_compensation"):
             case["compensation"] = {
                 "mode": "retain_external_facts_and_charges",
@@ -1009,7 +1083,7 @@ class RepairMixin:
                                hold, self.st, self.g, node=(run or {}).get("node"),
                                run=(run or {}).get("id"))]
             if other_holds:
-                # R10-022: name the release verb - the cold-start entrances
+                # Name the release verb - the cold-start entrances
                 # (next/status/recover-status) all reuse this reason, and
                 # without the verb they looped between "run next again" and
                 # aborting the whole case.
@@ -1022,7 +1096,7 @@ class RepairMixin:
             if run and run.get("evidence_status") == "complete" and run.get("adoption_status") == "adopted":
                 self._complete_recovery(case, f"same RUN {run.get('id')} evidence reconciled")
                 return None
-            # R11 matrix sweep (M2): the replaying branch has always lazily
+            # The replaying branch has always lazily
             # terminated on an abandoned target; the repairing branch had no
             # such arm, so a case whose completion condition became
             # unsatisfiable (owner abandoned, or the RUN terminally
@@ -1044,7 +1118,7 @@ class RepairMixin:
                     case, status="failed",
                     result=f"target RUN {run.get('id')}'s owner node was abandoned during repair")
                 return None
-            # R10-017: waiting on late materials is a LOCAL condition - the
+            # Waiting on late materials is a LOCAL condition - the
             # case's guidance rides the RUN's standing reconcile notice, and
             # the round close is already blocked by the open evidence
             # obligation. Returning waiting here made one node's material
@@ -1071,7 +1145,7 @@ class RepairMixin:
                            hold, self.st, self.g, node=node.get("id"), lane=node.get("lane"),
                            round_=node.get("round"))]
         if other_holds:
-            # R10-022: same release-verb duty as the repairing branch above
+            # Same release-verb duty as the repairing branch above
             extra = ", ".join(str(row.get("id")) for row in other_holds)
             return {"kind": "waiting",
                     "reason": (f"recovery {case.get('id')} is additionally paused by hold(s) "
@@ -1088,7 +1162,7 @@ class RepairMixin:
         for gate in self.st.get("gates", []):
             if gate.get("status") != "open":
                 continue
-            # R11-017: the abandon_request proposal is NON-BLOCKING by
+            # The abandon_request proposal is NON-BLOCKING by
             # contract (the main loop only surfaces it when nothing else is
             # actionable; evo.py prints that promise) - presenting it here
             # ahead of the replay target's live task inverted the priority
@@ -1104,9 +1178,9 @@ class RepairMixin:
                  if task.get("status") == "stuck"
                  and (task.get("subject") or {}).get("node") == node.get("id")]
         for task in stuck:
-            # R11-012 (belt): "waiting for its escalation decision" is only
+            # "waiting for its escalation decision" is only
             # honest while a DECIDABLE gate exists. A stale-cancelled
-            # escalation used to leave the stuck launch card waiting forever
+            # escalation must not leave the stuck launch card waiting forever
             # for a decision object that no longer exists; with a terminal
             # RUN behind it, no submit shape can ever discharge it - settle
             # it here and let the scheduler re-mint from the node's state.
@@ -1134,7 +1208,7 @@ class RepairMixin:
         for task in self.store.open_tasks(self.st):
             if (task.get("subject") or {}).get("node") == node.get("id"):
                 return self._present_task(task)
-        # R7 audit: this fast path runs BEFORE the main loop's global gate
+        # This fast path runs BEFORE the main loop's global gate
         # scan and one-open-card floor. Creating the recovery's next task
         # while an UNRELATED gate awaits the user, or while an unrelated task
         # legitimately holds the floor, minted a second live authority card

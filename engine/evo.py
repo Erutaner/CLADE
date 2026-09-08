@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""evo - engine CLI for Model Evolution v10.
+"""evo - the CLADE engine CLI.
 
 The agent's whole standing contract:
     evo next     -> ONE task card; do exactly what it says
@@ -87,6 +87,8 @@ def _print(obj: dict, as_json: bool) -> None:
             print("Fix exactly these deficiencies, then submit again. NOT a stopping point.")
     elif kind == "accepted":
         print(f"ACCEPTED {obj['task']} ({obj.get('type')})")
+        for line in obj.get("advice") or []:
+            print(f"  DOOR: {line}")
         print("CONTINUE: run 'evo next' immediately - an accepted task is never a stopping point.")
     elif kind == "waiting":
         print(f"WAITING: {obj.get('reason')}")
@@ -98,7 +100,7 @@ def _print(obj: dict, as_json: bool) -> None:
         print(f"DONE: {obj.get('reason')} (rounds completed: {obj.get('rounds')})")
     else:
         print(json.dumps(obj, ensure_ascii=False, indent=2))
-    # R9 audit: standing obligations ride along with EVERY next output so a
+    # Standing obligations ride along with EVERY next output so a
     # parallel duty (unknown launch, held terminal RUN, plan awaiting the
     # human, open evidence gap) is never invisible behind the primary surface.
     if obj.get("notices"):
@@ -139,7 +141,9 @@ def _preflight_scientific_mutation(store: estore.Store, *, node: str | None = No
             blocked.append(str(hold.get("id") or "?"))
     if blocked:
         raise SystemExit("[evo] active hold(s) block this side effect/authority mutation: "
-                         + ", ".join(blocked))
+                         + ", ".join(blocked)
+                         + "; resume them ('evo resume --hold <id> --note ...') or finish their "
+                           "recovery first ('evo recover-status' names the next step)")
 
 
 def cmd_init(store: estore.Store, args) -> int:
@@ -155,7 +159,7 @@ def cmd_next(store: estore.Store, args) -> int:
     _print(out, args.json)
     if out.get("kind") == "task" and not args.json and out.get("card"):
         if out.get("represented"):
-            # v11: an open task's card was already printed in full when it was
+            # An open task's card was already printed in full when it was
             # first issued; re-printing it on every poll cost 5-8K read tokens
             # per node. The card FILE is the durable source: a fresh agent (or
             # one that lost context) follows the pointer and reads it.
@@ -261,7 +265,8 @@ def cmd_status(store: estore.Store, args) -> int:
                            "charged": charged.get(u, 0.0), "reserved": reserved.get(u, 0.0)}
                       for u, lim in base_limits.items()},
         "views": {"dashboard": ".evo/views/DASHBOARD.html",
-                  "graph": ".evo/views/GRAPH.md", "frontier": ".evo/views/FRONTIER.md"},
+                  "graph": ".evo/views/GRAPH.md", "frontier": ".evo/views/FRONTIER.md",
+                  "field_map": ".evo/views/FIELD_MAP.md"},
         "phase": st.get("phase"),
         "current_round": st.get("current_round"),
         "round_status": st.get("round_status"),
@@ -296,7 +301,7 @@ def cmd_status(store: estore.Store, args) -> int:
         "artifacts": [{"id": a["id"], "node": a.get("node"), "stage": a.get("stage"),
                        "kind": a.get("kind"), "status": a.get("status")}
                       for a in reg.get("artifacts", [])],
-        # R7 audit: holds/recoveries were invisible here, so a fresh session
+        # Holds/recoveries were invisible here, so a fresh session
         # reading status could not see a pending recovery review at all.
         "holds": [{"id": h.get("id"), "scope": h.get("scope"), "reason": h.get("reason")}
                   for h in st.get("holds", []) if h.get("status") == "active"],
@@ -305,6 +310,14 @@ def cmd_status(store: estore.Store, args) -> int:
                         "plan_digest": c.get("plan_digest")}
                        for c in st.get("recoveries", [])
                        if c.get("status") in ("planned", "fork_required", "repairing", "replaying")],
+        "corrections": [{"id": c.get("id"), "node": c.get("node"), "status": c.get("status"),
+                         "from": (c.get("original") or {}).get("status"),
+                         "to": (c.get("corrected") or {}).get("status"), "gate": c.get("gate")}
+                        for c in st.get("corrections", [])],
+        "posthoc_claims": [{"id": c.get("id"), "node": c.get("node"), "status": c.get("status"),
+                            "verdict": (c.get("settlement") or {}).get("verdict"), "gate": c.get("gate")}
+                           for c in st.get("posthoc_claims", [])],
+        "amendments": len(__import__("eamend").read_all(store)),
     }
     if args.json:
         print(json.dumps(out, ensure_ascii=False, indent=2))
@@ -319,7 +332,18 @@ def cmd_status(store: estore.Store, args) -> int:
         print(f"training seeds: {rep.get('mode') or 'unset'}"
               + (f" ({rep.get('planned_runs')} runs, {rep.get('aggregation')})"
                  if rep.get("mode") == "preplanned" else " (one recorded seed; no repeats)"))
-        print(f"targeted ablation: {abl.get('mode') or 'unset'} (manual approval always)")
+        try:
+            k = float(abl.get("budget_multiple") or 0.0)
+        except (TypeError, ValueError):
+            k = 0.0
+        research = econfig.is_research(cfg)
+        print("targeted ablation: budget multiple "
+              + (f"{k:g} (the engine never opens one; 'evo ablate' stays open to people)" if k <= 0 else
+                 f"{k:g} ({k:g} x a winning node's own cost; engineering mode: the engine opens no ablation "
+                 "itself, 'evo ablate' stays open to people)" if not research else
+                 f"{k:g} ({k:g} x a winning node's own cost; the engine opens the ablation after every "
+                 "program-level win, whatever the probe said; its gates follow the autonomy policy inside "
+                 "that allowance, the user decides above it)"))
         if out["resources"]:
             print("resources: " + "; ".join(
                 f"{u} charged={v['charged']:g} reserved={v['reserved']:g} limit={v['effective_limit']:g}"
@@ -332,7 +356,7 @@ def cmd_status(store: estore.Store, args) -> int:
         for h in out["holds"]:
             print(f"active hold: {h['id']} scope={h['scope']} reason={h['reason']}")
         for c in out["recoveries"]:
-            # R8 audit: the uniform "(recover-apply / recover-abort)" tail
+            # The uniform "(recover-apply / recover-abort)" tail
             # pointed fork-classified cases at a command that always refuses;
             # replay the status- and action-correct verbs instead.
             case_row = next((row for row in st.get("recoveries", [])
@@ -340,6 +364,14 @@ def cmd_status(store: estore.Store, args) -> int:
             print(f"recovery: {c['id']} {c['status']} hold={c['hold']} plan={c['plan_path']} "
                   f"digest={c['plan_digest']} - "
                   + esched.Engine._recovery_review_hint(case_row))
+        for c in out["corrections"]:
+            print(f"instrument correction: {c['id']} on {c['node']} {c['status']} "
+                  f"({c['from']} -> {c['to']})" + (f" gate={c['gate']}" if c.get("gate") else ""))
+        for c in out["posthoc_claims"]:
+            print(f"post-hoc claim: {c['id']} on {c['node']} {c['status']} (settled {c['verdict']})"
+                  + (f" gate={c['gate']}" if c.get("gate") else ""))
+        if out["amendments"]:
+            print(f"notebook corrections recorded: {out['amendments']} (ledger .evo/amendments.jsonl)")
         for l in out["lanes"]:
             print(f"lane {l['id']} [{l['intent']}/{l['experiment_purpose']}] {l['status']} "
                   f"idea={l['idea']} node={l['node']}")
@@ -465,7 +497,7 @@ def cmd_run_reconcile(store: estore.Store, args) -> int:
         for error in run.get("evidence_errors") or []:
             print(f"  - {error}")
     elif run.get("evidence_status") == "pending" and not run.get("absorbed"):
-        # R8 (external audit r5): under an active hold the bytes are recorded
+        # Under an active hold the bytes are recorded
         # but authority did NOT move - saying "reconciled" here sent the
         # operator away believing the RUN was settled.
         print("Bytes recorded, but authority is DEFERRED by an active hold: the RUN is not "
@@ -492,7 +524,7 @@ def cmd_hold(store: estore.Store, args) -> int:
 def cmd_resume(store: estore.Store, args) -> int:
     eng = esched.Engine(store)
     hold = eng.release_hold(args.hold, args.note)
-    # R8 audit: the hold's own stdout promised "resume -> run-reconcile
+    # The hold's own stdout promised "resume -> run-reconcile
     # (adopts) -> recover-plan BEFORE next"; printing a bare next here
     # contradicted it and next would have adopted the reviewed RUN first.
     # The deferral now persists on the RUN, so next stays safe either way -
@@ -519,7 +551,7 @@ def cmd_recover_plan(store: estore.Store, args) -> int:
     print(f"digest: {case['plan_digest']}")
     actions = [str(a) for a in (case.get("action") or [])]
     print(f"actions: {', '.join(actions)}")
-    # R8 (external audit r5): a fork classification is a TERMINAL diagnosis -
+    # A fork classification is a TERMINAL diagnosis -
     # this engine deliberately supports only narrow suffix replay, and
     # recover-apply would only mark the case fork_required and error out.
     # Printing the doomed apply command sent the operator into a wall; print
@@ -528,7 +560,7 @@ def cmd_recover_plan(store: estore.Store, args) -> int:
     if forks:
         print(f"This diagnosis is TERMINAL ({', '.join(forks)}): the damaged authority has hard "
               "consumers and cannot be rewritten in place - by design, there is no in-place apply.")
-        # R8 audit: the handoff is rebuilt from the PERSISTED case by one
+        # The handoff is rebuilt from the PERSISTED case by one
         # shared factory - status/next/recover-status replay the same text, so
         # a fresh session no longer depends on this stdout having survived.
         for line in esched.Engine.fork_handoff_lines(case):
@@ -546,7 +578,7 @@ def cmd_recover_apply(store: estore.Store, args) -> int:
     case = esched.Engine(store).apply_recovery(args.recovery, args.confirm)
     print(f"recovery {case['id']}: {case['status']} (boundary={case['boundary']})")
     if case.get("status") == "completed":
-        # R8 audit: this branch is a real stop-releasing step (the hold is
+        # This branch is a real stop-releasing step (the hold is
         # gone, parked work may have reopened) - it must hand the loop back.
         print("The derived/annotated correction is complete and its scoped hold was released. "
               "Run 'evo next'.")
@@ -580,94 +612,28 @@ def cmd_recover_status(store: estore.Store, args) -> int:
 
 
 def _cmd_inject_lane(store: estore.Store, args, *, purpose: str, brief_title: str) -> int:
-    """Mid-round intake for instrumental work: the round portfolio stays the
-    only door for search bets, but a user question (probe) or a discovered
-    defect (maintenance) may enter NOW instead of masquerading as next
-    round's research candidate. Same legality rules as the portfolio door
-    (evalid.injected_lane_errors), full seal/receipt discipline downstream."""
-    import evalid
-    # R7: the hold preflight must see the TARGET - an empty-subject check let
-    # a node-scoped repairing hold be walked straight past (only project-scope
-    # holds match a subjectless probe).
+    """Mid-round intake for instrumental work: the engine's own door
+    (Engine.open_instrumental_lane), reached from the CLI."""
+    # The hold preflight must see the TARGET - an empty-subject check let
+    # a node-scoped repairing hold be walked straight past.
     _preflight_scientific_mutation(store, node=str(args.parent or "") or None)
     eng = esched.Engine(store)
-    st = eng.st
-    if st.get("phase") != "rounds" or st.get("round_status") != "running":
-        raise SystemExit("[evo] mid-round intake needs an open, running round (phase=rounds); "
-                         "declare the lane in the next open_round portfolio instead")
-    rid = str(st.get("current_round") or "")
-    # R8 (external audit r5): the RECEIVING round's own hold must also block
-    # intake - a probe on an old-round parent walked past a current-round
-    # hold, and the resume then reopened the paused close task into the
-    # same deadlock this door exists to avoid.
-    round_holds = erecover.active_holds_for_subject(st, eng.g, round_=rid)
-    if round_holds:
-        raise SystemExit("[evo] the current round is under active hold(s) "
-                         + ", ".join(round_holds)
-                         + "; resume them (or finish their recovery) before injecting a lane")
-    # R7/R8: ANY not-yet-terminal close_round lifecycle (open, paused, stuck -
-    # and a stuck task's escalation gate) means this round is already closing.
-    # An injected lane would make that task permanently unsubmittable
-    # (ROUND_ACTIVE_LANES) while it pre-empts all scheduling - and the
-    # escalation gate's two decisions were both wrong: approve re-opened the
-    # doomed close ahead of the new lane's design task forever, reject
-    # force-closed the round and stranded the just-accepted lane. Cancel the
-    # whole close lifecycle; the scheduler re-mints it once the lane is done.
-    for t in st.get("tasks", []):
-        if t.get("type") == "close_round" and t.get("status") in ("open", "paused", "stuck") \
-                and str((t.get("subject") or {}).get("round") or "") == rid:
-            for gate in st.get("gates", []):
-                if gate.get("status") == "open" and gate.get("kind") == "escalation" \
-                        and str((gate.get("subject") or {}).get("task") or "") == str(t.get("id")):
-                    gate["status"] = "cancelled"
-                    gate["resolved_at"] = eutil.utc_now()
-                    gate["note"] = "superseded: mid-round intake cancelled the stuck close_round task"
-                    store.event("engine", "gate_cancelled", gate=gate.get("id"),
-                                reason="close_round_lifecycle_cancelled")
-            t["status"] = "cancelled"
-            t.pop("_render", None)
-            t["updated_at"] = eutil.utc_now()
-            store.event("engine", "close_round_task_cancelled", task=t.get("id"), round=rid,
-                        reason="mid-round instrumental intake reopened the round's work")
-    name = str(args.name or f"{purpose.replace('_', '-')}-{rid.lower()}")
-    text = str(args.question if purpose == "diagnostic_probe" else args.defect or "").strip()
-    if len(text) < 20:
-        flag = "--question" if purpose == "diagnostic_probe" else "--defect"
-        raise SystemExit(f"[evo] {flag} needs >= 20 chars of substance (it becomes the lane brief)")
-    brief_rel = f".evo/rounds/{rid}/lanes/{name}/BRIEF.md"
-    ln = {"name": name, "intent": "exploit", "experiment_purpose": purpose,
-          "search_origin": "repair", "min_level": 0,
-          "parents": [str(args.parent)], "bottleneck_ids": [], "brief_md": brief_rel}
-    errs = evalid.injected_lane_errors(eng.ctx(), ln, rid)
-    if errs:
-        raise SystemExit("[evo] cannot open this lane:\n  - " + "\n  - ".join(errs))
-    # Containment belt beside the name slug check: the engine authors this file,
-    # so it must be provably inside the managed .evo tree before any write.
-    brief_path = eutil.rpath(store.repo, brief_rel).resolve()
-    evo_root = (store.repo / ".evo").resolve()
-    if evo_root not in brief_path.parents:
-        raise SystemExit(f"[evo] refusing to write a lane brief outside .evo: {brief_path}")
-    if brief_path.exists():
-        raise SystemExit(f"[evo] a lane brief already exists at {brief_rel}; choose another --name "
-                         "(an existing brief is another lane's frozen evidence)")
-    eutil.write_text(eutil.rpath(store.repo, brief_rel),
-                     f"# {brief_title}\n\n## Goal\n{text}\n\n## Constraints\n"
-                     f"- instrumental work: no novelty claim, level 0, manual user gate\n"
-                     f"- parent: {args.parent}\n")
-    lane = eng._create_lane(rid, ln)
-    # actor=engine, matching the lane_created event this rides beside.  Unlike
-    # `evo decide`, which only the user may run and so records actor=user
-    # truthfully, this door is open to the agent by design - recording a
-    # principal the engine cannot observe would put a guess in the audit log.
-    # Authority over instrumental work is exercised at the manual gate, and
-    # gate_decided already records who exercised it.
-    store.event("engine", "instrumental_lane_injected", lane=lane["id"], round=rid,
-                purpose=purpose, parent=str(args.parent), note=text[:200])
+    text = str(getattr(args, "defect", None) if purpose == "maintenance"
+               else getattr(args, "question", None) or "").strip()
+    lane = eng.open_instrumental_lane(purpose=purpose, parent=str(args.parent), text=text,
+                                      brief_title=brief_title, name=args.name, actor="engine",
+                                      opened_by="cli")
     eng.save()
+    rid = str(eng.st.get("current_round") or "")
     print(f"lane {lane['id']} ({purpose}) opened in {rid} on parent {args.parent}.")
-    print("Run 'evo next' - the design task is the next actionable step, and the "
-          "user gate after it is always manual.")
+    print("Run 'evo next' - the design task is the next actionable step; the gate after it "
+          "auto-resolves only inside the pre-authorized allowance, otherwise the user decides.")
     return 0
+
+
+def cmd_ablate(store: estore.Store, args) -> int:
+    return _cmd_inject_lane(store, args, purpose="targeted_ablation",
+                            brief_title="Targeted ablation (settle a causal question on an existing result)")
 
 
 def cmd_probe(store: estore.Store, args) -> int:
@@ -682,11 +648,11 @@ def cmd_maintain(store: estore.Store, args) -> int:
 
 def cmd_waive_repeat(store: estore.Store, args) -> int:
     """USER-only release of an approved repeat_measure whose physical re-run
-    turned out impossible (v11.1 R1 fix). Without this verb, approval had no
+    turned out impossible. Without this verb, approval had no
     exit: the metric door demanded the 2-run aggregate forever, and the only
     escape destroyed a fully-paid node. Waiving keeps the single-run verdict
     exactly as measured, with the whole decision trail on record."""
-    # R7: scoped preflight - the subjectless form walked past node-scoped holds
+    # Scoped preflight - the subjectless form walked past node-scoped holds
     _preflight_scientific_mutation(store, node=str(args.node or "") or None)
     eng = esched.Engine(store)
     note = str(args.note or "").strip()
@@ -695,16 +661,18 @@ def cmd_waive_repeat(store: estore.Store, args) -> int:
                          "cannot be executed (the approval and this release are both decisions)")
     node = next((n for n in eng.g.get("nodes", []) if n.get("id") == str(args.node)), None)
     if node is None:
-        raise SystemExit(f"[evo] node {args.node} does not exist")
+        raise SystemExit(f"[evo] node {args.node} does not exist; 'evo status' lists node ids")
     rm = node.get("repeat_measure")
     if not isinstance(rm, dict):
-        raise SystemExit(f"[evo] node {args.node} has no approved repeat_measure to waive")
+        raise SystemExit(f"[evo] node {args.node} has no approved repeat_measure to waive; nothing to "
+                         "release - run 'evo next' for the current card")
     if rm.get("waived"):
-        raise SystemExit(f"[evo] node {args.node}'s repeat_measure is already waived")
+        raise SystemExit(f"[evo] node {args.node}'s repeat_measure is already waived; nothing left to "
+                         "do - run 'evo next'")
     if node.get("repeat_measure_done"):
         raise SystemExit(f"[evo] node {args.node}'s repeat already settled on the 2-run aggregate; "
-                         "there is nothing left to waive")
-    # R9-002: the engine-run buy-back has real RUNs behind it. A live one must
+                         "there is nothing left to waive - run 'evo next'")
+    # The engine-run buy-back has real RUNs behind it. A live one must
     # settle through the normal RUN verbs first (bind / confirm-not-launched /
     # run-update / run-reconcile) - waiving cannot make an external job
     # disappear. An already-settled repeat evaluation means the second number
@@ -720,8 +688,9 @@ def cmd_waive_repeat(store: estore.Store, args) -> int:
     if node.get("repeat_eval_run"):
         raise SystemExit(f"[evo] node {args.node}'s repeat evaluation already settled "
                          f"(RUN {node.get('repeat_eval_run')}); the second measurement exists - "
-                         "report BOTH runs instead of waiving it away")
-    # R10-021: the resume snapshot was taken when the repeat was approved -
+                         "report BOTH runs in the node's evaluate card instead of waiving it away "
+                         "('evo next' serves it)")
+    # The resume snapshot was taken when the repeat was approved -
     # it belongs to that authority generation. Restoring it over a node whose
     # authority is mid-revision (an active recovery case, or a fix routing in
     # force) overwrote building/fix state with a stale workflow_done and left
@@ -742,14 +711,16 @@ def cmd_waive_repeat(store: estore.Store, args) -> int:
     if active_case is not None:
         raise SystemExit(f"[evo] recovery {active_case.get('id')} ({active_case.get('status')}) covers "
                          f"node {args.node}; its authority is mid-revision and the repeat approval's "
-                         "resume snapshot belongs to the previous generation - finish or abort the "
-                         "case first (an implementation recovery archives the approval itself)")
+                         "resume snapshot belongs to the previous generation - finish the case first "
+                         "('evo recover-status' names its step: recover-apply / 'evo next', or "
+                         f"'evo recover-abort --recovery {active_case.get('id')} --reason ...'); an "
+                         "implementation recovery archives the approval itself")
     if node.get("status") not in ("workflow_done", "stage_ready", "evidence_pending") \
             and node.get("repeat_pending_seed") is not None:
         hint = (" The node is mid-fix: decide the open escalation/fix first (approving the "
                 "retry lands the fix; the restart archives this approval by itself), then "
                 "waive if the repeat is still unwanted." if node.get("status") == "building"
-                else "")
+                else " Run 'evo next' to move the node into one of those states, then waive.")
         raise SystemExit(f"[evo] node {args.node} is {node.get('status')!r}; the pending repeat can "
                          "only be waived from the repeat lane's own states "
                          "(stage_ready/workflow_done/evidence_pending) - another lifecycle owns "
@@ -770,7 +741,7 @@ def cmd_waive_repeat(store: estore.Store, args) -> int:
             node["replica_index"] = resume.get("replica_index")
         node["status"] = str(resume.get("status") or "workflow_done")
         node.pop("repeat_pending_seed", None)
-        # R10 self-audit (H1b) + R11-001: preparing a repeat RUN archived the
+        # Preparing a repeat RUN archived the
         # BASE attempt's landing bytes into that RUN's archive dir, and the
         # repeat's own product registrations stayed DEFERRED - the registry
         # head still describes the base measurement. A waive therefore
@@ -833,7 +804,7 @@ def cmd_waive_repeat(store: estore.Store, args) -> int:
                     store.event("engine", "preexisting_landing_restored",
                                 run=r.get("id"), declared=declared,
                                 reason="repeat waived before completion")
-        # R9-002 pairing (reviewer finding): a failed repeat attempt routes
+        # A failed repeat attempt routes
         # through the ordinary failure channel and may have left a
         # repeat_attempt marker, an open repeat_spend gate, or fix routing
         # fields on the node. Waiving the repeat retires the very spend those
@@ -862,10 +833,10 @@ def cmd_waive_repeat(store: estore.Store, args) -> int:
                 node.pop(field, None)
             node["fix_needed"] = False
             node["fix_note"] = None
-    # R10-015: the repeat lane may also have minted a resource_approval gate
+    # The repeat lane may also have minted a resource_approval gate
     # (deficit while preparing the repeat) or a generic node escalation
     # (repeat attempts exhausted). Both carry the repeat identity in their
-    # subject since R10; waiving retires them with the purchase - approving a
+    # subject; waiving retires them with the purchase - approving a
     # leftover one would widen the project contract (or reset counters) for a
     # spend that no longer exists, and its reject arm would discard the
     # restored node.
@@ -888,7 +859,7 @@ def cmd_waive_repeat(store: estore.Store, args) -> int:
             gate["note"] = "superseded: repeat_measure waived; the purchase this gate guarded no longer exists"
             store.event("engine", "gate_cancelled", gate=gate.get("id"),
                         reason="repeat_measure_waived", node=node["id"])
-    # R11-001: the repeat never produced an adopted measurement - its deferred
+    # The repeat never produced an adopted measurement - its deferred
     # product registrations are discarded with it (the registry head never
     # moved, so there is nothing to roll back).
     dropped = rm.pop("pending_product_registrations", None)
@@ -900,8 +871,8 @@ def cmd_waive_repeat(store: estore.Store, args) -> int:
     rm["waived_at"] = eutil.utc_now()
     node["repeat_measure_done"] = True
     # The presented evaluation card baked the duty block into its saved render;
-    # a waive must strip it AND rewrite the on-disk CARD/BUNDLE (final audit
-    # C21/C27: popping presented_at alone left the stale block on disk), or
+    # a waive must strip it AND rewrite the on-disk CARD/BUNDLE (popping
+    # presented_at alone would leave the stale block on disk), or
     # the card keeps demanding the exact form the validator now refuses.
     for t in eng.st.get("tasks", []):
         if t.get("type") == "evaluate" and (t.get("subject") or {}).get("node") == node["id"] \
@@ -921,7 +892,7 @@ def cmd_waive_repeat(store: estore.Store, args) -> int:
     print(f"repeat_measure on {node['id']} waived; the single-run verdict stands, on record.")
     print("note: waive ONLY when the repeat was never executed - if it ran, report both runs instead "
           "(waiving discards a real measurement).")
-    # R8 audit: this decision unblocks an open evaluate task whose CARD/BUNDLE
+    # This decision unblocks an open evaluate task whose CARD/BUNDLE
     # were just rewritten - hand the loop back to it explicitly.
     refreshed = next((t for t in eng.st.get("tasks", [])
                       if t.get("status") == "open" and t.get("type") == "evaluate"
@@ -939,7 +910,7 @@ def cmd_propose_abandon(store: estore.Store, args) -> int:
     user decides. Before this, the cheapest legal exit from an admitted lane
     was riding it to attempts-exhaustion (up to three full sketch batches),
     and a doomed node could not be stopped mid-flight at all."""
-    # R7: scoped preflight - the subjectless form walked past node/lane-scoped
+    # Scoped preflight - the subjectless form walked past node/lane-scoped
     # holds, letting a proposal (and its later gate decision) abandon a node
     # out from under its active repairing recovery.
     _preflight_scientific_mutation(store, node=str(args.node or "") or None,
@@ -955,13 +926,15 @@ def cmd_propose_abandon(store: estore.Store, args) -> int:
     if args.lane:
         lane = store.get_lane(eng.st, str(args.lane))
         if lane is None or lane.get("status") in ("done", "abandoned"):
-            raise SystemExit(f"[evo] lane {args.lane} does not exist or is already terminal")
+            raise SystemExit(f"[evo] lane {args.lane} does not exist or is already terminal; 'evo status' "
+                             "lists live lanes (a terminal lane needs no abandonment)")
         subject["lane"] = str(args.lane)
         what = f"lane {args.lane} ({lane.get('name') or '?'}, status {lane.get('status')})"
     else:
         node = next((n for n in eng.g.get("nodes", []) if n.get("id") == str(args.node)), None)
         if node is None or node.get("status") in ("concluded", "abandoned"):
-            raise SystemExit(f"[evo] node {args.node} does not exist or is already terminal")
+            raise SystemExit(f"[evo] node {args.node} does not exist or is already terminal; 'evo status' "
+                             "lists live nodes (a terminal node needs no abandonment)")
         if node.get("role") == "baseline":
             raise SystemExit("[evo] the baseline cannot be abandoned; stopping the project is a "
                              "different decision (see rounds_max / round_continue)")
@@ -971,13 +944,14 @@ def cmd_propose_abandon(store: estore.Store, args) -> int:
         if g.get("kind") == "abandon_request" and g.get("status") == "open" \
                 and (g.get("subject") or {}).get("lane") == subject.get("lane") \
                 and (g.get("subject") or {}).get("node") == subject.get("node"):
-            raise SystemExit(f"[evo] an abandon request for this subject is already open ({g.get('id')})")
+            raise SystemExit(f"[evo] an abandon request for this subject is already open ({g.get('id')}); "
+                             f"decide it: 'evo decide --gate {g.get('id')} --approve/--reject'")
     gate = store.new_gate(
         eng.st, "abandon_request", subject,
-        f"The agent proposes STOPPING {what} as a dead direction. Reason: {reason[:300]} "
+        f"The agent proposes STOPPING {what} as a dead direction. Reason: {reason[:300]} -- "
         "Approve = deliberate stop (recorded as a decision, not a failure); "
         "reject = continue the work.")
-    # R9 (external audit r6): materialize the engine report NOW. This gate is
+    # Materialize the engine report NOW. This gate is
     # deliberately non-blocking, so the scheduler only presents it once nothing
     # else is actionable - which for the usual case (the agent proposes a stop
     # while still holding that subject's open task) could be never. The gate
@@ -989,6 +963,212 @@ def cmd_propose_abandon(store: estore.Store, args) -> int:
     print(f"Report for the user (relay it verbatim): {presented.get('card')}")
     print("The user decides at the gate. It never blocks live work: 'evo next' keeps "
           "scheduling normally and presents this request when nothing else is actionable.")
+    return 0
+
+
+def cmd_amend(store: estore.Store, args) -> int:
+    """Correct notebook material on record (eamend): old bytes kept, frozen
+    fields refused, reviewers shown the history."""
+    import eamend
+    eng = esched.Engine(store)
+    eng._assert_frozen_contract()
+    owner = eamend.owner_of(store, eng.st, eng.g, eamend.norm_rel(args.path))
+    holding = erecover.active_holds_for_subject(
+        eng.st, eng.g, lane=owner.get("lane"), node=owner.get("node"))
+    authorized = {str(case.get("hold")) for case in eng.st.get("recoveries", [])
+                  if case.get("status") == "replaying" and case.get("hold")}
+    holding = [h for h in holding if h not in authorized]
+    if holding:
+        raise SystemExit("[evo] this subject is under active hold(s) " + ", ".join(holding)
+                         + "; resume the hold or finish its recovery before correcting its notebook")
+    rec, warnings = eamend.apply(eng, args.path, args.draft, args.reason)
+    eng.save()
+    print(f"amendment {rec['id']} recorded on {rec['path']} ({owner['label']}):")
+    for row in rec.get("changed") or []:
+        print(f"  - {row}")
+    print(f"  reason: {rec['reason']}")
+    print(f"  previous bytes kept at {rec['old_snapshot']}; ledger: {eamend.AMENDMENTS_REL}")
+    for line in warnings:
+        print(f"  note: {line}")
+    if any(line.startswith("open cards re-rendered") for line in warnings):
+        print("Those open cards now read from the corrected file. Run 'evo next'.")
+    else:
+        print("Run 'evo next'.")
+    return 0
+
+
+def cmd_correct_instrument(store: estore.Store, args) -> int:
+    """File an instrument-correction proposal against a settled mechanism verdict.
+
+    The engine checks the mechanics (sealed inputs, legal rule, real change),
+    seals the proposal under the node, recomputes the verdict the corrected
+    rule would give, and mints an independent review task. A FORMULA_ERROR
+    ruling opens a manual user gate; approval re-settles the SAME sealed
+    observations - nothing is rerun, the original conclusion stays on record.
+    """
+    import os as _os
+    import evalid
+    _preflight_scientific_mutation(store, node=str(args.node or "") or None)
+    eng = esched.Engine(store)
+    node = eng.node(str(args.node or ""))
+    if node is None:
+        raise SystemExit(f"[evo] node {args.node} does not exist; 'evo status' lists node ids")
+    proposal_path = eutil.rpath(store.repo, str(args.proposal))
+    data = eutil.read_json(proposal_path, None)
+    if data is None:
+        raise SystemExit(f"[evo] proposal {args.proposal} is missing or not JSON; write it as a JSON "
+                         "object at a repo-relative path and pass that path with --proposal")
+    sess = str(getattr(args, "session", None) or _os.environ.get("EVO_SESSION") or "").strip()
+    if str((eng.cfg.get("policy") or {}).get("critic_isolation") or "") == "strict" and not sess:
+        raise SystemExit("[evo] critic_isolation=strict: file the correction WITH --session (or "
+                         "EVO_SESSION) so the judge's independence can be proven against it")
+    pending = [c for c in eng.st.get("corrections", [])
+               if c.get("node") == node["id"] and c.get("status") in ("review_open", "awaiting_user")]
+    if pending:
+        raise SystemExit(f"[evo] correction {pending[0].get('id')} on {node['id']} is still "
+                         f"{pending[0].get('status')}; one correction at a time per node - "
+                         + (f"decide gate {pending[0].get('gate')} first ('evo decide --gate "
+                            f"{pending[0].get('gate')} --approve/--reject')"
+                            if pending[0].get("status") == "awaiting_user"
+                            else "its independent review card is served by 'evo next' (a fresh session)"))
+    errs = evalid.instrument_proposal_errors(eng.ctx(), node, data)
+    if errs:
+        raise SystemExit("[evo] the proposal is not filable:\n  - " + "\n  - ".join(errs))
+    cid = store.next_id(eng.st, "IC")
+    rel = f".evo/nodes/{node['id']}/corrections/{cid}.json"
+    eutil.write_json_atomic(eutil.rpath(store.repo, rel),
+                            {**data, "id": cid, "filed_at": eutil.utc_now(),
+                             "applicant_session": sess or None})
+    seal = eng._seal([("instrument_proposal", rel)],
+                     upstream=[str((node.get("conclusion_seal") or {}).get("digest") or "")])
+    sealed = evalid.sealed_probe_observations(eng.ctx(), node)
+    meta = evalid._idea_meta(eng.ctx(), node)
+    probe = (meta.get("mechanism_probe") or {}) if isinstance(meta, dict) else {}
+    original_rule = probe.get("decision_rule") or {}
+    original_values = [float(row["values"][str(original_rule.get("field"))]) for row in sealed
+                       if isinstance(row["values"].get(str(original_rule.get("field"))), (int, float))]
+    corrected_values = [float(row["value"]) for row in data["observations"]]
+    corrected = evalid.settle_decision_rule(dict(data["corrected_rule"]), corrected_values)
+    record = {
+        "id": cid, "node": node["id"], "status": "review_open", "created_at": eutil.utc_now(),
+        "proposal_path": rel, "proposal_seal": seal, "applicant_session": sess or None,
+        "original": {"status": node.get("mechanism_status"), "rule": original_rule,
+                     "values": original_values},
+        "corrected": {"status": corrected.get("status"), "rule": dict(data["corrected_rule"]),
+                      "values": corrected_values, "settlement": corrected},
+    }
+    eng.st.setdefault("corrections", []).append(record)
+    metrics_path = str(node.get("eval_metrics_path") or f".evo/nodes/{node['id']}/eval/metrics.json")
+    recompute = [
+        f"- original rule {json.dumps(original_rule, ensure_ascii=False)} over sealed values "
+        f"{original_values} -> {node.get('mechanism_status')}",
+        f"- corrected rule {json.dumps(data['corrected_rule'], ensure_ascii=False)} over the proposal's "
+        f"values {corrected_values} -> {corrected.get('status')}"
+        + (f" ({corrected.get('reason')})" if corrected.get("reason") else ""),
+        "- every proposal input was checked equal to the sealed artifact it cites; the arithmetic "
+        "from those inputs to each corrected value is YOURS to reproduce",
+    ]
+    task = eng._create_task(
+        "instrument_review", {"node": node["id"], "correction": cid},
+        [f".evo/nodes/{node['id']}/corrections/{cid}.review.md"],
+        extra_fields={"NODE": node["id"], "CORRECTION": cid, "PROPOSAL": rel,
+                      "ORIGINAL_STATUS": str(node.get("mechanism_status") or "?"),
+                      "CORRECTED_STATUS": str(corrected.get("status") or "?")},
+        inputs=[(rel, "the correction proposal under review (argument, formula, inputs, values)"),
+                (metrics_path, "the sealed normalized evaluation with its _mechanism_probe block"),
+                (str(node.get("idea_doc") or "").replace(".md", ".meta.json"),
+                 "the frozen probe registration (signal, expect, decision_rule)"),
+                (str(node.get("outcome_path") or f".evo/nodes/{node['id']}/OUTCOME.json"),
+                 "the original settlement and the analyst's note")]
+               + [(row["snapshot"], f"sealed probe artifact for {row['artifact']} (seed {row.get('seed')})")
+                  for row in sealed if row.get("snapshot")],
+        extra_blocks=[("Engine recomputation under the proposal", recompute)])
+    # One live authority card at a time: park behind an open card, the reopen
+    # pump presents the review when the floor is free.
+    other_open = [t for t in eng.st.get("tasks", [])
+                  if t is not task and t.get("status") == "open" and t.get("type") != "stage_watch"]
+    if other_open:
+        task["status"] = "paused"
+        task["queued_after_hold"] = True
+        task["held_by"] = []
+    store.event("agent", "instrument_correction_filed", correction=cid, node=node["id"],
+                proposal=rel, session=sess or None)
+    eng.save()
+    print(f"correction {cid} filed on {node['id']}: {node.get('mechanism_status')} -> "
+          f"{corrected.get('status')} under the corrected rule (engine recomputation).")
+    print(f"proposal sealed at {rel}. Review task {task['id']} "
+          + ("is queued behind the open card" if other_open else "is open")
+          + " - it must be judged by a session that did NOT file this correction "
+            "(spawn a fresh sub-agent; pass its own --session).")
+    print("Run 'evo next'.")
+    return 0
+
+
+def cmd_claim(store: estore.Store, args) -> int:
+    """File a post-hoc claim on a concluded node: a NEW bet priced with the
+    data in hand. The engine settles it from the sealed metrics right away,
+    labels it post-hoc, and opens the user's gate; the original bet's record
+    is never rewritten."""
+    import os as _os
+    import evalid
+    _preflight_scientific_mutation(store, node=str(args.node or "") or None)
+    eng = esched.Engine(store)
+    node = eng.node(str(args.node or ""))
+    if node is None:
+        raise SystemExit(f"[evo] node {args.node} does not exist; 'evo status' lists node ids")
+    data = eutil.read_json(eutil.rpath(store.repo, str(args.proposal)), None)
+    if data is None:
+        raise SystemExit(f"[evo] proposal {args.proposal} is missing or not JSON; write it as a JSON "
+                         "object at a repo-relative path and pass that path with --proposal")
+    pending = [c for c in eng.st.get("posthoc_claims", [])
+               if c.get("node") == node["id"] and c.get("status") == "awaiting_user"]
+    if pending:
+        raise SystemExit(f"[evo] post-hoc claim {pending[0].get('id')} on {node['id']} still awaits the user "
+                         f"(gate {pending[0].get('gate')}); decide it first: 'evo decide --gate "
+                         f"{pending[0].get('gate')} --approve/--reject'")
+    errs = evalid.posthoc_claim_errors(eng.ctx(), node, data)
+    if errs:
+        raise SystemExit("[evo] the claim is not filable:\n  - " + "\n  - ".join(errs))
+    assessment = evalid.assess_posthoc_claim(eng.ctx(), node, data)
+    pid = store.next_id(eng.st, "PC")
+    rel = f".evo/nodes/{node['id']}/claims/{pid}.json"
+    sess = str(getattr(args, "session", None) or _os.environ.get("EVO_SESSION") or "").strip()
+    eutil.write_json_atomic(eutil.rpath(store.repo, rel),
+                            {**data, "id": pid, "filed_at": eutil.utc_now(), "post_hoc": True,
+                             "proposer_session": sess or None})
+    seal = eng._seal([("posthoc_claim", rel)],
+                     upstream=[str((node.get("conclusion_seal") or {}).get("digest") or "")])
+    # Settled in the one shape the gate report and the approval record share:
+    # the claim's verdict / effect and, under the node's LIVE mechanism, the
+    # promotion approval would install.
+    settlement = eng.posthoc_claim_settlement(node, assessment)
+    record = {"id": pid, "node": node["id"], "status": "awaiting_user", "filed_at": eutil.utc_now(),
+              "proposal_path": rel, "proposal_seal": seal, "proposer_session": sess or None,
+              "settlement": settlement}
+    gate = store.new_gate(eng.st, "posthoc_claim", {"node": node["id"], "claim": pid},
+                          f"post-hoc claim {pid} on {node['id']}: settled {assessment.get('verdict')} / effect "
+                          f"{assessment.get('effect_contract_status')}; under the live mechanism "
+                          f"{settlement.get('mechanism_status')} approval sets promotion "
+                          f"{node.get('scientific_promotion_status') or '-'} -> "
+                          f"{settlement.get('scientific_promotion_status')} - approve to let it drive inheritance")
+    record["gate"] = gate["id"]
+    eng.st.setdefault("posthoc_claims", []).append(record)
+    store.event("agent", "posthoc_claim_filed", claim=pid, node=node["id"], gate=gate["id"],
+                verdict=assessment.get("verdict"), effect=assessment.get("effect_contract_status"))
+    eng.save()
+    print(f"post-hoc claim {pid} filed on {node['id']} and settled from the sealed metrics: verdict "
+          f"{assessment.get('verdict')}, effect {assessment.get('effect_contract_status')}, wins on "
+          f"{', '.join(assessment.get('target_wins') or []) or 'no claimed cell'}; judged under the node's "
+          f"live mechanism {settlement.get('mechanism_status') or '-'}, approval would set scientific promotion "
+          f"{node.get('scientific_promotion_status') or '-'} -> {settlement.get('scientific_promotion_status')}.")
+    print(f"Gate {gate['id']} is the user's: the original bet stays on record; approval makes THIS claim "
+          "the one inheritance reads. Run 'evo next' to present it.")
+    return 0
+
+
+def cmd_doors(store: estore.Store, args) -> int:
+    import ecards
+    print("\n".join(ecards.doors_table()))
     return 0
 
 
@@ -1005,9 +1185,9 @@ def cmd_revive(store: estore.Store, args) -> int:
     eng = esched.Engine(store)
     node = egraph.by_id(eng.g).get(args.node)
     if node is None:
-        raise SystemExit(f"[evo] no node {args.node}")
+        raise SystemExit(f"[evo] no node {args.node}; 'evo status' lists node ids")
     if node.get("retire_reason") is None:
-        raise SystemExit(f"[evo] node {args.node} is not retired")
+        raise SystemExit(f"[evo] node {args.node} is not retired (retire_reason is empty); nothing to revive")
     if not (args.note or "").strip():
         raise SystemExit("[evo] revival needs --note with the user's reason")
     # Revival makes a scientific lineage and its artifacts reusable again.
@@ -1024,7 +1204,8 @@ def cmd_revive(store: estore.Store, args) -> int:
     except SystemExit as exc:
         node["retire_reason"] = prev
         raise SystemExit("[evo] cannot revive: the node's active contract no longer verifies "
-                         f"(restore its workdir/worktree and sealed bytes first):\n{exc}") from exc
+                         "(restore its workdir/worktree and the sealed bytes from their .evo/seals "
+                         f"snapshots first - 'evo doctor' lists them - then revive again):\n{exc}") from exc
     egraph.touch(node)
     implementation_digest = str((node.get("implementation_seal") or {}).get("digest") or "")
     revived, skipped_rows = eartifact.revive_for_node(
@@ -1032,12 +1213,12 @@ def cmd_revive(store: estore.Store, args) -> int:
     store.event("user", "node_revived", node=args.node, was=prev, note=args.note,
                 artifacts_revived=revived,
                 artifacts_skipped=[row.get("id") for row in skipped_rows])
-    # R7 audit: the revive used to change graph+registry but leave every
-    # rendered surface at the OLD world - FRONTIER/GRAPH views (the open
-    # round card's declared inputs) still said "(archived - revive first)"
-    # and an already-open open_round card was never re-rendered, so a cold
-    # session read stale state while the live validator judged by the new
-    # one. Refresh both in the same command.
+    # A revive changes graph+registry and must refresh every rendered
+    # surface with it - otherwise FRONTIER/GRAPH views (the open round card's
+    # declared inputs) would still say "(archived - revive first)" and an
+    # already-open open_round card would never be re-rendered, so a cold
+    # session would read stale state while the live validator judged by the
+    # new one. Refresh both in the same command.
     egraph.render_views(store, eng.g, eng.cfg, eng.st)
     refreshed = None
     for t in eng.st.get("tasks", []):
@@ -1049,7 +1230,7 @@ def cmd_revive(store: estore.Store, args) -> int:
           "Future portfolios may extend it again."
           + (f" Open strategy card {refreshed} was re-rendered with the revived node."
              if refreshed else ""))
-    # R8 audit: report what could NOT be restored - registry metadata alone
+    # Report what could NOT be restored - registry metadata alone
     # must not promise consumers bytes that are no longer there.
     for row in skipped_rows:
         print(f"  NOT restored: {row['id']} at {row['uri']!r} ({row['reason']}) - it stays "
@@ -1058,7 +1239,7 @@ def cmd_revive(store: estore.Store, args) -> int:
 
 
 def cmd_revise_infra(store: estore.Store, args) -> int:
-    """User-owned mid-run INFRA_FACTS revision (v11.7).
+    """User-owned mid-run INFRA_FACTS revision.
 
     The bootstrap approval froze the facts as a snapshot, but infrastructure
     knowledge is a hypothesis that reality can refute. Before this verb the
@@ -1098,7 +1279,8 @@ def cmd_revise_infra(store: estore.Store, args) -> int:
     current = einfra.load_facts(store, eng.cfg) or {}
     if ecanary.facts_digest_of(proposed) == ecanary.facts_digest_of(current):
         raise SystemExit("[evo] the proposed facts are byte-equivalent to the approved facts; "
-                         "nothing to revise")
+                         "nothing to revise - edit .evo/profile/INFRA_FACTS_PROPOSED.json with the "
+                         "corrected values, then re-run 'evo revise-infra'")
     changed = sorted(k for k in set(list(current.keys()) + list(proposed.keys()))
                      if current.get(k) != proposed.get(k))
     gate = store.new_gate(
@@ -1119,7 +1301,7 @@ def cmd_revise_infra(store: estore.Store, args) -> int:
 
 def cmd_rebind_artifact(store: estore.Store, args) -> int:
     """User decision: re-freeze one accepted node's input binding to the
-    artifact's CURRENT generation/digest (R11-005).
+    artifact's CURRENT generation/digest.
 
     Plan acceptance freezes generation+digest; when the producer legitimately
     revises and regenerates the same AR id, every launch of this consumer is
@@ -1134,15 +1316,17 @@ def cmd_rebind_artifact(store: estore.Store, args) -> int:
     eng = esched.Engine(store)
     node = egraph.by_id(eng.g).get(args.node)
     if node is None:
-        raise SystemExit(f"[evo] no node {args.node}")
+        raise SystemExit(f"[evo] no node {args.node}; 'evo status' lists node ids")
     if node.get("status") in ("concluded", "abandoned"):
         raise SystemExit(f"[evo] node {args.node} is {node['status']}; rebinding is for nodes with "
-                         "launches still ahead - a settled result never changes its input identity")
+                         "launches still ahead - a settled result never changes its input identity; "
+                         "a new node in the next open_round portfolio consumes the new generation")
     bindings = node.get("artifact_bindings") if isinstance(node.get("artifact_bindings"), dict) else None
     bound = (bindings or {}).get(args.artifact)
     if bound is None:
         raise SystemExit(f"[evo] node {args.node} has no frozen binding for {args.artifact}; "
-                         "rebinding only replaces an existing plan-time freeze")
+                         "rebinding only replaces an existing plan-time freeze - the node's "
+                         "artifact_bindings names what is frozen ('evo artifacts' lists registered ids)")
     art = eartifact.by_id(eng.reg).get(args.artifact)
     if art is None:
         raise SystemExit(f"[evo] artifact {args.artifact} is not in the registry - "
@@ -1150,12 +1334,15 @@ def cmd_rebind_artifact(store: estore.Store, args) -> int:
     if str(art.get("status")) != "available":
         raise SystemExit(f"[evo] artifact {args.artifact} is {art.get('status')} "
                          f"({art.get('stale_reason') or 'producer superseded it'}); recover or revive the "
-                         "producer first - rebinding may only target bytes the registry stands behind")
+                         f"producer {art.get('node')} first ('evo recover-plan --target node:{art.get('node')} "
+                         f"...' / 'evo revive --node {art.get('node')} --note ...') - rebinding may only "
+                         "target bytes the registry stands behind")
     producer = egraph.by_id(eng.g).get(str(art.get("node") or ""))
     if producer is not None and (producer.get("fix_needed")
                                  or producer.get("implementation_revision_pending")):
         raise SystemExit(f"[evo] producer {art.get('node')} is mid-revision; the current generation is "
-                         "itself about to be replaced - wait for it to settle, then rebind once")
+                         "itself about to be replaced - wait for it to settle ('evo next' drives the "
+                         "revision), then rebind once")
     live = [r for r in eng.st.get("runs", [])
             if r.get("node") == node["id"] and not erun.is_terminal(r)]
     if live:
@@ -1208,11 +1395,11 @@ def cmd_autonomy(store: estore.Store, args) -> int:
     raw = eutil.read_json(store.config_path) or {}
     cur = str(((raw.get("policy") or {}).get("autonomy")) or "")
     if args.mode == cur:
-        # R9 audit: the two-step record (intent event -> config write ->
+        # The two-step record (intent event -> config write ->
         # completion event) has a window where the config landed but the
         # completion did not; the documented remedy is re-running the same
-        # command, and this early return used to skip the closure forever -
-        # the ledger then could never distinguish "effect pending" from
+        # command, and this early return must not skip the closure -
+        # the ledger could then never distinguish "effect pending" from
         # "effect landed, record torn". Close any dangling intent here.
         events = store.events()
         dangling = None
@@ -1229,6 +1416,28 @@ def cmd_autonomy(store: estore.Store, args) -> int:
             print(f"supervision is already '{cur}'; the interrupted change record was closed "
                   "(intent had landed without its completion).")
             return 0
+        # A hand edit of .evo/config.json that already shows the live mode left
+        # the ledger behind; this verb is the named exit, so it re-records the
+        # file instead of answering "nothing to change" forever.
+        import eamend
+        import eseal
+        last = None
+        repo = getattr(store, "repo", None)
+        for row in (eamend.read_all(store) if repo else []):
+            if str(row.get("path") or "") == eamend.CONFIG_REL:
+                last = row
+        live = eseal.artifact_digest(repo, eamend.CONFIG_REL) if (repo and last is not None) else None
+        if last is not None and live and live != str(last.get("new_digest") or ""):
+            rec = eamend.record_config_write(
+                store, st, old=(str(last.get("new_digest") or ""), str(last.get("new_snapshot") or "")),
+                reason=str(args.note),
+                changed=[f"policy.autonomy: {cur} (unchanged; the file was edited outside the ledger and is "
+                         "re-recorded as it stands)"])
+            store.save_state(st)
+            print(f"supervision is already '{cur}'; the config file had been edited outside the ledger - "
+                  f"re-recorded as amendment {rec['id']} (ledger: {eamend.AMENDMENTS_REL}). Other "
+                  "corrections in that edit are now on record too; doctor has nothing left to report.")
+            return 0
         print(f"supervision is already '{cur}' - nothing to change.")
         return 0
     cand = copy.deepcopy(raw)
@@ -1237,17 +1446,29 @@ def cmd_autonomy(store: estore.Store, args) -> int:
     econfig.apply_preset(expanded)
     errs = econfig.validate_config(expanded) + econfig.preset_conflicts(cand)
     if errs:
-        raise SystemExit("[evo] refusing the switch - the resulting config would be invalid:\n  - "
+        raise SystemExit("[evo] refusing the switch - the resulting config would be invalid; fix the "
+                         "listed fields in .evo/config.json (world facts via 'evo amend') or choose "
+                         "another mode:\n  - "
                          + "\n  - ".join(errs))
-    # R9 (external audit r6): audit trail FIRST, then the effect. A crash
-    # between the two used to leave full_auto silently in force with no
-    # autonomy_changed event - the mode auto-approved gates while the ledger
+    # Audit trail FIRST, then the effect. A crash
+    # between the two must not leave full_auto silently in force with no
+    # autonomy_changed event - the mode would auto-approve gates while the ledger
     # could not say who authorized it. With the intent event first, the worst
     # crash leaves an intent on record whose effect did not land (visible,
     # re-runnable), never an unexplained live control change.
+    import eamend
+    import eseal
+    before = eseal.snapshot(store.repo, eamend.CONFIG_REL)
     store.event("user", "autonomy_change_intent", note=args.note, to=args.mode, **{"from": cur})
     eutil.write_json_atomic(store.config_path, cand)
     store.event("user", "autonomy_changed", note=args.note, to=args.mode, **{"from": cur})
+    # The same ledger `evo amend` keeps: the latest recorded digest stays the
+    # live file's, so a later in-place amendment diffs against these bytes and
+    # doctor has nothing to report.
+    rec = eamend.record_config_write(store, st, old=before, reason=str(args.note),
+                                     changed=[f"policy.autonomy: {cur} -> {args.mode}"])
+    store.save_state(st)
+    print(f"recorded as amendment {rec['id']} (ledger: {eamend.AMENDMENTS_REL}).")
     meaning = {
         "full_auto": "after the already-required manual bootstrap sign-off, ordinary idea approvals, "
                      "workflow approvals and round continuation auto-approve; project-limit increases "
@@ -1260,7 +1481,7 @@ def cmd_autonomy(store: estore.Store, args) -> int:
         "gated": "every gate now waits for your decision again",
     }[args.mode]
     print(f"supervision: {cur} -> {args.mode} ({meaning}).")
-    # R7: honest tense - the switch takes effect at the NEXT engine
+    # Honest tense - the switch takes effect at the NEXT engine
     # invocation (each invocation loads config once at startup).
     print("effective from the next 'evo' invocation onward.")
     open_gates = [x for x in st.get("gates", []) if x.get("status") == "open"]
@@ -1282,7 +1503,7 @@ def cmd_doctor(store: estore.Store, args) -> int:
     elif problems and args.fix:
         print("re-run 'evo doctor' to confirm the repairs converged; remaining PROBLEM lines "
               "need the verbs named in their messages")
-    # v11.1 P3: one line of measurement provenance - which noise floors are in
+    # One line of measurement provenance - which noise floors are in
     # force and whose authority each one has (config | engine-observed).
     try:
         cfg, st = store.load_config(), store.load_state()
@@ -1294,7 +1515,9 @@ def cmd_doctor(store: estore.Store, args) -> int:
             if src != "none":
                 rows.append(f"{cid}={econfig.noise_floor(cfg, cid, st):g}({src})")
         if rows:
-            print("noise floors in force: " + ", ".join(rows))
+            print("noise floors in force: " + ", ".join(rows)
+                  + (f"; a real win clears {econfig.noise_floor_multiple(cfg):g} x the floor"
+                     if econfig.noise_floor_multiple(cfg) != 1.0 else ""))
     except Exception:  # noqa: BLE001 - informational line; problems already printed
         pass  # an unbootstrapped/broken config already surfaced as PROBLEM rows
     if not problems:
@@ -1315,13 +1538,13 @@ def cmd_render(store: estore.Store, args) -> int:
     egraph.render_views(store, g, cfg, st)
     eartifact.render_view(store, reg)
     edash.render(store, g, cfg, st, reg)
-    print("views rendered: .evo/views/GRAPH.md, FRONTIER.md, ARTIFACTS.md, DASHBOARD.html")
+    print("views rendered: .evo/views/GRAPH.md, FRONTIER.md, FIELD_MAP.md, ARTIFACTS.md, DASHBOARD.html")
     print("open .evo/views/DASHBOARD.html in a browser for the interactive DAG")
     return 0
 
 
 def main() -> int:
-    ap = argparse.ArgumentParser(prog="evo", description="Model Evolution v10 engine")
+    ap = argparse.ArgumentParser(prog="evo", description="CLADE engine")
     ap.add_argument("--repo", required=True, help="path to the evolved project repository")
     ap.add_argument("--session", default=None,
                     help="agent-session id for provenance (or env EVO_SESSION). Recorded on "
@@ -1475,6 +1698,18 @@ def main() -> int:
                    help="required after apply: abandon the partially repaired node honestly")
     s.set_defaults(fn=cmd_recover_abort)
 
+    s = sub.add_parser("ablate",
+                       help="mid-round: open a targeted-ablation lane to settle ONE causal question on a "
+                            "concluded node (the inheritance tax: pay it when the next bet depends on "
+                            "a deferred mechanism, not at birth)")
+    s.add_argument("--parent", required=True,
+                   help="the concluded node whose result left the causal fork open")
+    s.add_argument("--question", required=True,
+                   help="the ONE causal question: which two explanations are live and what "
+                        "changed-component run separates them (>= 20 chars)")
+    s.add_argument("--name", default=None)
+    s.set_defaults(fn=cmd_ablate)
+
     s = sub.add_parser("probe", help="mid-round: open a bounded diagnostic-probe lane for a user question")
     s.add_argument("--parent", required=True, help="the concluded node the question grows out of")
     s.add_argument("--question", required=True, help="the ONE question this probe answers (>= 20 chars)")
@@ -1502,6 +1737,56 @@ def main() -> int:
     s.add_argument("--reason", required=True,
                    help=">= 30 chars: the mechanism that makes this direction dead")
     s.set_defaults(fn=cmd_propose_abandon)
+
+    s = sub.add_parser("amend",
+                       help="correct notebook material on record: a lane BRIEF.md, an accepted idea's "
+                            ".md or amendable .meta.json fields, a node's NODE_SPEC.json caps / smoke "
+                            "plan / rehearsal / not-yet-launched stage commands, or a profile document. "
+                            "Old bytes are kept, frozen fields are refused, reviewers see the history",
+                       description="Copy the file, edit the copy, then: evo amend --path <file> --from "
+                                   "<copy> --reason '...'. History (what was claimed at production "
+                                   "launch, every measurement) is never amended: a wrong settled record "
+                                   "goes through recover-plan or correct-instrument.")
+    s.add_argument("--path", required=True, help="repo-relative file to correct")
+    s.add_argument("--from", dest="draft", default=None,
+                   help="the edited copy to install (recommended). Without it the file must already "
+                        "be edited in place AND have a recorded previous version (a sealed file or an "
+                        "earlier amendment); otherwise history would be lost and the verb refuses")
+    s.add_argument("--reason", required=True, help=">= 20 chars: why this line is corrected")
+    s.set_defaults(fn=cmd_amend)
+
+    s = sub.add_parser("correct-instrument",
+                       help="file a proposal that the FORMULA behind a settled mechanism verdict was "
+                            "wrong; an independent session judges it, the user decides, and the same "
+                            "sealed observations are re-settled under the corrected rule (symmetric: "
+                            "a wrong formula in a passing gate goes through the same door)",
+                       description="Write a JSON proposal: {node, argument (>=120 chars, must hold "
+                                   "whatever the verdict was), original_rule (exact copy of the frozen "
+                                   "mechanism_probe.decision_rule), corrected_rule, formula, inputs "
+                                   "[raw field names in the sealed artifacts], observations "
+                                   "[{artifact, seed, inputs {name: sealed value}, value}] one per sealed "
+                                   "observation}. Every input is checked against the sealed bytes.")
+    s.add_argument("--node", required=True, help="the concluded node whose probe verdict is contested")
+    s.add_argument("--proposal", required=True, help="repo-relative path of the proposal JSON")
+    s.set_defaults(fn=cmd_correct_instrument)
+
+    s = sub.add_parser("claim",
+                       help="file a POST-HOC claim on a concluded node: a new line priced with the data in "
+                            "hand (the original bet stays on record); the engine settles it from the sealed "
+                            "metrics and the user decides whether it drives inheritance",
+                       description="Write a JSON proposal: {node, reason (>=80 chars), claim_scope {kind "
+                                   "generalist|specialist, target_cells, guardrail_cells}, lines [{target_cell, "
+                                   "direction increase|decrease, minimum_worthwhile_delta}], comparator_id "
+                                   "(optional, default the original)}. For a line set too high, not for a "
+                                   "wrong formula (that is correct-instrument) or a wrong fact (evo amend).")
+    s.add_argument("--node", required=True, help="the concluded node the new claim is priced on")
+    s.add_argument("--proposal", required=True, help="repo-relative path of the claim JSON")
+    s.set_defaults(fn=cmd_claim)
+
+    s = sub.add_parser("doors", help="list every side door (amend, ablate, probe, maintain, "
+                                     "correct-instrument, claim, propose-abandon, run facts, hold/recover, "
+                                     "user-only verbs) with the moment each is for")
+    s.set_defaults(fn=cmd_doors)
 
     s = sub.add_parser("log", help="append a freeform note event")
     s.add_argument("--note", required=True)
@@ -1582,7 +1867,7 @@ def main() -> int:
     if rest:
         ap.error("unrecognized arguments: " + " ".join(rest))
     store = estore.Store(Path(args.repo))
-    # R7 external audit: one whole-invocation mutex. The state CAS alone let a
+    # One whole-invocation mutex. The state CAS alone let a
     # concurrent invocation overwrite agent-facing LAUNCH/CARD/BUNDLE files
     # BEFORE losing the CAS - the surviving process then printed the loser's
     # attempt token and the external job could never bind. Two invocations of

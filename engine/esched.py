@@ -1,4 +1,4 @@
-'''Deterministic scheduler core (v10): owns compute_next/submit and the
+'''Deterministic scheduler core: owns compute_next/submit and the
 phase walk. All heavy machinery lives in the mixins; policy tables in eflow.'''
 
 from __future__ import annotations
@@ -62,16 +62,16 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
         ER as handled.  Written eagerly, a transition that raised before save()
         would permanently silence a knowledge duty for an abandon/conclusion
         that never happened.  Events stay eager (they are pure history); this
-        one is not. R11-008: each staged row carries an outbox key - the row
+        one is not. Each staged row carries an outbox key - the row
         rides INSIDE the committed state until its journal append lands, so
-        the commit-then-append window can no longer lose it (see save()).
+        the commit-then-append window cannot lose it (see save()).
         """
         row = dict(rec)
         row.setdefault("outbox_key", secrets.token_hex(8))
         self._pending_error_resolutions.append(row)
 
     def _stage_resolution_retraction(self, node_id: str, *, recovery: str, reason: str) -> None:
-        """R9 (external audit r6): staged like the suppressors so nothing lands
+        """Staged like the suppressors so nothing lands
         when the transition raises before save(). Flush ORDER differs: a
         retraction UN-suppresses knowledge duties, so it is written before the
         state commit (see save()) - the crash window then fails closed (duty
@@ -93,10 +93,10 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
             self.store.retract_error_resolutions(
                 row["node"], recovery=row["recovery"], reason=row["reason"])
             self._pending_resolution_retractions.pop(0)
-        # R11-008: the staged suppressor rows ride INSIDE the state commit as
+        # The staged suppressor rows ride INSIDE the state commit as
         # an outbox - "state committed, appends lost to a mid-command
-        # interruption" used to leave a concluded/abandoned node permanently
-        # owing rows nobody could re-stage (the task was done, the schedule
+        # interruption" would otherwise leave a concluded/abandoned node
+        # permanently owing rows nobody could re-stage (the task was done, the schedule
         # skips terminal nodes, doctor --fix does not write rows). Any outbox
         # left by an interrupted predecessor is merged in front (journal-key
         # dedup makes the replay idempotent).
@@ -115,9 +115,9 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
         # One optimistic transaction: the state revision guards all three files.
         self.store.save_all(self.st, self.g, self.reg)
         # Only after the authoritative write succeeded do the staged
-        # suppressor rows become real. R7: pop each row only after its own
-        # append returned - detaching the whole buffer first meant an append
-        # failure dropped every remaining row with no retry left anywhere.
+        # suppressor rows become real. Pop each row only after its own
+        # append returned - detaching the whole buffer first would let one
+        # append failure drop every remaining row with no retry left anywhere.
         # The outbox stays in the committed state until the NEXT save proves
         # every append landed (dedup above); a second interruption between
         # this commit and these appends therefore replays instead of losing.
@@ -136,14 +136,14 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
             raise SystemExit(
                 "[evo] the confirmed success/resource contract in .evo/config.json changed after "
                 "bootstrap approval. The engine will not run under unapproved rules. Restore the "
-                "confirmed fields, or deliberately restart/reconfigure this fresh v10 project; "
+                "confirmed fields, or deliberately restart/reconfigure this fresh project; "
                 "'evo doctor' reports the mismatch. Supervision changes remain available through "
                 "'evo autonomy'.")
         approved_facts = str(self.st.get("bootstrap_infra_facts_digest") or "")
         facts = einfra.load_facts(self.store, self.cfg) or {}
         facts_digest = ecanary.facts_digest_of(facts)
         if not approved_facts or facts_digest != approved_facts:
-            # C4 (correctness audit): a facts-revision decision writes the
+            # A facts-revision decision writes the
             # file before its state commits; a crash in that window leaves
             # disk bytes ahead of (approve) or behind (rollback) the stamped
             # digest. BOTH torn shapes are identified by the still-open gate
@@ -164,8 +164,10 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
             else:
                 raise SystemExit(
                     "[evo] INFRA_FACTS changed after bootstrap approval. The active resource manifest "
-                    "and any canary evidence are no longer valid; restore the approved facts or "
-                    "deliberately restart/reconfigure this fresh v10 project.")
+                    "and any canary evidence are no longer valid; restore .evo/profile/INFRA_FACTS.json "
+                    "to its approved bytes, then record a deliberate change through 'evo revise-infra' "
+                    "(write .evo/profile/INFRA_FACTS_PROPOSED.json, --note why); a fresh project is "
+                    "the only other route.")
         if self.st.get("infra_revision_pending"):
             # the revised facts are approved but their canary proof is still
             # owed; the launch validators refuse new spend meanwhile, so the
@@ -177,7 +179,9 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                 self.store, record, cfg=self.cfg, st=self.st,
                 require_passed=True, facts=facts)
             if canary_errs:
-                raise SystemExit("[evo] active infrastructure canary evidence is invalid:\n  - "
+                raise SystemExit("[evo] active infrastructure canary evidence is invalid; restore the "
+                                 "receipt files named below to their recorded bytes ('evo doctor' "
+                                 "lists what changed):\n  - "
                                  + "\n  - ".join(canary_errs))
             # The dashboard render later in this same invocation re-validates
             # the identical record against identical bytes; hand it this
@@ -236,7 +240,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
         return (self.cfg.get("project") or {}).get("vcs") == "git"
 
     def _policy_projection_digest(self) -> str:
-        """Digest of everything the strategist card renders from policy (R9).
+        """Digest of everything the strategist card renders from policy.
 
         The tempo controls are legally mutable mid-run; what must not happen is
         the card and the live validator disagreeing about them."""
@@ -256,7 +260,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
             return True
         if node.get("workflow_reuse_seal"):
             return True
-        # R9 (external audit r6): compute that is CURRENTLY BURNING is paid for
+        # Compute that is CURRENTLY BURNING is paid for
         # too. Counting only finished stage RUNs let on_stuck=abandon destroy a
         # node whose training was already bound and running on the platform -
         # the money was spent, the protection just could not see it yet.
@@ -265,9 +269,9 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                    for r in self.st.get("runs", []))
 
     def _capture_commit(self, node: dict) -> None:
-        # v11: the implement-path HEAD spawn this used to make was provably dead
-        # (its write is unconditionally overwritten by
-        # _activate_implementation_selector moments later); the remaining
+        # No HEAD spawn on the implement path: that write would be
+        # unconditionally overwritten by _activate_implementation_selector
+        # moments later. The remaining
         # callers get the memoized status probe, so repeat calls in one
         # invocation cost nothing.
         if not self._git_mode() or not node.get("workdir"):
@@ -315,9 +319,9 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
         """The (lanes, nodes) the imminent scheduling decision consumes, or
         None for a full-web sweep.
 
-        `evo next` used to re-audit EVERY object the project ever created on
-        every call - 48-88% of a steady-state next, growing with project age
-        while per-round work does not. submit/gate/absorb already use scoped
+        Re-auditing EVERY object the project ever created on every call would
+        cost 48-88% of a steady-state next, growing with project age while
+        per-round work does not. submit/gate/absorb already use scoped
         sweeps for the same contract, and doctor owns the full-history audit.
         The full-web tripwire is kept on a CADENCE (every K invocations or T
         minutes, whichever first), persisted OUTSIDE state.json so a no-op next
@@ -358,8 +362,8 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
         if count >= every or stale:
             # Do NOT reset here: the tripwire re-arms only after the full sweep
             # SUCCEEDS (compute_next writes the reset). A full sweep that fails
-            # closed used to have already reset the counter, silently disarming
-            # the tripwire for the next K calls.
+            # closed must not have reset the counter already, or the tripwire
+            # would be silently disarmed for the next K calls.
             return None
         eutil.write_json_atomic(marker_path, {"count": count, "last_full_at": last})
         rid = str(self.st.get("current_round") or "")
@@ -377,8 +381,8 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
         for n in egraph.frontier(self.g, self.cfg, self.st) + egraph.performance_frontier(self.g, self.cfg, self.st):
             nodes.add(str(n.get("id")))
         # Active recoveries: _next_recovery reads and mutates their target
-        # nodes/lanes regardless of round (R1 finding: a replaying recovery's
-        # target was schedulable while out of scope).
+        # nodes/lanes regardless of round (a replaying recovery's target
+        # must never be schedulable while out of scope).
         for case in self.st.get("recoveries", []):
             if case.get("status") in ("planned", "fork_required", "repairing", "replaying"):
                 scope_obj = case.get("scope") or {}
@@ -425,9 +429,9 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
         out = self._compute_next_inner()
         # A deferred abandon_request surfaces exactly when nothing else is
         # actionable: the proposal never blocks live work, and the user still
-        # sees it at the next natural pause. R7: "done" is a natural pause too
-        # - the old waiting-only surface let a project reach DONE with the
-        # proposal permanently buried (deciding it there was a silent no-op).
+        # sees it at the next natural pause. "done" is a natural pause too
+        # - a waiting-only surface would let a project reach DONE with the
+        # proposal permanently buried (deciding it there a silent no-op).
         # A proposal whose subject already ended is cancelled, not presented.
         if out.get("kind") in ("waiting", "done"):
             for gate in list(self.store.open_gates(self.st)):
@@ -447,7 +451,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                             if g.get("kind") == "abandon_request"), None)
             if pending is not None:
                 out = self._present_gate(pending)
-        # R9 audit: every next carries the standing-obligation notices so no
+        # Every next carries the standing-obligation notices so no
         # parallel duty stays invisible behind the single primary surface.
         notices = self._standing_notices()
         if notices:
@@ -469,7 +473,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
         else:
             marker_path = edash.rendered_marker_path(self.store)
             marker = eutil.read_text(marker_path) if marker_path.exists() else ""
-            # R9 audit: compare the FULL marker (state triple + config
+            # Compare the FULL marker (state triple + config
             # projection) so a config-only tempo change re-renders too.
             if marker.strip() != edash.marker_value(self.st, self.g, self.reg, self.cfg,
                                                     fingerprint=after):
@@ -497,12 +501,18 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                               + "; external RUN facts may still be reported/reconciled."
                               + self._hold_waiting_suffix(hold_ids)}
         if st.get("phase") == "done":
-            # R9 audit (root cause): "finished" is a PROVED claim, not a phase
-            # bit. Four audit rounds patched individual done WRITE points
-            # while this READ point returned the verdict unexamined - so a
-            # done written by any path (baseline abandonment, legacy states)
-            # buried live recoveries, running external jobs and open evidence
-            # obligations. One predicate now guards the verdict itself.
+            # "finished" is a PROVED claim, not a phase bit: a done written by
+            # any path must not bury live recoveries, running external jobs,
+            # open evidence obligations - or a correction of the record that
+            # the finished project's report will be read against.
+            pending_gate = next((g for g in self.store.open_gates(st)
+                                 if g.get("kind") in ("instrument_correction", "posthoc_claim")), None)
+            if pending_gate is not None:
+                return self._present_gate(pending_gate)
+            pending_review = next((t for t in self.store.open_tasks(st)
+                                   if t.get("type") == "instrument_review"), None)
+            if pending_review is not None:
+                return self._present_task(pending_review)
             blockers = self._terminal_blockers()
             if blockers:
                 return self._blocked_terminal_surface(blockers)
@@ -510,7 +520,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
             return {"kind": "done", "reason": st.get("terminal_reason") or "evolution finished",
                     "rounds": closed}
         # 1. a gate awaiting the user blocks everything - EXCEPT an
-        # abandon_request (v11 R2): that gate is the agent's own proposal to
+        # Abandon_request: that gate is the agent's own proposal to
         # stop, and its advertised contract is "work stays schedulable until
         # the user decides". Blocking on it would make proposing an early exit
         # strictly worse than riding the dead direction. It is presented only
@@ -518,7 +528,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
         for gate in self.store.open_gates(st):
             if gate.get("kind") == "abandon_request":
                 continue
-            # R9 (external audit r6): a resource gate must be re-settled against
+            # A resource gate must be re-settled against
             # LIVE capacity before it is shown - otherwise a gate whose deficit
             # disappeared (a sibling RUN settled under its cap) keeps preempting
             # all scheduling, and the honest REJECT destroys a node that is now
@@ -548,33 +558,20 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
         if open_tasks:
             t = open_tasks[0]
             if t["type"] != "stage_watch":
-                # R8 (external audit r5): a mid-run tempo change (documented
+                # A mid-run tempo change (documented
                 # raw policy.preset edit) left an already-materialized
                 # open_round showing the OLD preset while the live validator
                 # enforced the new one - the authoritative card contradicted
                 # its own validation. Rebuild the strategy projection when the
                 # preset drifted (same refresh recovery uses).
                 if t["type"] == "open_round":
-                    # R9 (external audit r6): compare the WHOLE rendered policy
+                    # Compare the WHOLE rendered policy
                     # projection, not the preset word - a legal custom->custom
                     # tempo edit (e.g. max_exploit_share) changed what the live
                     # validator enforces while the card kept the old numbers and
                     # `next` still reported "unchanged".
                     current_policy = self._policy_projection_digest()
-                    if t.get("policy_digest") is None:
-                        # Pre-binding (v11.2) task: it carried only the preset
-                        # WORD. Adopt the digest without churn when that word
-                        # still matches; refresh when it drifted while unbound
-                        # - silently adopting swallowed the one drift v11.2
-                        # itself would have caught.
-                        legacy_preset = t.pop("policy_preset", None)
-                        current_preset = str((self.cfg.get("policy") or {}).get("preset") or "")
-                        if legacy_preset is not None and str(legacy_preset) != current_preset:
-                            self._refresh_open_round_task(t)
-                            self.store.event("engine", "open_round_policy_refreshed",
-                                             task=t.get("id"), preset=current_preset)
-                        t["policy_digest"] = current_policy
-                    elif str(t.get("policy_digest")) != current_policy:
+                    if str(t.get("policy_digest") or "") != current_policy:
                         self._refresh_open_round_task(t)
                         t["policy_digest"] = current_policy
                         self.store.event("engine", "open_round_policy_refreshed",
@@ -593,7 +590,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
 
     def _phase_next(self) -> dict:
         st = self.st
-        # 2c. v11.7: an adopted facts revision owes a fresh canary proof.
+        # 2c. An adopted facts revision owes a fresh canary proof.
         # The re-minted infra_drill task takes priority over ordinary rounds
         # work; stage/eval launches are refused meanwhile (validator-side).
         if st.get("infra_revision_pending") and st["phase"] == "rounds":
@@ -624,7 +621,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
 
     def _present_task(self, task: dict) -> dict:
         if task.get("status") == "paused" and (task.get("held_by") or []):
-            # R10-009: a duty whose task is paused under an active hold is
+            # A duty whose task is paused under an active hold is
             # NOT schedulable - presenting it (or minting a twin for it)
             # would walk the duty around the review the pause exists for.
             holds = ", ".join(str(h) for h in (task.get("held_by") or []))
@@ -633,7 +630,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                                f"{holds} - the duty resumes when the hold ends (a recovery hold "
                                "ends with its case; a plain hold with 'evo resume --hold ... "
                                "--note ...')")}
-        # R11 interruption audit: presented_at alone lied after a torn
+        # Presented_at alone lied after a torn
         # _reject window (card bytes rewritten on disk, state rolled back) -
         # "Card unchanged" pointed at a file that HAD changed. The receipt is
         # the card bytes themselves.
@@ -682,7 +679,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                 inputs=[(".evo/ONBOARDING.md", "questions to resolve with the user before configuration"),
                         (".evo/config.json", "untrusted skeleton; do not treat empty/default fields as facts")],
                 extra_blocks=blocks))
-        # v11.7: the engine-fit verdict gates everything after the scan. A
+        # The engine-fit verdict gates everything after the scan. A
         # non-fit overall stops here until the USER decides - proceed with the
         # assessment on record, or stop with the gap named. Fit projects fall
         # straight through with zero extra surface.
@@ -701,7 +698,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
             if fit_gate["status"] == "open":
                 if not self._maybe_auto_resolve(fit_gate):
                     return self._present_gate(fit_gate)
-        # v11.7: the preparation pass runs BEFORE configure, so the contract is
+        # The preparation pass runs BEFORE configure, so the contract is
         # frozen against observed reality instead of guesses. It exists only
         # when the scan recorded needs_preparation; certified-running projects
         # skip it entirely.
@@ -810,7 +807,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                         (".evo/profile/PROBLEM_DOSSIER.md", "repair-route bottlenecks and external invariants")]))
         if "sota_scan" not in done and econfig.sota_enabled(self.cfg) \
                 and not self._task_settled("sota_scan", round=None):
-            # R7: _task_settled, not bootstrap_done membership alone - an
+            # _task_settled, not bootstrap_done membership alone - an
             # exhausted/cancelled bootstrap scan is a recorded decision, and
             # recreating it with fresh attempts was an infinite loop (the
             # round-refresh trigger already asked the right predicate).
@@ -834,7 +831,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                                    experiment_purpose="candidate")
             self.store.event("engine", "node_created", node=nid, role="baseline")
         else:
-            # R9 (external audit r6): ADOPTING an existing graph row must also
+            # ADOPTING an existing graph row must also
             # cover its id in the committed counter. A crash between the graph
             # write and the state commit leaves baseline N001 on disk with
             # counters.N=0; this branch then adopts it WITHOUT allocating, the
@@ -849,7 +846,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                 self.store.event("engine", "counter_adopted_graph_id", kind="N", value=int(tail),
                                  node=base.get("id"))
         if base.get("status") == "abandoned":
-            # R10-003: even this stop routes through the unified writer - an
+            # Even this stop routes through the unified writer - an
             # abandoned baseline may still have live orphan RUNs or open
             # evidence obligations behind it, and the first DONE is the one a
             # standard operator stops on.
@@ -887,11 +884,11 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
         return str((fit or {}).get("overall") or "") if isinstance(fit, dict) else ""
 
     def _provision_needed(self) -> bool:
-        """True when the scan recorded needs_preparation (v11.7).
+        """True when the scan recorded needs_preparation.
 
-        Absent/legacy discovery files read as certified-running - an already
-        mid-bootstrap project keeps its old sequence instead of being forced
-        through a step its scan never defined."""
+        A discovery file without a readiness verdict reads as certified-running
+        - a project keeps the sequence its scan defined instead of being forced
+        through a step it never named."""
         disc = eutil.read_json(eutil.rpath(self.store.repo, ".evo/profile/PROJECT_DISCOVERY.json"), None)
         if not isinstance(disc, dict):
             return False
@@ -908,10 +905,10 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
         return len([r for r in self.st.get("rounds", []) if r.get("closed_at")])
 
     def _standing_notices(self) -> list[str]:
-        """R9 audit: next returns ONE primary surface, but a complex project
-        carries parallel standing obligations that used to become visible
-        only after every other surface drained - each audit round found
-        another buried combination (launch_unknown behind its own card, a
+        """next returns ONE primary surface, but a complex project carries
+        parallel standing obligations that must not become visible only
+        after every other surface drained - there is always another buried
+        combination (launch_unknown behind its own card, a
         held terminal RUN behind unrelated work, a planned review behind an
         open task). One builder, appended to every next output. Scheduling
         order is untouched: this is visibility, not priority."""
@@ -924,6 +921,14 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
             if case.get("status") in ("planned", "fork_required"):
                 notes.append(f"recovery {case.get('id')} awaits the HUMAN - "
                              + self._recovery_review_hint(case))
+        for case in self.st.get("corrections", []):
+            if case.get("status") == "review_open":
+                notes.append(f"instrument correction {case.get('id')} on {case.get('node')} awaits its "
+                             "INDEPENDENT review (a session other than the one that filed it; the "
+                             "review card is presented when the current card settles)")
+            elif case.get("status") == "awaiting_user":
+                notes.append(f"instrument correction {case.get('id')} on {case.get('node')} awaits the "
+                             f"user at gate {case.get('gate')}")
         for r in self.st.get("runs", []):
             status = str(r.get("status") or "")
             rid = str(r.get("id") or "")
@@ -936,7 +941,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                 covering = erecover.active_holds_for_subject(
                     self.st, self.g, node=str(r.get("node") or "") or None, run=rid or None)
                 if covering:
-                    # R10-008: a hold OWNED by an active recovery case must
+                    # A hold OWNED by an active recovery case must
                     # never be answered with a generic "resume first" - for a
                     # planned case that resume CANCELS the pending review,
                     # and for an applied case the resume is refused while
@@ -997,12 +1002,12 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
         return self._watch_or_wait()
 
     def _write_terminal_phase(self, reason: str, *, event: str, **event_kw) -> None:
-        """Sweep G-5: the ONE writer for every semantic stop that cannot
+        """The ONE writer for every semantic stop that cannot
         return a scheduling surface (gate decision arms, cascade stops).
-        Behavior matches the historical direct writes - the phase lands and
-        the done READ point keeps arbitrating live obligations - but the
-        write itself now records when blockers were still open, so a torn
-        world is visible in the ledger instead of only at the next read."""
+        The phase lands and the done READ point keeps arbitrating live
+        obligations, and the write itself records when blockers were still
+        open, so a torn world is visible in the ledger instead of only at the
+        next read."""
         self.st["phase"] = "done"
         self.st.setdefault("terminal_reason", reason)
         blockers = self._terminal_blockers()
@@ -1013,12 +1018,12 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
         self.store.event("engine", event, reason=reason, **event_kw)
 
     def _terminal_verdict(self, reason: str, *, event: str, **event_kw) -> dict:
-        """R10-003: DONE is WRITTEN only through the same predicate the read
-        point verifies. Every earlier round patched individual write points
-        (pending-recovery here, nothing there) while live orphan RUNs and
-        open evidence obligations slid past - the first next after a
-        recover-abort returned DONE with external compute still burning, and
-        a standard operator correctly stops on the first DONE. If anything
+        """DONE is WRITTEN only through the same predicate the read
+        point verifies - never through individual write points that each
+        check a different subset, which would let live orphan RUNs and open
+        evidence obligations slide past (a next after a recover-abort
+        returning DONE with external compute still burning, while a standard
+        operator correctly stops on the first DONE). If anything
         blocks, the phase stays alive and the blocker surface is returned;
         the verdict lands on a later call once the world is actually
         settled."""
@@ -1034,7 +1039,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
     def _terminal_blockers(self) -> list[dict]:
         """Everything that must settle before a terminal verdict is honest.
 
-        R9 audit: consulted by the done READ point (and usable by any close
+        consulted by the done READ point (and usable by any close
         logic). Three blocker kinds, each carrying its surface:
         - an active recovery case (planned/fork_required/repairing/replaying);
         - a RUN that may still be executing externally (launch_unknown or
@@ -1055,7 +1060,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
             elif erun.needs_reconciliation(r):
                 out.append({"kind": "run_obligation", "id": r.get("id"),
                             "evidence": r.get("evidence_status")})
-        # R10-013: an approved repeat_measure whose engine-run second
+        # An approved repeat_measure whose engine-run second
         # measurement has not settled is an open obligation exactly like a
         # live RUN - a terminal verdict may not bury a purchase the user
         # already authorized.
@@ -1069,22 +1074,21 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
 
     def _pending_recovery_case(self) -> dict | None:
         """An ACTIVE recovery case. Every phase=done write point must consult
-        this (R9 added it to rounds_max; the R7 audit found the open_round
-        failure spiral skipped it): DONE must not bury an in-flight recovery -
+        this: DONE must not bury an in-flight recovery -
         nothing re-presents the case or its hold after the phase flips.
         repairing/replaying count too: _next_recovery legitimately returns
         None while the case's RUN is in flight or its node is parked, and a
-        done write in that window buried live training under DONE."""
+        done write in that window would bury live training under DONE."""
         return next((c for c in self.st.get("recoveries", [])
                      if c.get("status") in ("planned", "fork_required",
                                             "repairing", "replaying")), None)
 
     @staticmethod
     def fork_handoff_lines(case: dict) -> list[str]:
-        """The fork handoff, rebuilt from the persisted case (R8 audit: it
-        used to exist only on the stdout of the session that planned the
-        case, so a fresh session had 'follow the printed handoff' pointing at
-        text that no longer existed anywhere)."""
+        """The fork handoff, rebuilt from the persisted case - never only
+        from the stdout of the session that planned it, or a fresh session
+        would have 'follow the printed handoff' pointing at text that no
+        longer exists anywhere."""
         actions = {str(a) for a in (case.get("action") or [])}
         cid = str(case.get("id") or "?")
         if "fork_lane" in actions:
@@ -1114,9 +1118,8 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
     def _recovery_review_hint(cls, case: dict) -> str:
         """The status- and action-correct exit verbs for an active recovery
         case. A fork-classified case has NO apply path - printing
-        recover-apply for it (which the uniform status line used to do even
-        for planned cases whose action was already fork_*) sent the operator
-        into a wall."""
+        recover-apply for it (even for a planned case whose action is already
+        fork_*) would send the operator into a wall."""
         status = str(case.get("status") or "")
         actions = {str(a) for a in (case.get("action") or [])}
         forkish = bool(actions & {"fork_node", "fork_lane", "fork_project"})
@@ -1133,7 +1136,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                 "(run-update / run-reconcile), or 'evo recover-abort' to terminate it")
 
     def _hold_waiting_suffix(self, hold_ids: list[str]) -> str:
-        """R7 audit: a hold waiting used to print only the hold id. When the
+        """A hold waiting prints more than the hold id. When the
         hold belongs to a recovery awaiting review, the next step is already
         engine-determined (read THIS plan, apply exactly it, or abort) - and a
         fresh session's only standard entry point is `next`, so the full
@@ -1163,7 +1166,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
         bud = cfg.get("budgets", {})
         if st.get("round_status") in (None, "closed"):
             if st.get("spiral_stop_pending_recovery"):
-                # R7 audit: the open_round failure spiral tried to stop while a
+                # The open_round failure spiral tried to stop while a
                 # recovery review was pending. Mint no further rounds (the
                 # spiral verdict stands); present the review until decided,
                 # then let the deferred stop land.
@@ -1175,7 +1178,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                                        f"{pending_case.get('status')} - "
                                        + self._recovery_review_hint(pending_case)
                                        + "; the project stops after that case ends")}
-                # R10-003: the spiral verdict lands through the unified
+                # The spiral verdict lands through the unified
                 # writer - live orphan RUNs / open evidence obligations defer
                 # it exactly like a pending recovery review always did. The
                 # deferral flag survives until the verdict actually lands, or
@@ -1190,7 +1193,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                 return out
             closed = self._closed_rounds()
             if bud.get("rounds_max", 0) and closed >= bud["rounds_max"]:
-                # R9 (external audit r6) + R10-003: DONE must not bury an
+                # DONE must not bury an
                 # in-flight recovery review, a live orphan RUN or an open
                 # evidence obligation - the unified writer consults the SAME
                 # blocker predicate the read point verifies.
@@ -1219,7 +1222,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
             paused = next((t for t in self.st["tasks"]
                            if t["type"] == "open_round" and t["status"] == "paused"), None)
             if paused is not None:
-                # R9 (external audit r6): when the pausing hold belongs to a
+                # When the pausing hold belongs to a
                 # TERMINAL fork diagnosis, this waiting state was a self-lock -
                 # the printed handoff protocol says "build the replacement via
                 # the next open_round" while the only open_round sat paused
@@ -1228,7 +1231,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                 # fresh one from current truth; the damaged authority stays
                 # held and is excluded from legal parents by its own validator.
                 holder_ids = {str(h) for h in (paused.get("held_by") or [])}
-                # R10-010: fork_project is EXCLUDED from the local re-mint -
+                # Fork_project is EXCLUDED from the local re-mint -
                 # its handoff is "keep the hold, build the replacement world
                 # in a fresh 'evo init' project"; re-minting a strategy card
                 # in the OLD project's current round contradicted that
@@ -1270,7 +1273,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                                      round=st["current_round"])
                     return self._present_task(fresh)
                 else:
-                    # R9: after a session/context loss this WAITING is the only
+                    # After a session/context loss this WAITING is the only
                     # surface a fresh agent sees - it must carry the review
                     # handoff (plan path + digest + exact commands), not just
                     # "finish the recovery".
@@ -1298,7 +1301,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
             k_ref = int((cfg.get("research") or {}).get("sota_refresh_rounds") or 0)
             if k_ref and int(rid[1:]) % k_ref == 0 and not self._task_settled("sota_scan", round=rid):
                 res = cfg.get("research") or {}
-                # R8 audit: bind only STAMPED accepted history (a shadowed
+                # Bind only STAMPED accepted history (a shadowed
                 # stamp branch meant no project ever had a sota watermark; the
                 # raw-file fallback froze cancelled tasks' unaccepted tails)
                 sota_n, sota_digest = evalid.stamped_ledger_watermark(st, "sota")
@@ -1321,10 +1324,10 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
         # rewards title collection and is skipped when coverage is already live.
         if not self._task_settled("evidence", round=rid) and self._round_needs_evidence_refresh(rid):
             prior, prior_digest = evalid.ledger_watermark(st, "evidence", self.store.evidence())
-            # F14: a positive evidence_min_new_per_round is the explicit
+            # A positive evidence_min_new_per_round is the explicit
             # per-round contract; the when-gap floor applies only to
-            # gap-triggered refreshes (v9.2 always used the gap floor and the
-            # configured per-round count was never enforced anywhere).
+            # gap-triggered refreshes; the configured per-round count is
+            # enforced here.
             min_new = int(cfg.get("budgets", {}).get("evidence_min_new_per_round", 0) or 0)
             if min_new <= 0:
                 min_new = econfig.budget(cfg, "evidence_refresh_min_when_gap")
@@ -1333,9 +1336,10 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                              "prior_digest": prior_digest},
                 [".evo/evidence/EVIDENCE.jsonl"],
                 inputs=self._profile_inputs() + [(f".evo/rounds/{rid}/PORTFOLIO.json", "this round's lanes and bottlenecks"),
-                                                 (".evo/evidence/EVIDENCE.jsonl", "existing pool (continue E### numbering)")],
+                                                 (".evo/evidence/EVIDENCE.jsonl", "existing pool (continue E### numbering)"),
+                                                 (".evo/views/FIELD_MAP.md", "per-cell facts: our best, published cap, gap, who claimed the cell and what happened")],
                 extra_fields={"PRIOR_COUNT": str(prior), "MIN_NEW": str(min_new),
-                              # R5: the card must state EVERY enforced floor -
+                              # The card must state EVERY enforced floor -
                               # on an empty pool the real work is the total
                               # floor, not the refresh increment.
                               "TOTAL_MIN": str(econfig.budget(cfg, "evidence_min_total")),
@@ -1368,7 +1372,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                 return out
             if lane.get("node") and (self.node(lane["node"]) or {}).get("status") == "executing":
                 waiting_on_runs = True
-        # R9 (external audit r6): abandoning a node does NOT stop its external
+        # Abandoning a node does NOT stop its external
         # job - the RUN is marked orphaned and left running on purpose, so the
         # execution fact stays honest. But the round then closed and the project
         # could reach DONE while real compute burned, holding a stage slot and a
@@ -1382,11 +1386,11 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                         if r.get("orphaned") and not erun.is_terminal(r)]
         if live_orphans:
             waiting_on_runs = True
-        # R9 audit: an open EVIDENCE obligation blocks the close exactly like
+        # An open EVIDENCE obligation blocks the close exactly like
         # a live job does - a terminal RUN still owed late materials (or an
         # explicit terminal disposition via run-reconcile
-        # --accept-missing-evidence) used to be forgotten by close/DONE while
-        # its landing stayed leased forever.
+        # --accept-missing-evidence) must not be forgotten by close/DONE while
+        # its landing stays leased.
         if any(erun.needs_reconciliation(r) for r in self.st.get("runs", [])):
             waiting_on_runs = True
         if waiting_on_runs:
@@ -1394,7 +1398,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
         # close the round
         if erecover.is_held(self.st, self.g, round_=rid):
             return self._watch_or_wait()
-        # R7 audit: a closer for this round may already exist but sit PAUSED
+        # A closer for this round may already exist but sit PAUSED
         # under a recovery hold - impact scans mark every open/paused
         # close_round a frontier-projection consumer, and the round-subject
         # is_held check above cannot see that task-only coverage. Minting a
@@ -1413,7 +1417,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                                "hold); finish the recovery (evo recover-apply / recover-abort) or "
                                "resolve its escalation instead of minting a second closer")}
         if not self._done_task("close_round", round=rid):
-            # R7: the addendum is decision-bearing (B# ids gate repair lanes)
+            # The addendum is decision-bearing (B# ids gate repair lanes)
             # and append-only by card contract, but nothing bound the prior
             # bytes - a whole-file rewrite silently rebound history. Freeze
             # the prefix at task creation, checked at submit.
@@ -1427,7 +1431,10 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                 [f".evo/rounds/{rid}/RETIRE.json"],
                 inputs=[(f".evo/rounds/{rid}/PORTFOLIO.json", "what this round planned"),
                         (".evo/views/FRONTIER.md", "frontier after this round"),
-                        (".evo/views/GRAPH.md", "full graph")],
+                        (".evo/views/GRAPH.md", "full graph"),
+                        (".evo/views/FIELD_MAP.md", "per-cell facts: our best, published cap, gap, who claimed the cell and what happened")]
+                       + ([(".evo/profile/FIELD_NOTES.md", "the agent's own per-cell judgment (live levers, dead forms, untried)")]
+                          if (self.store.profile_dir() / "FIELD_NOTES.md").exists() else []),
                 extra_blocks=[("This round's lanes and outcomes", self._round_summary_block(rid)),
                               ("Frontiers, origin and per-cell records",
                                ebundle.frontier_block(self.g, self.cfg, self.st))])
@@ -1440,7 +1447,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
         checks the platform."""
         w = getattr(self, "_open_watch", None)
         if w is not None and w.get("status") == "open":
-            # R7 audit: the watch card is a cached placeholder; when a sibling
+            # The watch card is a cached placeholder; when a sibling
             # RUN became settle-able (or got settled) after the card was cut,
             # re-present it with the fresh actionable list instead of a stale
             # "nothing else is actionable" claim.
@@ -1459,7 +1466,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
             pending = [r for r in self.st.get("runs", []) if erun.needs_reconciliation(r)]
             if pending:
                 run = sorted(pending, key=lambda row: str(row.get("id") or ""))[0]
-                # R9 audit: when an ACTIVE hold covers this RUN, the true
+                # When an ACTIVE hold covers this RUN, the true
                 # first step is resume - reconcile is refused for
                 # failed/cancelled outright and re-deferred for finished, so
                 # the old hint looped on a command that could not advance.
@@ -1470,7 +1477,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                     after = ("its factual failure is absorbed automatically"
                              if str(run.get("status")) in ("failed", "cancelled")
                              else f"then 'evo run-reconcile --run {run.get('id')} ...' adopts its evidence")
-                    # R10 self-audit: never front-recommend resuming a hold an
+                    # Never front-recommend resuming a hold an
                     # active recovery case owns (planned: resume cancels the
                     # review; applied: resume is refused and reconcile works
                     # directly) - the resume verb points at a PLAIN hold only.
@@ -1516,7 +1523,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                               "Do not create another attempt while launch is unknown."}
         run = sorted(running, key=lambda r: r["id"])[0]
         node = self.node(run["node"]) or {}
-        # R7: one card watched both run kinds and its hard rule ("workflow is
+        # One card watched both run kinds and its hard rule ("workflow is
         # required for an implementation failure") is WRONG for an eval RUN -
         # an evaluator-only fix is --repair-scope evaluation, and the engine
         # accepts the destructive value silently, replaying paid training.
@@ -1530,7 +1537,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
             "`--repair-scope workflow` is required for an implementation failure: a "
             "stage-code change can invalidate the whole workflow, so the repeat-spend "
             "gate will disclose that whole replay.")
-        # R7 audit: a terminal sibling awaiting late materials IS actionable
+        # A terminal sibling awaiting late materials IS actionable
         # right now - hiding it until every unrelated job ended idled its
         # node, its reservation and its follow-up chain behind a possibly
         # hours-long run (and made this card's "nothing else is actionable"
@@ -1574,7 +1581,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                    for l in st.get("lanes", [])])
 
     def _sync_graph_consumers(self) -> None:
-        """R8 audit: a graph-changing decision must update its formal
+        """A graph-changing decision must update its formal
         consumers in the SAME persisted step. Gate decisions (abandon arms)
         and recovery aborts changed nodes/lanes/frontiers while the rendered
         FRONTIER/GRAPH views and an already-open close_round card kept the
@@ -1622,12 +1629,17 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
             round_closed = t.get("type") in ("open_round", "close_round") and any(
                 r.get("id") == str(subj.get("round") or "") and r.get("closed_at")
                 for r in st.get("rounds", []))
+            # an instrument review's subject is a CONCLUDED node by design;
+            # only an abandoned one makes that review stale
+            terminal_states = ("abandoned",) if t.get("type") == "instrument_review" \
+                else ("concluded", "abandoned")
             stale = round_closed \
-                or (node is not None and node.get("status") in ("concluded", "abandoned")) \
-                or (lane is not None and lane.get("status") in ("done", "abandoned")) \
+                or (node is not None and node.get("status") in terminal_states) \
+                or (lane is not None and lane.get("status") in ("done", "abandoned")
+                    and t.get("type") != "instrument_review") \
                 or any(t2 is not t and t2.get("type") == t.get("type")
                        and (t2.get("subject") or {}) == subj
-                       # R11 cold-start audit: an OPEN twin covers the duty
+                       # An OPEN twin covers the duty
                        # regardless of id order - the old '_seq(t2) > _seq(t)'
                        # test pointed the wrong way for a duplicate parked by
                        # doctor --fix (kept card has the SMALLER id), so the
@@ -1646,7 +1658,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                 self.store.event("engine", "queued_task_cancelled", task=t.get("id"),
                                  reason="subject re-covered or terminal while parked")
                 continue
-            # R8 audit: a parked launch card whose RUN dropped back to
+            # A parked launch card whose RUN dropped back to
             # prepared holds no slot; reopening it into a full platform
             # would authorize a second concurrent stage. Leave it parked and
             # try the next candidate; submit re-proves the slot either way.
@@ -1680,7 +1692,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
             [f".evo/rounds/{rid}/PORTFOLIO.json"],
             extra_fields=self._portfolio_fields(rid),
             **self._round_strategy_context(rid))
-        # R8/R9: stamp the tempo projection the card was rendered under, so
+        # Stamp the tempo projection the card was rendered under, so
         # any mid-run tempo change (preset switch OR a custom numeric edit)
         # refreshes the projection instead of presenting a card its own
         # validator contradicts.
@@ -1691,7 +1703,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
         for t in self.st["tasks"]:
             if t["type"] == type_ and t["status"] == "open":
                 return t
-        # R9 audit (root-cause form of the r6 fix): the strategy projection is
+        # The strategy projection is
         # DERIVED state - an opening round with no live card is not an
         # inconsistency to crash on, it is a projection to re-materialize.
         # Cancel sites multiplied across releases (fork handoff, recovery
@@ -1719,11 +1731,20 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
         lane["status"] = "abandoned"
         lane["abandon_reason"] = reason
         self.store.event("engine", "lane_abandoned", lane=lane["id"], reason=reason)
-        # R5 blind-operator audit: a pre-node lane abandonment used to leave
-        # its open lane-subject task alive - the scheduler kept presenting it,
-        # and a VALID submission then wrote lane.status back to a live stage,
-        # silently undoing the user's approved stop; the only blind exit was
-        # attempt exhaustion. Abandonment cancels everything the lane owns
+        # An inheritance-tax lane that dies before it settles anything leaves
+        # the parent's mechanism deferred, with the declined attempt on record.
+        for parent in (getattr(self, "g", None) or {}).get("nodes", []):
+            if parent.get("ablation_lane") == lane["id"]:
+                parent.pop("ablation_lane", None)
+                parent["ablation_declined"] = {"lane": lane["id"], "reason": reason[:300],
+                                               "opened_by": parent.pop("ablation_lane_opened_by", None),
+                                               "at": eutil.utc_now()}
+                egraph.touch(parent)
+        # A pre-node lane abandonment must not leave
+        # its open lane-subject task alive - the scheduler would keep
+        # presenting it, and a VALID submission would write lane.status back
+        # to a live stage, silently undoing the user's approved stop.
+        # Abandonment cancels everything the lane owns
         # (mirror of the node-side cleanup below).
         affected_tasks: set[str] = set()
         for task in self.st.get("tasks", []):
@@ -1758,14 +1779,14 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
     def _abandon_node(self, node: dict, reason: str, cascade_lane: bool = True) -> None:
         node["status"] = "abandoned"
         node["verdict"] = "failed"
-        # R10 self-audit: abandonment retires every obligation the node owed -
+        # Abandonment retires every obligation the node owed -
         # including an approved-but-unsettled repeat measurement. Left in
         # place, its pending seed kept feeding the terminal blocker forever
         # while both advertised exits were closed (the scheduler never
         # touches an abandoned node, and waive refuses non-lane states) -
         # the same pairing the recovery retirement path already had.
         self._archive_repeat_measure(node, f"node abandoned: {reason}")
-        # R11 matrix sweep (M4): the replacement-spend marker dies with the
+        # The replacement-spend marker dies with the
         # node too (its gate is cancelled by the cascade below; the marker
         # alone would be an inert field claiming a decision is still owed).
         node.pop("repeat_attempt", None)
@@ -1787,7 +1808,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
         if node.get("role") == "baseline":
             # No later decision is meaningful after the comparison authority
             # has been retired.  Recovery cannot resurrect it; continuation is
-            # a new project authority world. (G-5: one terminal writer.)
+            # a new project authority world. (One terminal writer.)
             self._write_terminal_phase(f"baseline authority abandoned: {reason}",
                                        event="project_stopped_baseline_abandoned",
                                        node=node["id"])
@@ -1824,12 +1845,12 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
             if run.get("node") != node["id"]:
                 continue
             if erun.is_terminal(run):
-                # R7 external audit: abandoning the DIRECTION does not erase an
+                # Abandoning the DIRECTION does not erase an
                 # already-executed fact. A finished RUN still awaiting
-                # materials/settlement used to be skipped wholesale: its
-                # reservation held project capacity forever and its open
-                # reconciliation axis was buried under the terminal node (and
-                # under DONE). Settle both axes honestly: bill the run
+                # materials/settlement must not be skipped wholesale: its
+                # reservation would hold project capacity forever and its open
+                # reconciliation axis would be buried under the terminal node
+                # (and under DONE). Settle both axes honestly: bill the run
                 # (reported usage, or the reserved cap when unreported) and
                 # record the evidence gap as permanent - with the SAME receipt
                 # protocol the abort-recovery disposition uses, or the run
@@ -1891,13 +1912,24 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
         if cascade_lane and node.get("lane"):
             lane = self.store.get_lane(self.st, node["lane"])
             if lane and lane["status"] != "abandoned":
-                lane["status"] = "abandoned"
-                lane["abandon_reason"] = reason
-                self.store.event("engine", "lane_abandoned", lane=lane["id"], reason=reason)
+                # One exit for every lane abandonment: the parent's inheritance-tax
+                # pointers are cleared and the declined attempt is recorded there too.
+                self._abandon_lane(lane, reason)
 
-    def _abandon_task_subject(self, task: dict, note: str | None) -> None:
+    def _abandon_task_subject(self, task: dict, note: str | None, *, reason: str | None = None) -> None:
         subj = task.get("subject", {})
-        reason = f"stuck task {task['id']} abandoned: {note or 'attempts exhausted'}"
+        reason = reason or f"stuck task {task['id']} abandoned: {note or 'attempts exhausted'}"
+        if task.get("type") == "instrument_review":
+            # The review judges a claimed formula error on a CONCLUDED node;
+            # giving up on the review closes the correction request and
+            # leaves the node's settled record exactly as it was.
+            for case in self.st.get("corrections", []):
+                if str(case.get("id") or "") == str(subj.get("correction") or ""):
+                    case["status"] = "closed_unreviewed"
+                    case["closed_at"] = eutil.utc_now()
+                    self.store.event("engine", "instrument_correction_closed",
+                                     correction=case.get("id"), node=case.get("node"), reason=reason)
+            return
         if task.get("resource_reservation") and not task.get("resource_accounted"):
             released = dict(task.pop("resource_reservation", {}) or {})
             self.store.event("engine", "resource_reservation_released", task=task.get("id"),
@@ -1923,13 +1955,13 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
             # full_auto + on_stuck=abandon + rounds_max=0 would otherwise
             # force-close and reopen forever on a deterministic open_round
             # failure (attempts reset per fresh round: a macro-livelock with
-            # unbounded rounds/gates/events growth - R3 logic audit). Three
+            # unbounded rounds/gates/events growth). Three
             # consecutive strategist failures with zero settled work is a
             # project defect, not a scheduling blip: stop honestly.
             spiral = int(self.st.get("consecutive_forced_round_closes", 0)) + 1
             self.st["consecutive_forced_round_closes"] = spiral
             if spiral >= 3 and self.st.get("phase") != "done":
-                # R7 audit: this DONE write point skipped the pending-recovery
+                # This DONE write point skipped the pending-recovery
                 # guard the rounds_max path has - a planned/fork case and its
                 # hold would be buried under the terminal phase forever. Keep
                 # the spiral verdict on record but leave the phase alive until
@@ -1951,17 +1983,17 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                     event="evolution_stopped")
             return
         # The branches above cover every task family whose subject names a thing
-        # that CAN be abandoned. The remaining families used to fall through as
-        # a silent no-op: the task was cancelled, nothing changed, and the very
-        # next scheduling pass recreated an identical task with attempts=0 -
-        # so "reject = abandon" on their escalation gates was a lie, and under
-        # full_auto + on_stuck=abandon the reject was automatic and the
-        # recreate loop ran forever with unbounded task/gate/event growth.
+        # that CAN be abandoned. The remaining families must not fall through
+        # as a silent no-op (task cancelled, nothing changed, the very next
+        # scheduling pass recreating an identical task with attempts=0): that
+        # would make "reject = abandon" on their escalation gates a lie, and
+        # under full_auto + on_stuck=abandon the automatic reject would loop
+        # forever with unbounded task/gate/event growth.
         # Each family gets the honest semantics of "this duty will not be met":
         if task["type"] == "close_round":
             # The strategist could not produce a close review; force-close so
             # the run can move on, with the reason on the round record.
-            # R7: improved=None, not False - the close REPORT failed, but the
+            # Improved=None, not False - the close REPORT failed, but the
             # round's real work may have moved the frontier (the node evidence
             # is already sealed). A hard False fed the stagnation window and
             # could force L3/moonshot rounds over a formatting failure;
@@ -1969,7 +2001,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
             # close spiral counter is for OPEN_round strategist failures: a
             # round that ran its lanes is not that, so it breaks the streak.
             rid = str(subj.get("round") or "")
-            # R8 (external audit r5): NEVER force-close a round that still has
+            # NEVER force-close a round that still has
             # active lanes (a mid-round injection may have legitimately
             # reopened work after this close task went stuck) - that stranded
             # the accepted lane in a closed round forever. Cancel the doomed
@@ -2013,7 +2045,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                     event="evolution_stopped", note=reason)
 
     def validation_report(self, task_id: str, *, session: str | None = None) -> dict:
-        """v12: read-only dry run of exactly what submit would validate.
+        """Read-only dry run of exactly what submit would validate.
 
         Purpose: burning an attempt on a schema mismatch teaches the agent to
         import engine internals for pre-validation - the field run did exactly
@@ -2083,10 +2115,24 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                 and not sess:
             report["notes"].append("critic_isolation=strict: submit WITHOUT --session would be "
                                    "rejected (CRITIC_SESSION_AUTHOR_REQUIRED) before validation")
+        if task["type"] == "stage_launch":
+            # mirror of submit's busy branch: a wait report is never validated
+            # as a launch
+            launch_data = eutil.read_json(eutil.rpath(self.store.repo, str(task["outputs"][0])), None)
+            if isinstance(launch_data, dict) and launch_data.get("mode") == "busy":
+                if len(str(launch_data.get("note") or "").strip()) < 10:
+                    report["errors"] = ["LAUNCH_BUSY_NOTE: mode 'busy' needs a note (>= 10 chars): what is "
+                                        "occupied and what you checked - the attempt counter is untouched"]
+                else:
+                    report["notes"].append("mode 'busy' is a wait report, not a launch: submit records the "
+                                           "wait on the RUN (no attempt spent), keeps this card open, and "
+                                           f"asks the user after {econfig.busy_wait_minutes(self.cfg)} min "
+                                           "of waiting")
+                return report
         validator = evalid.VALIDATORS.get(task["type"])
         if validator is None:
             raise SystemExit(f"[evo] no validator for task type {task['type']} (engine bug)")
-        # Self-review F4: submit stamps task["session"] BEFORE validation so
+        # Submit stamps task["session"] BEFORE validation so
         # critic-isolation checks judge the submitting session. Predict with
         # the same stamp on a COPY - never on the stored row - or the dry run
         # reports session deficiencies the real submit would not (and vice
@@ -2103,11 +2149,12 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
         # predicts real submission - a pre-check added here must appear there.
         evcs.begin_invocation()
         self._seal_digest_seed = {}
+        self._accept_advice = None
         self._assert_frozen_contract()
         task = self.store.get_task(self.st, task_id)
         if task is None:
             raise SystemExit(f"[evo] no task {task_id}")
-        # Provenance record (v11): who claims to have done this work. Written
+        # Provenance record: who claims to have done this work. Written
         # BEFORE validation so critic-isolation checks can compare the review's
         # session against the authored work's. Absent = recorded as unknown.
         sess = str(session or os.environ.get("EVO_SESSION") or "").strip()
@@ -2121,8 +2168,9 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
             only_lane=str(subject.get("lane") or "") or None,
             only_node=str(subject.get("node") or "") or None)
         if task["status"] != "open":
-            raise SystemExit(f"[evo] task {task_id} is {task['status']}, not open")
-        # Defense in depth for the scoped brake (G1): even if a covered task
+            raise SystemExit(f"[evo] task {task_id} is {task['status']}, not open; run 'evo next' "
+                             "for the current card")
+        # Defense in depth for the scoped brake: even if a covered task
         # was reopened through an escalation approved before/around the hold,
         # no submission may mutate authority inside an active hold's scope.
         holding = erecover.active_holds_for_subject(
@@ -2145,7 +2193,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                              + "; resume the hold or complete its recovery first")
         if task["type"] == "stage_watch":
             return self._submit_stage_watch(task)
-        # R6 blind-operator audit: under strict isolation an author task that
+        # Under strict isolation an author task that
         # closes without a recorded session leaves its release critic in an
         # unrepairable CRITIC_SESSION_AUTHOR_UNKNOWN trap (done tasks cannot
         # be re-submitted; lane authority cannot be rewritten). Fail-early
@@ -2158,6 +2206,10 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                 "submit time - re-run this exact submit WITH --session <your-stable-session-id>. "
                 "The release critic must later prove independence against YOUR recorded identity; "
                 "an author that closes unnamed can never be released under strict."])
+        if task["type"] == "stage_launch":
+            busy = self._submit_launch_busy(task)
+            if busy is not None:
+                return busy
         validator = evalid.VALIDATORS.get(task["type"])
         if validator is None:
             raise SystemExit(f"[evo] no validator for task type {task['type']} (engine bug)")
@@ -2198,7 +2250,11 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
         # of on every accepted submit.
         edash.render(self.store, self.g, self.cfg, self.st, self.reg, infra_memo=self._infra_memo)
         self.save()
-        return {"kind": "accepted", "task": task_id, "type": task["type"]}
+        out = {"kind": "accepted", "task": task_id, "type": task["type"]}
+        advice = getattr(self, "_accept_advice", None)
+        if advice:
+            out["advice"] = list(advice)
+        return out
 
     def _require_human_study_confirmation(self, task: dict) -> dict | None:
         """E2: a human-study cell's settlement is user-owned in EVERY autonomy
@@ -2216,7 +2272,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
             return None
         metrics_rel = str(task.get("outputs", [""])[0] or "")
         digest = evalid.json_file_digest(self.ctx(), metrics_rel)
-        # R7 external audit: the decision object is the RAW response bytes,
+        # The decision object is the RAW response bytes,
         # not just the normalized JSON that cites them. Binding only the
         # metrics digest let an approved gate seal bytes the user never saw
         # (swap after approval) and let a rejection permanently block a
@@ -2265,19 +2321,22 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
         return self._present_gate(gate)
 
     def _reject(self, task: dict, errs: list[str]) -> dict:
-        # R11 liveness audit (O1): GENERATION_MOVED means the REGISTRY moved
+        # GENERATION_MOVED means the REGISTRY moved
         # under the card, not that the agent got it wrong - burning an attempt
         # per background producer re-run could walk an innocent task into
         # stuck/escalation. The refresh below re-arms the card; only mixed or
-        # agent-caused errors spend attempts.
+        # agent-caused errors spend attempts. A busy-machine report with a
+        # note too short to read is the same kind of free re-ask: the wait is
+        # nobody's failure and must not walk the launch card toward stuck.
         moved_only = bool(errs) and all(
-            str(e).startswith(("SPEC_ARTIFACT_GENERATION_MOVED", "INFRA_REVISION_UNPROVEN"))
+            str(e).startswith(("SPEC_ARTIFACT_GENERATION_MOVED", "INFRA_REVISION_UNPROVEN",
+                               "LAUNCH_BUSY_NOTE"))
             for e in errs)
         task["attempts"] = task.get("attempts", 0) + (0 if moved_only else 1)
         task["last_errors"] = errs
         task["updated_at"] = eutil.utc_now()
         if any(str(e).startswith("SPEC_ARTIFACT_GENERATION_MOVED") for e in errs):
-            # R11-010: the rejection just proved this card's registry view is
+            # The rejection just proved this card's registry view is
             # stale, and _render replays VERBATIM on rematerialize - so
             # refresh the Shared-artifacts lines and the machine receipt in
             # place. The retry card must show the registry the resubmission
@@ -2294,7 +2353,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                          attempt=task["attempts"], errors=errs)
         maxa = int(self.cfg.get("budgets", {}).get("max_attempts", 3))
         escalated = None
-        # v11.7: a BLOCKED rehearsal is not the agent's failure and not a code
+        # A BLOCKED rehearsal is not the agent's failure and not a code
         # defect - it needs the USER (access/quota/data). Escalate immediately
         # instead of burning attempts on an unwinnable retry loop.
         if task.get("type") == "rehearsal" and any(
@@ -2327,14 +2386,14 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
             task.get("type") == "ablation_fidelity" and
             any(str(err).startswith("ABLATION_FIDELITY_DEVIATES") for err in errs)
         ) or (
-            # v11.7: a failed full-chain rehearsal is a WIRING defect in the
+            # A failed full-chain rehearsal is a WIRING defect in the
             # sealed implementation (a stage that cannot launch, an artifact
             # its consumer cannot read) - route to the fix pass, and the
             # re-sealed code owes a fresh rehearsal.
             task.get("type") == "rehearsal" and any(
                 str(err).startswith("REHEARSAL_FAILED") for err in errs)
         ) or (
-            # R9 (external audit r6): a bridge anchor mismatch PROVES the sealed
+            # A bridge anchor mismatch PROVES the sealed
             # adapter does not reproduce the baseline numbers - an implementation
             # defect. Its own card forbids editing code, so without a typed route
             # the only outcomes were infinite retries of an unwinnable audit, or
@@ -2346,17 +2405,17 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
         if typed_implementation_repair:
             node = self.node(str((task.get("subject") or {}).get("node") or ""))
             if node is not None:
-                # F1: the typed repair loop is bounded by the same max_attempts
-                # machinery as every other failure path. v9.2 re-armed fix
-                # passes forever with no counter: implement->smoke->fail could
-                # loop unbounded, never escalate and ignore on_stuck=abandon.
+                # The typed repair loop is bounded by the same max_attempts
+                # machinery as every other failure path - without a counter,
+                # implement->smoke->fail could loop unbounded, never escalate
+                # and ignore on_stuck=abandon.
                 node["fix_cycles"] = int(node.get("fix_cycles") or 0) + 1
                 if node["fix_cycles"] >= maxa:
                     task["status"] = "cancelled"
                     task.pop("_render", None)
                     if self.cfg.get("policy", {}).get("on_stuck") == "abandon" \
                             and not self._node_training_paid(node):
-                        # v11 R2: once the node's training is paid for (e.g. an
+                        # Once the node's training is paid for (e.g. an
                         # evaluation-only repair after workflow reuse), repair
                         # exhaustion escalates like every other expensive
                         # terminal state instead of silently destroying paid
@@ -2369,12 +2428,12 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                                 "status": task["status"]}
                     gate = self.store.new_gate(
                         self.st, "escalation",
-                        # R7: carry the repair intent ON the gate. Approval
-                        # used to reset counters only - the node then sat in
-                        # its old status, the scheduler recreated the SAME
+                        # Carry the repair intent ON the gate. An approval
+                        # that only reset counters would leave the node in
+                        # its old status, the scheduler would recreate the SAME
                         # deterministic check, and (max_attempts<=1) the very
-                        # first failure re-opened this gate: approve promised
-                        # a repair it never delivered.
+                        # first failure would re-open this gate: approve would
+                        # promise a repair it never delivers.
                         {"node": node.get("id"),
                          "repair_intent": {"fix_note": "; ".join(str(err) for err in errs[:5]),
                                            "task_type": task["type"]}},
@@ -2420,14 +2479,14 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
             # Bootstrap steps are structurally unabandonable (minus the
             # optional sota_scan) plus the round-strategy tasks; derived from
             # the canonical sequence so the two can never drift (D3).
-            # v11: the EXPENSIVE terminal tasks joined the list - a stuck
-            # conclude used to abandon the WHOLE TRAINED NODE over report
-            # formatting, the single most disproportionate death in the
-            # survival audit: all compute spent, evidence sealed, and the
+            # The EXPENSIVE terminal tasks are protected too - a stuck
+            # conclude must not abandon the WHOLE TRAINED NODE over report
+            # formatting, the single most disproportionate death possible:
+            # all compute spent, evidence sealed, and the
             # engine already knows most of the answers it is rejecting.
             protected = tuple(step for step in eflow.BOOTSTRAP_SEQ if step != "sota_scan") + (
                 "baseline_spec", "open_round", "close_round", "evidence") + eflow.EXPENSIVE_TERMINAL_TASKS
-            # v11 R2: ANY stuck task whose subject node already paid its
+            # ANY stuck task whose subject node already paid its
             # training (eval_launch, metric_bridge, ...) is expensive-terminal
             # in effect - the type list alone left bypasses.
             stuck_node = self.node(str((task.get("subject") or {}).get("node") or ""))
@@ -2442,7 +2501,7 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                 # (egate escalation_on_stuck): a stuck task whose node already
                 # paid training MUST carry the node key, or the protection's
                 # two halves read different keys and the trained node is
-                # auto-rejected into abandonment unattended (R3 logic audit).
+                # Auto-rejected into abandonment unattended.
                 gate_subject = {"task": task["id"]}
                 if stuck_node:
                     gate_subject["node"] = stuck_node["id"]
@@ -2463,6 +2522,66 @@ class Engine(etask.TaskMixin, eapply.ApplyMixin, eabsorb.AbsorbMixin,
                 "max_attempts": maxa, "errors": errs, "escalation": escalated,
                 "errors_file": f".evo/tasks/{task['id']}/ERRORS.json" if task.get("card") else None,
                 "status": task["status"]}
+
+    def _submit_launch_busy(self, task: dict) -> dict | None:
+        """A launch that found the shared machine busy is not a failure and
+        spends no attempt: LAUNCH.json mode 'busy' with a note keeps the card
+        open, records the wait on the RUN, and after
+        resource_contract.busy_wait_minutes of waiting opens ONE escalation so
+        a person decides (wait on, launch smaller, or stop). None when the
+        report is a real launch."""
+        data = eutil.read_json(eutil.rpath(self.store.repo, str(task["outputs"][0])), None)
+        if not isinstance(data, dict) or data.get("mode") != "busy":
+            return None
+        note = str(data.get("note") or "").strip()
+        if len(note) < 10:
+            return self._reject(task, ["LAUNCH_BUSY_NOTE: mode 'busy' needs a note (>= 10 chars): what is "
+                                       "occupied and what you checked - the attempt counter is untouched"])
+        run = self.store.get_run(self.st, str(task["subject"].get("run") or ""))
+        if run is None:
+            raise SystemExit("[evo] stage launch lost its engine-prepared RUN")
+        waits = run.setdefault("busy_waits", [])
+        waits.append({"at": eutil.utc_now(), "note": note[:300]})
+        task["updated_at"] = eutil.utc_now()
+        self.store.event("agent", "stage_launch_busy", task=task["id"], run=run["id"], note=note[:200])
+        limit = econfig.busy_wait_minutes(self.cfg)
+        # The wait window starts at the first busy report, or at the user's
+        # last decision on a busy escalation for this task ("keep waiting"
+        # restarts the clock instead of re-asking on the next report).
+        busy_gates = [g for g in self.st.get("gates", []) if g.get("kind") == "escalation"
+                      and (g.get("subject") or {}).get("task") == task["id"]
+                      and (g.get("subject") or {}).get("reason") == "resources_busy"]
+        since = max([str(waits[0].get("at") or "")]
+                    + [str(g.get("decided_at") or "") for g in busy_gates if g.get("status") != "open"])
+        waited_min = 0.0
+        try:
+            import datetime as _dt
+            t0 = _dt.datetime.fromisoformat(since.replace("Z", "+00:00"))
+            waited_min = max(0.0, (_dt.datetime.now(_dt.timezone.utc) - t0).total_seconds() / 60.0)
+        except ValueError:
+            pass
+        gate_id = None
+        if waited_min >= limit:
+            existing = next((g for g in busy_gates if g.get("status") == "open"), None)
+            if existing is None:
+                gate = self.store.new_gate(
+                    self.st, "escalation",
+                    {"task": task["id"], "node": task["subject"].get("node"), "reason": "resources_busy"},
+                    f"Stage launch for {run['id']} has been waiting on busy resources for "
+                    f"{waited_min:.0f} min (limit {limit}; latest note: {note[:160]}). Approve = keep "
+                    "waiting (the card stays open and the clock restarts); reject = route the node per "
+                    "policy. Fewer devices or a higher allowance are launch-time choices, not this gate's.")
+                self.store.event("engine", "stage_launch_busy_escalated", task=task["id"], gate=gate["id"],
+                                 waited_minutes=round(waited_min, 1))
+                gate_id = gate["id"]
+            else:
+                gate_id = existing["id"]
+        self.save()
+        return {"kind": "waiting", "task": task["id"], "run": run["id"], "busy_waits": len(waits),
+                "escalation": gate_id,
+                "reason": (f"resources busy ({note[:120]}); no attempt spent - relaunch when devices free up, "
+                           f"or launch with fewer devices; after {limit} min of waiting the engine asks the user"
+                           + (f" (gate {gate_id} is open now)" if gate_id else ""))}
 
     def _submit_stage_watch(self, task: dict) -> dict:
         run = self.store.get_run(self.st, task["subject"].get("run"))

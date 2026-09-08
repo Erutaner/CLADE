@@ -1,4 +1,4 @@
-"""Pure recovery planning helpers for the v10 control-plane boundary.
+"""Pure recovery planning helpers for the control-plane boundary.
 
 This module deliberately does not mutate engine state, write files, schedule
 tasks, or launch/cancel external work.  It answers the questions that must be
@@ -335,7 +335,7 @@ def hard_descendants(graph: Mapping[str, Any], registry: Mapping[str, Any],
     for node in nodes:
         if node.get("role") != "platform":
             continue
-        # R9 (external audit r6): only a platform that actually REACHED
+        # Only a platform that actually REACHED
         # "enabled" creates hard dependency edges. A failed row still carrying
         # enabled_services made every consumer of the slug a phantom hard
         # descendant (nothing was ever scheduled under it), reclassifying an
@@ -391,7 +391,7 @@ def pending_authority_consumers(graph: Mapping[str, Any],
     must be included in a recovery plan/hold rather than silently continuing on
     the old authority.
 
-    R11-009: a plan card that rendered the recovered node's SHARED ARTIFACT
+    a plan card that rendered the recovered node's SHARED ARTIFACT
     (non-parent consumption) and an open task whose on-disk NODE_SPEC draft
     already consumes such an artifact are consumers too - the card's
     artifact_receipts (recorded at materialization) and the draft's consumes

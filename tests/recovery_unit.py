@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Pure unit checks for the v9.2 recovery planning helpers."""
+"""Pure unit checks for the recovery planning helpers."""
 from __future__ import annotations
 
 import os
@@ -220,7 +220,7 @@ def main() -> None:
     dependency_checks()
     plan_and_head_checks()
     classification_checks()
-    print(f"V9.2 RECOVERY UNIT GREEN: {CHECKS} checks passed")
+    print(f"RECOVERY UNIT GREEN: {CHECKS} checks passed")
 
 
 if __name__ == "__main__":

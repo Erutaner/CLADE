@@ -61,10 +61,30 @@ requires another non-automatic user decision.
 Also state the approved **training-seed policy** by name: `record_only` means
 one recorded seed and no full retraining repeats; `preplanned` names the exact
 run count and aggregation fixed before evolution, with every seed traversing
-every workflow stage. State the **ablation policy**
-by name: `off`, or `targeted` with exactly one changed-component run per
-manually approved diagnostic node. Make clear that neither policy is inferred
-from later results and targeted ablation never multiplies by seed count.
+every workflow stage. State the **ablation allowance**
+by number: `evidence_policy.ablation.budget_multiple`, how much of a winning
+node's own cost the engine may spend settling that node's mechanism (0 = never;
+the engine opens the ablation itself after a program-level win in research mode; inside the
+allowance its gates follow the autonomy policy, above it the user decides).
+Now that the machines are known, settle the two money facts that depend on
+them and write both to `.evo/config.json` with `evo amend --path
+.evo/config.json --from <copy> --reason ...` (they are notebook facts, outside
+the signed contract, changeable any time):
+- **devices**: "How many accelerators may our jobs hold at once on this
+  machine?" -> `resource_contract.max_devices` (an integer; leave null when a
+  scheduler allocates). Agents then pick whichever devices are free under that
+  number at each launch - never particular cards.
+- **node ceiling**: "The most ONE experiment may spend, per unit?" ->
+  `resource_contract.node_ceiling` + `node_ceiling_source` (`user`) +
+  `node_ceiling_basis`. If the user cannot name it, propose one from the
+  hardware you just recorded and the field's usual cost for this scale (two
+  GPUs do not pretrain a 100B model; a 1B-parameter finetune is usually N
+  GPU-hours in this literature), record it as `estimated` with that basis,
+  and say it is changeable. A declared cap or the agent's own estimate above
+  the ceiling puts the workflow gate in front of the user even under full_auto.
+State both in this section (the numbers, or that the user chose not to set
+them). Make clear that neither policy is inferred from
+later results and that an ablation never crosses with the seed protocol.
 
 A user gate follows this task: the user approves the review or rejects it with a
 note (which reopens the infra scan). Write for that reader.

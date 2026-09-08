@@ -1,4 +1,4 @@
-"""Gate lifecycle (v10): reports, protection/auto-resolve policy (driven by
+"""Gate lifecycle: reports, protection/auto-resolve policy (driven by
 eflow.GATE_POLICY), decisions and their side effects.
 """
 
@@ -7,6 +7,7 @@ from __future__ import annotations
 import json
 import shutil
 
+import eamend
 import ecanary
 import econfig
 import eflow
@@ -51,6 +52,19 @@ def _facts_field_diff(cur, prop, *, indent: str = "    ") -> list[str]:
 
 
 class GateMixin:
+    def _project_facts_report_lines(self) -> list[str]:
+        """Project-level notebook rows (floors, margins, required cells, the
+        ablation allowance) for the idea and workflow gates: the user decides
+        knowing which ruler changed, when and why. Empty when none."""
+        try:
+            rows = list(eamend.history_lines(self.store, project=True) or [])
+        except (AttributeError, TypeError, OSError, ValueError):
+            rows = []
+        if not rows:
+            return []
+        return ["- Project facts corrected (floors / margins / required / ablation allowance):"] \
+            + [f"  {line}" for line in rows]
+
     def _gate_report(self, gate: dict) -> list[str]:
         """Engine-built, human-readable status block embedded in every gate card.
         Gates are the moments the user is guaranteed to be paying attention -
@@ -77,9 +91,8 @@ class GateMixin:
             if hist:
                 out.append(f"Last round's lanes ({hist[-1].get('id')}):")
                 out.extend(f"  {line}" for line in self._round_summary_block(hist[-1].get("id")))
-                # v12: retirement is a strategy decision the user reviews HERE.
-                # It used to surface only in GRAPH.md/events, so a user at this
-                # gate never saw which lineages the close just retired. This is
+                # Retirement is a strategy decision the user reviews HERE, not
+                # something to discover later in GRAPH.md/events. This is
                 # an advisory read on the user's only decision surface: a
                 # damaged file degrades the line, never the gate.
                 try:
@@ -133,8 +146,14 @@ class GateMixin:
             purpose = econfig.lane_purpose(meta)
             if purpose == "targeted_ablation":
                 ab = meta.get("ablation") or {}
-                out.append(f"- TARGETED ABLATION (manual approval required): {ab.get('question') or '?'}")
-                out.append(f"- one changed-component run: {ab.get('intervention') or '?'}")
+                inside, lines = evalid.ablation_design_within_allowance(self.ctx(), lane)
+                out.append(f"- TARGETED ABLATION ({'inside the pre-authorized allowance' if inside else 'ABOVE the allowance - your decision'}): "
+                           f"{ab.get('question') or '?'}")
+                out.append(f"- changed-component run(s): {ab.get('costly_runs')} - {ab.get('intervention') or '?'}")
+                out.append(f"- run count sized by: {ab.get('runs_basis') or '?'}")
+                out.append(f"- settles the parent's mechanism: {ab.get('settles_parent_mechanism')}")
+                for line in lines:
+                    out.append(f"- allowance: {line}")
                 out.append(f"- decision if effect/no-effect: {ab.get('decision_if_effect') or '?'} / "
                            f"{ab.get('decision_if_no_effect') or '?'}")
             elif purpose == "diagnostic_probe":
@@ -156,7 +175,7 @@ class GateMixin:
                 out.append(f"- unblocks: {mt.get('expected_unblock') or '?'} | semantics: "
                            f"{boundary.get('semantic_intent') or '?'} (parity settled over every decision cell)")
             if purpose == "exploratory":
-                # (final audit C16) approving this waives real rigor - the user
+                #  approving this waives real rigor - the user
                 # must see the whole trade before deciding, like every other
                 # manual-only purpose above.
                 out.append("- EXPLORATORY SCOUT (manual approval required): approving WAIVES registered "
@@ -190,7 +209,7 @@ class GateMixin:
             if lane.get("confirmatory_of"):
                 out.append(f"- CONFIRMATORY re-run of exploratory {lane.get('confirmatory_of')}: same kernel "
                            "under full pre-registration - the only legal duplication of a scout's kernel")
-            # v11: the human sees whose judgment they are trusting - a release
+            # The human sees whose judgment they are trusting - a release
             # review from the authoring session is a self-audit and says so.
             provenance = evalid.review_provenance_lines(self.ctx(), lane)
             if provenance:
@@ -207,6 +226,11 @@ class GateMixin:
             if review_suffix:
                 reads.append(f".evo/ideas/{iid}{review_suffix} (adversarial review verdict)")
             out.append("- read: " + ", ".join(reads))
+            history = eamend.history_lines(self.store, lane=str(lane.get("id") or "") or None, idea=iid)
+            if history:
+                out.append("- notebook corrections on this lane/idea:")
+                out.extend(f"  {line}" for line in history)
+            out.extend(self._project_facts_report_lines())
         elif kind == "workflow_approval":
             nid = str(subj.get("node") or "")
             node = self.node(nid) or {}
@@ -244,17 +268,28 @@ class GateMixin:
                        f"1 standard eval + {ep.get('extra_eval_arms', '?')} extra eval arm(s).")
             if node.get("experiment_purpose") == "targeted_ablation":
                 ab = spec.get("ablation") or {}
-                out.append(f"- manual targeted-ablation spend: exactly {ab.get('costly_runs')} run; "
-                           f"question: {ab.get('question') or '?'}")
+                inside, lines = evalid.ablation_spec_within_allowance(self.ctx(), node, spec)
+                out.append(f"- targeted-ablation spend ({'inside the pre-authorized allowance' if inside else 'ABOVE the allowance - your decision'}): "
+                           f"{ab.get('costly_runs')} changed-component run(s) "
+                           f"({ab.get('runs_basis') or 'no sizing basis recorded'}); question: {ab.get('question') or '?'}")
+                for line in lines:
+                    out.append(f"- allowance: {line}")
             for s in stages:
                 control = s.get("control") or {}
                 cons = ", ".join(
                     (c.get("artifact") or f"stage '{c.get('stage')}'") if isinstance(c, dict) else str(c)
                     for c in (s.get("consumes") or [])) or "-"
                 limits = ", ".join(f"{k}<={v}" for k, v in sorted((((s.get('budget') or {}).get('limits')) or {}).items()))
-                out.append(f"  - stage '{s.get('name')}': {control.get('mode')}/{control.get('multiplicity')}; "
+                out.append(f"  - stage '{s.get('name')}': {control.get('mode') or '-'}/{control.get('multiplicity') or '-'}; "
                            f"budget {limits or '-'}; consumes {cons}; produces {len(s.get('produces') or [])} artifact(s)")
+            out.extend(evalid.workflow_spend_review(self.ctx(), node, spec)[0])
             out.append(f"- spec: .evo/nodes/{nid}/NODE_SPEC.json | idea: {node.get('idea_doc') or '-'}")
+            history = eamend.history_lines(self.store, node=nid, lane=str(node.get("lane") or "") or None,
+                                           idea=str(wf_lane.get("idea") or "") or None)
+            if history:
+                out.append("- notebook corrections on this node/idea (weigh WHEN each was made):")
+                out.extend(f"  {line}" for line in history)
+            out.extend(self._project_facts_report_lines())
         elif kind == "human_study_confirm":
             nid = str(subj.get("node") or "")
             out.append(f"Node {nid} asks to settle human-study evaluation cell(s). The engine "
@@ -322,8 +357,8 @@ class GateMixin:
             abl = ((self.cfg.get("evidence_policy") or {}).get("ablation") or {})
             out.append(f"- training seed policy: {rep.get('mode')} (planned runs {rep.get('planned_runs')}, "
                        f"aggregation {rep.get('aggregation')})")
-            out.append(f"- ablation policy: {abl.get('mode')} (max costly runs per targeted node "
-                       f"{abl.get('max_costly_runs_per_node')})")
+            out.append(f"- ablation allowance: {econfig.ablation_budget_multiple(self.cfg):g} x a node's own "
+                       "cost (0 = mechanisms stay deferred)")
             out.append("- approval authorizes the next tiny engine-run infrastructure canary; it does not "
                        "declare the infrastructure ready by itself")
             prov = eutil.read_json(eutil.rpath(self.store.repo, ".evo/profile/PROVISION.json"), None)
@@ -409,7 +444,7 @@ class GateMixin:
         elif kind == "abandon_request":
             out.append("The agent proposes STOPPING this direction as dead - you are being asked "
                        "to discard admitted work on its judgment.")
-            # (final audit C20) the discard decision comes WITH its numbers -
+            #  the discard decision comes WITH its numbers -
             # what the subject is, what it measured, and what is already paid.
             if subj.get("node"):
                 n = self.node(str(subj.get("node"))) or {}
@@ -427,6 +462,96 @@ class GateMixin:
             out.append(f"- agent's reason: {str(subj.get('reason') or '(none recorded)')}")
             out.append("- approve = deliberate stop, recorded as a decision (not a failure); "
                        "reject = the work continues unchanged.")
+        elif kind == "posthoc_claim":
+            record = next((c for c in self.st.get("posthoc_claims", [])
+                           if str(c.get("id") or "") == str(subj.get("claim") or "")), None) or {}
+            node = self.node(str(subj.get("node") or "")) or {}
+            proposal = eutil.read_json(eutil.rpath(self.store.repo, str(record.get("proposal_path") or "")), {}) or {}
+            summary = node.get("evaluation_summary") or {}
+            meta = evalid._idea_meta(self.ctx(), node) if node else {}
+            original_scope = (meta.get("claim_scope") or {}) if isinstance(meta, dict) else {}
+            settlement = record.get("settlement") or {}
+            out.append(f"- POST-HOC CLAIM {record.get('id')} on {node.get('id')} (concluded "
+                       f"{str(node.get('concluded_at') or node.get('updated_at') or '?')[:16]}; "
+                       f"claim filed {str(record.get('filed_at') or '?')[:16]})")
+            out.append(f"- the ORIGINAL bet: {original_scope.get('kind') or '?'} on "
+                       f"{', '.join(original_scope.get('target_cells') or []) or '?'}; settled verdict "
+                       f"{node.get('verdict')} / effect {node.get('effect_contract_status')} / promotion "
+                       f"{node.get('scientific_promotion_status')} - this record does not change")
+            lines = "; ".join(f"{r.get('target_cell')} {r.get('direction')} >= {r.get('minimum_worthwhile_delta')}"
+                              for r in (proposal.get("lines") or []) if isinstance(r, dict))
+            out.append(f"- the NEW claim: {(proposal.get('claim_scope') or {}).get('kind')} on "
+                       f"{', '.join((proposal.get('claim_scope') or {}).get('target_cells') or [])}; lines: {lines}")
+            out.append(f"- settled from the SAME sealed metrics: verdict {settlement.get('verdict')} / effect "
+                       f"{settlement.get('effect_contract_status')}; wins on "
+                       f"{', '.join(settlement.get('target_wins') or []) or 'none'}; losses on "
+                       f"{', '.join(settlement.get('target_losses') or []) or 'none'}")
+            out.append(f"- proposer's reason: {str(proposal.get('reason') or '')[:400]}")
+            # The claim is judged under the node's LIVE mechanism (an ablation
+            # write-back or an instrument correction may have moved it since
+            # the original probe), so the user sees the promotion approval
+            # would actually produce.
+            live: dict = {}
+            if node and proposal and node.get("status") == "concluded":
+                try:
+                    live = evalid.assess_posthoc_claim(self.ctx(), node, proposal) or {}
+                except (KeyError, TypeError, ValueError, OSError):
+                    live = {}
+            would = self.posthoc_claim_settlement(node, live or settlement)["scientific_promotion_status"] \
+                if node else "?"
+            out.append(f"- judged under the node's LIVE mechanism: {egraph.mechanism_label(node) if node else '?'}; "
+                       f"approval would set scientific promotion {node.get('scientific_promotion_status')} -> {would}")
+            refusal = self.posthoc_claim_refusal(node, record) if node else None
+            if refusal:
+                out.append(f"- NOTE: approve will be refused (nothing is recorded by a refused decision): {refusal}")
+            out.append("- approve = this claim becomes the one inheritance reads (labeled post-hoc on the "
+                       "frontier); reject = recorded as rejected, nothing changes. Either way the original "
+                       "bet and its verdict stay exactly as settled.")
+        elif kind == "instrument_correction":
+            record = next((c for c in self.st.get("corrections", [])
+                           if str(c.get("id") or "") == str(subj.get("correction") or "")), None) or {}
+            node = self.node(str(subj.get("node") or "")) or {}
+            original, corrected = record.get("original") or {}, record.get("corrected") or {}
+            proposal = eutil.read_json(eutil.rpath(self.store.repo, str(record.get("proposal_path") or "")), {}) or {}
+            out.append(f"INSTRUMENT CORRECTION on node {node.get('id')} '{node.get('title') or '?'}': an "
+                       "independent judge ruled the mechanism rule's FORMULA was wrong. Nothing is rerun; "
+                       "approval re-settles the SAME sealed observations under the corrected rule.")
+            out.append(f"- original rule {json.dumps(original.get('rule') or {}, ensure_ascii=False)} over "
+                       f"{original.get('values')} -> {original.get('status')}")
+            out.append(f"- corrected rule {json.dumps(corrected.get('rule') or {}, ensure_ascii=False)} over "
+                       f"{corrected.get('values')} -> {corrected.get('status')}"
+                       + (f" ({(corrected.get('settlement') or {}).get('reason')})"
+                          if (corrected.get("settlement") or {}).get("reason") else ""))
+            out.append(f"- applicant's argument: {str(proposal.get('argument') or '')[:400]}")
+            out.append(f"- formula: {str(proposal.get('formula') or '')[:200]}")
+            out.append(f"- judge's ruling: {record.get('review_verdict')} "
+                       f"(read {record.get('review_path')}); applicant session "
+                       f"{record.get('applicant_session') or 'unrecorded'}, judge session "
+                       f"{record.get('review_session') or 'unrecorded'}")
+            out.append(f"- consequence: the probe's answer {original.get('status')} -> {corrected.get('status')} "
+                       "on record (probe_result, with the correction id). Parenthood does not move: a probe "
+                       "is information about whether the trained model uses the part; the causal status "
+                       f"(currently {node.get('mechanism_status') or '-'}) is settled only by a targeted "
+                       "ablation. The original OUTCOME stays sealed as history.")
+            out.append("- symmetry: this channel re-judges in BOTH directions; a formula error that "
+                       "inflated a passing gate is corrected the same way.")
+            out.append("- approve = re-settle under the corrected rule; reject = keep the original settlement "
+                       "(the proposal and ruling stay on record either way).")
+        elif kind == "escalation" and subj.get("reason") == "resources_busy":
+            t = self.store.get_task(self.st, str(subj.get("task") or ""))
+            run = self.store.get_run(self.st, str(((t or {}).get("subject") or {}).get("run") or ""))
+            waits = list((run or {}).get("busy_waits") or [])
+            out.append(f"The launch for node {subj.get('node')} keeps finding the shared machine busy "
+                       f"({len(waits)} report(s); limit {econfig.busy_wait_minutes(self.cfg)} min of waiting). "
+                       "Nothing has been trained and no attempt was spent.")
+            for w in waits[-3:]:
+                out.append(f"  - {w.get('at')}: {w.get('note')}")
+            out.append("- approve = keep waiting: the launch card stays open and the wait window restarts "
+                       "from this decision; the agent relaunches when devices free up (fewer devices "
+                       "than planned is a launch-time choice and is recorded, not judged).")
+            out.append("- reject = stop waiting: the launch card is cancelled and the node is abandoned "
+                       "(nothing paid for is lost). Raise resource_contract.max_devices or "
+                       "busy_wait_minutes with 'evo amend' if the allowance itself is the problem.")
         elif kind == "escalation":
             out.append(f"Something is stuck and policy says ask: {json.dumps(subj, ensure_ascii=False)}")
             t = self.store.get_task(self.st, str(subj.get("task") or ""))
@@ -451,8 +576,8 @@ class GateMixin:
         return out
 
     def _last_gate_note(self, kind: str, statuses: tuple[str, ...] = ("rejected",)) -> str | None:
-        """Latest user decision note on a gate of this kind. R11 matrix sweep
-        (M1): the caller picks which decision arm can carry a follow-up note -
+        """Latest user decision note on a gate of this kind. The caller picks
+        which decision arm can carry a follow-up note -
         infra_canary_blocked's continuable arm is APPROVE (reject terminates
         the project), so the rejected-only default silently discarded the
         user's "here is what I fixed" note on the exact retry it was for."""
@@ -470,22 +595,19 @@ class GateMixin:
 
     def _needs_workflow_gate(self, node: dict) -> bool:
         if econfig.lane_purpose(node) in econfig.INSTRUMENTAL_PURPOSES:
-            # Instrumental spend is never silently released by full_auto.  This
-            # used to name targeted_ablation alone, while
+            # Instrumental spend is never silently released by full_auto:
             # eflow.GATE_POLICY["workflow_approval"].manual_when lists all three
-            # instrumental purposes - so for probe and maintenance the table
-            # declared a protection the creation path never delivered, and the
-            # entry was unreachable decoration: under full_auto (any cost class)
-            # a repair's retraining launched with no human decision at all.
-            # Both caps are one per round, so this costs at most two extra
-            # decisions per round and makes manual_when load-bearing.
+            # instrumental purposes, and creation must deliver exactly that
+            # protection - otherwise under full_auto (any cost class) a
+            # repair's retraining would launch with no human decision at all.
+            # Every instrumental cap is one per round, so this costs at most a
+            # few extra decisions per round and keeps manual_when load-bearing.
             return True
-        # R3 logic audit: the SAME table lists 'exploratory' in manual_when,
+        # The SAME table lists 'exploratory' in manual_when,
         # and carbon-copy lanes (scaling follow-up / confirmatory) buy real
-        # training with a duplicated kernel. The auto-resolve guards protected
-        # a gate this creation path never made under full_auto - the exact bug
-        # class fixed above for instrumental purposes, reintroduced when v11.1
-        # added these doors. Creation must match the table and the CLI promise
+        # training with a duplicated kernel. The auto-resolve guards can only
+        # protect a gate this creation path actually makes under full_auto,
+        # so creation must match the table and the CLI promise
         # ("exploratory and kernel-copy gates ALWAYS wait for you").
         if econfig.lane_purpose(node) in econfig.EXPLORATORY_PURPOSES:
             return True
@@ -526,7 +648,7 @@ class GateMixin:
         start_label = (f" beginning at {stage}" if stage and repeat_operation == "workflow" else
                        f" {stage}" if stage else "")
         source_row = self.store.get_run(self.st, source_run) or {}
-        # R10-016: when the failed attempt belongs to the approved repeat
+        # When the failed attempt belongs to the approved repeat
         # buy-back lane, a THIRD exit exists and must be on the decision
         # surface - waiving keeps the paid first measurement and retires this
         # very gate; hiding it compressed a three-way user decision into
@@ -537,22 +659,21 @@ class GateMixin:
             "keeps the PAID first measurement as the verdict basis, cancels this gate, and the "
             "node proceeds to analysis - neither a new spend nor an abandonment."
             if source_row.get("repeat_measure_attempt") else "")
-        # v12 decision-surface honesty (same principle as the third exit
-        # above): when the source attempt died on a declared budget cap, the
-        # user must know BEFORE approving that a deterministic cost profile
+        # Decision-surface honesty (same principle as the third exit above):
+        # when the source attempt died on a declared budget cap, the user
+        # must know BEFORE approving that a deterministic cost profile
         # (registered RNG, unchanged code) makes the replacement spend roughly
         # the SAME amount and fail the SAME cap - approval buys a rerun, not a
-        # different number. The governed alternative is named, not hidden.
+        # different number. The remedy for a mis-derived cap is named.
         budget_trap = (
             " CAUTION (budget-cap failure): the failed attempt exceeded a declared budget cap. "
             "If its cost profile is deterministic, a replacement will repeat the same overage and "
             "die the same way; approving then only spends the experiment again. If the cap itself "
-            "was mis-derived, the governed remedy is the config key stage_budget_tolerance "
-            "(validity band >= 1.0, affects future ingestions only) - set it BEFORE approving the "
-            "replacement so the rerun's evidence can be valid. (The intended FIRST exit for an "
-            "acceptable overage is earlier: while the source RUN's evidence is still pending, "
-            "raising the key and 'evo run-reconcile --run <source RUN>' adopts the SAME evidence "
-            "with no rerun; this gate exists after that evidence was disposed of.)"
+            "was mis-derived, correct it on record first - 'evo amend' the node's NODE_SPEC.json "
+            "budget.limits with the reason - so the rerun's evidence can be valid. (The intended "
+            "FIRST exit for an acceptable overage is earlier: while the source RUN's evidence is "
+            "still pending, amending the cap and 'evo run-reconcile --run <source RUN>' adopts the "
+            "SAME evidence with no rerun; this gate exists after that evidence was disposed of.)"
             if any("BUDGET_EXCEEDED" in str(e) for e in (source_row.get("evidence_errors") or []))
             else "")
         return self.store.new_gate(
@@ -579,7 +700,7 @@ class GateMixin:
         return None
 
     def _require_repeat_measure_decision(self, node: dict) -> dict | None:
-        """v11.1 P4: an open repeat-measure offer blocks the evaluation
+        """An open repeat-measure offer blocks the evaluation
         analysis (the decision changes what that analysis must report)."""
         for gate in reversed(self.st.get("gates", [])):
             if gate.get("kind") == "repeat_measure" \
@@ -598,8 +719,7 @@ class GateMixin:
 
         The policy table is the single statement of which gates are protected
         (user-owned under every autonomy mode) and which auto policy applies;
-        this method interprets the policy ids. Behavior equals v9.2's inline
-        chain - the table is now load-bearing rather than decorative.
+        this method interprets the policy ids; the table is load-bearing.
         """
         policy = eflow.GATE_POLICY.get(str(gate.get("kind") or ""))
         if policy is None:
@@ -616,8 +736,13 @@ class GateMixin:
                 subj = gate.get("subject") or {}
                 lane = self.store.get_lane(self.st, str(subj.get("lane") or "")) or {}
                 if lane.get("experiment_purpose") in policy.manual_when:
-                    return False
-                # v11.1 (R1 fix): a carbon-copy lane (scaling follow-up /
+                    # The ablation allowance is the user's standing pre-authorization:
+                    # a design inside it falls through to the ordinary autonomy
+                    # policy; anything larger, and every probe or repair, waits.
+                    if lane.get("experiment_purpose") != "targeted_ablation" \
+                            or not evalid.ablation_design_within_allowance(self.ctx(), lane)[0]:
+                        return False
+                # A carbon-copy lane (scaling follow-up /
                 # confirmatory re-run) buys real training with a duplicated
                 # kernel - a spend-shaped decision, user-owned like
                 # repeat_spend, never auto-approved.
@@ -625,13 +750,18 @@ class GateMixin:
                     return False
                 iid = str(subj.get("idea") or "")
                 meta = eutil.read_json(eutil.rpath(self.store.repo, f".evo/ideas/{iid}.meta.json"), {}) or {}
-                if meta.get("experiment_purpose") in policy.manual_when:
-                    return False
+                meta_purpose = meta.get("experiment_purpose")
+                if meta_purpose in policy.manual_when:
+                    if meta_purpose != "targeted_ablation" or lane.get("experiment_purpose") != "targeted_ablation" \
+                            or not evalid.ablation_design_within_allowance(self.ctx(), lane)[0]:
+                        return False
             if gate.get("kind") == "workflow_approval":
                 subj = gate.get("subject") or {}
                 node = self.node(str(subj.get("node") or "")) or {}
                 if node.get("experiment_purpose") in policy.manual_when:
-                    return False
+                    if node.get("experiment_purpose") != "targeted_ablation" \
+                            or not evalid.ablation_spec_within_allowance(self.ctx(), node, self._spec(node))[0]:
+                        return False
                 lane = self.store.get_lane(self.st, str(node.get("lane") or "")) or {}
                 if lane.get("scaling_followup_of") or lane.get("confirmatory_of"):
                     return False
@@ -649,7 +779,13 @@ class GateMixin:
                 return True
             return False
         if auto_policy == "escalation_on_stuck":
-            # S2 (liveness audit): the drill escalation inside a pending facts
+            # A launch waiting on a busy shared machine is nobody's failure:
+            # whatever on_stuck says, only a person decides to keep waiting
+            # or to stop - an unattended reject would abandon a node over a
+            # colleague's job.
+            if (gate.get("subject") or {}).get("reason") == "resources_busy":
+                return False
+            # The drill escalation inside a pending facts
             # revision decides between re-proving and ROLLING BACK the
             # revision - both are user calls on a mid-rounds project; an
             # unattended reject here would bury paid work over an environment
@@ -659,7 +795,7 @@ class GateMixin:
                     and self.st.get("infra_revision_pending"):
                 return False
             if mode == "full_auto" and self.cfg.get("policy", {}).get("on_stuck") == "abandon":
-                # v11: never auto-reject the escalation of an expensive
+                # Never auto-reject the escalation of an expensive
                 # terminal task - the reject would abandon the fully-trained
                 # node, which is exactly what its protection exists to prevent.
                 # The gate waits for the user instead.
@@ -669,7 +805,7 @@ class GateMixin:
                 # Same protection for NODE-subject escalations raised after the
                 # node's training already ran (eval-failure exhaustion): an
                 # auto-reject would abandon a fully trained node unattended.
-                # R3 logic audit: a stuck-TASK escalation carries the node too
+                # A stuck-TASK escalation carries the node too
                 # now, but resolve it through the task as well so an older
                 # task-only gate row can never dodge the trained-node guard.
                 subj_node = self.node(str((gate.get("subject") or {}).get("node")
@@ -686,12 +822,19 @@ class GateMixin:
             approve = mode == "full_auto" or (
                 mode == "auto" and self.cfg.get("budgets", {}).get("rounds_max", 0) > 0)
         elif auto_policy == "workflow_cost":
+            nid = gate.get("subject", {}).get("node")
+            node = self.node(nid) if nid else None
+            spec = self._spec(node) if node else {}
+            # Money is protected BEFORE it is spent: whatever the autonomy, a
+            # declared cap or the agent's own estimate above the user's node
+            # ceiling puts the gate in front of a person with the numbers
+            # side by side (the engine projects nothing itself).
+            if node and evalid.workflow_spend_review(self.ctx(), node, spec)[1]:
+                return False
             if mode == "full_auto":
                 approve = True
             elif mode == "auto":
-                nid = gate.get("subject", {}).get("node")
-                node = self.node(nid) if nid else None
-                cost = (self._spec(node) if node else {}).get("cost_class", "heavy")
+                cost = spec.get("cost_class", "heavy")
                 approve = not econfig.cost_at_least(
                     cost, self.cfg.get("policy", {}).get("cost_gate_class", "heavy"))
         if approve:
@@ -703,13 +846,15 @@ class GateMixin:
         self._assert_frozen_contract()
         gate = self.store.get_gate(self.st, gate_id)
         if gate is None:
-            raise SystemExit(f"[evo] no gate {gate_id}")
+            raise SystemExit(f"[evo] no gate {gate_id}; 'evo next' presents the pending gate "
+                             "('evo status' lists open gates)")
         subject = gate.get("subject") or {}
         self._assert_artifact_seals(only_lane=str(subject.get("lane") or "") or None,
                                     only_node=str(subject.get("node") or "") or None)
         if gate["status"] != "open":
-            raise SystemExit(f"[evo] gate {gate_id} already {gate['status']}")
-        # R7: re-check holds at the DECISION point. Hold creation pauses the
+            raise SystemExit(f"[evo] gate {gate_id} already {gate['status']}; nothing to decide - run "
+                             "'evo next' for the current card")
+        # Re-check holds at the DECISION point. Hold creation pauses the
         # gates that exist at that moment; a gate created afterwards (e.g. a
         # propose-abandon injected during a repairing recovery) could be
         # decided inside the hold's scope and mutate authority the brake was
@@ -769,7 +914,7 @@ class GateMixin:
 
     def _decide_gate(self, gate: dict, *, approve: bool, note: str | None, actor: str,
                      retry_stage: str | None = None) -> dict:
-        # R8 audit: several decision arms abandon nodes/lanes. Detect any
+        # Several decision arms abandon nodes/lanes. Detect any
         # graph-shaped change across this decision and re-render the formal
         # consumers in the same persisted step (see _sync_graph_consumers).
         graph_sig_before = self._graph_consumer_sig()
@@ -787,15 +932,17 @@ class GateMixin:
             if lane_now is None or (gate.get("subject") or {}).get("contract_digest") != \
                     self._idea_contract_digest(lane_now):
                 raise SystemExit("[evo] idea approval does not match the active sealed idea+review contract; "
-                                 "approval was not recorded")
+                                 "approval was not recorded - run 'evo next' to re-render the gate "
+                                 "against the current contract ('evo doctor' if it persists)")
         if gate.get("kind") == "workflow_approval":
             node_now = self.node(str((gate.get("subject") or {}).get("node") or "")) or {}
             if (gate.get("subject") or {}).get("contract_digest") != \
                     str((node_now.get("spec_seal") or {}).get("digest") or ""):
                 raise SystemExit("[evo] workflow approval does not match the active sealed NODE_SPEC; "
-                                 "approval was not recorded")
+                                 "approval was not recorded - run 'evo next' to re-render the gate "
+                                 "against the current spec ('evo doctor' if it persists)")
         if gate.get("kind") == "abandon_request" and approve:
-            # R9 (external audit r6): the hold guard tested only the DECLARED
+            # The hold guard tested only the DECLARED
             # subject, but approving a lane abandonment cascades to lane.node -
             # a node-scoped hold (the standing brake of a pending recovery) was
             # walked straight past because the gate named only the lane. Expand
@@ -813,12 +960,14 @@ class GateMixin:
                 covering = [h for h in covering if h not in replay_authorized]
                 if covering:
                     raise SystemExit(f"[evo] approving this abandonment would retire node {eff_node}, "
-                                     f"which is under active hold(s) {', '.join(covering)}; resolve "
-                                     "that recovery (or resume the hold) first - decision not recorded")
+                                     f"which is under active hold(s) {', '.join(covering)}; finish that "
+                                     "recovery first ('evo recover-status' names the step: recover-apply / "
+                                     "recover-abort) or resume the hold ('evo resume --hold <id> --note "
+                                     "...') - decision not recorded")
         if gate.get("kind") == "round_continue" and not approve:
-            # R9: rejecting round continuation writes phase=done. Done must not
+            # Rejecting round continuation writes phase=done. Done must not
             # bury an in-flight recovery - the case and its hold would survive
-            # invisibly with no next ever presenting them again. R7 follow-up:
+            # invisibly with no next ever presenting them again;
             # repairing/replaying count too (their RUN may be in flight; DONE
             # would bury live training).
             pending_case = self._pending_recovery_case()
@@ -826,7 +975,8 @@ class GateMixin:
                 raise SystemExit(f"[evo] recovery {pending_case.get('id')} is still "
                                  f"{pending_case.get('status')} - "
                                  + self._recovery_review_hint(pending_case)
-                                 + "; finish it before ending the project - decision not recorded")
+                                 + "; finish it before ending the project ('evo recover-status' "
+                                   "reprints this step) - decision not recorded")
         if gate.get("kind") == "infra_canary_blocked":
             canary_task = self.store.get_task(
                 self.st, str((gate.get("subject") or {}).get("task") or "")) or {}
@@ -835,7 +985,8 @@ class GateMixin:
                 self.store, canary_record, expect_task=canary_task.get("id"))
             if canary_errs or canary_record.get("status") != "blocked":
                 raise SystemExit("[evo] blocked infrastructure canary evidence changed; gate decision "
-                                 "was not recorded:\n  - "
+                                 "was not recorded - run 'evo next' to re-render the gate against the "
+                                 "current record:\n  - "
                                  + "\n  - ".join(canary_errs or ["CANARY_RUN_NOT_BLOCKED"]))
         if gate.get("kind") == "infra_confirm" and approve:
             errs = econfig.validate_config(self.cfg)
@@ -843,7 +994,9 @@ class GateMixin:
             facts = einfra.load_facts(self.store, self.cfg)
             errs.extend(einfra.validate_facts(self.store, facts))
             if errs:
-                raise SystemExit("[evo] bootstrap contract is no longer valid; approval was not recorded:\n  - "
+                raise SystemExit("[evo] bootstrap contract is no longer valid; approval was not recorded - "
+                                 "fix the listed fields in .evo/config.json (or reject this gate with a "
+                                 "note so configure is rebuilt), then decide again:\n  - "
                                  + "\n  - ".join(errs))
             reviewed = str((self.st.get("profile_digests") or {}).get("bootstrap_review_config") or "")
             current = econfig.bootstrap_contract_digest(self.cfg)
@@ -872,11 +1025,11 @@ class GateMixin:
                 f"--retry-stage to abandon. The gate is still open.")
         if gate.get("kind") == "idea_approval" and not approve and retry_stage:
             # A rewind stage belongs to a lane FAMILY. argparse offers every
-            # stage for every gate, so a stage the lane does not have used to
+            # stage for every gate, so a stage the lane does not have must not
             # fall through the dispatch chain to the abandon branch: the lane
-            # was destroyed with no hint that the requested rewind was
+            # would be destroyed with no hint that the requested rewind was
             # impossible, and since the cap counts lanes opened, the round's
-            # instrumental slot went with it and could not be recovered.
+            # instrumental slot would go with it, unrecoverable.
             # Refuse before anything mutates - the gate stays open, so the user
             # simply decides again with a stage that exists.
             lane_for_stage = self.store.get_lane(self.st, (gate.get("subject") or {}).get("lane")) or {}
@@ -893,15 +1046,40 @@ class GateMixin:
             lane = self.store.get_lane(self.st, (gate.get("subject") or {}).get("lane"))
             if (lane or {}).get("search_origin") == "theory_derived":
                 raise SystemExit("[evo] a theory-derived program cannot reopen its source theorem after program "
-                                 "selection; reject to sketch only if the same sealed theory remains the source, "
-                                 "or open a new theory-derived lane for a changed theorem")
+                                 "selection; reject with --retry-stage sketch only if the same sealed theory "
+                                 "remains the source, or open a new theory-derived lane (next open_round "
+                                 "portfolio) for a changed theorem. The gate is still open.")
             winner = self.ctx().winner_sketch(lane or {}) or {}
             role = str(winner.get("theory_role") or "none")
             if role == "none":
                 raise SystemExit("[evo] this winner froze theory_role='none'; retry sketch to change the "
                                  "scientific contract rather than attaching post-selection theory")
             if retry_stage == "pose" and role != "derivational":
-                raise SystemExit("[evo] pose is legal only for a winner that precommitted derivational theory")
+                raise SystemExit("[evo] pose is legal only for a winner that precommitted derivational theory; "
+                                 "reject with --retry-stage sketch (or theorize) instead. The gate is still open.")
+        if gate.get("kind") == "posthoc_claim":
+            # Everything that can refuse a post-hoc claim decision runs BEFORE
+            # the gate row or the event log changes: a refusal has no side
+            # effects (the gate stays open, no orphan decision event).
+            import eseal
+            claim_subject = gate.get("subject") or {}
+            claim_record = next((c for c in self.st.get("posthoc_claims", [])
+                                 if str(c.get("id") or "") == str(claim_subject.get("claim") or "")), None)
+            claim_node = self.node(str(claim_subject.get("node") or ""))
+            if claim_record is None or claim_node is None:
+                raise SystemExit(f"[evo] post-hoc claim gate {gate.get('id')} names an unknown claim/node; the "
+                                 "gate is still open - run 'evo doctor'")
+            if approve:
+                refusal = self.posthoc_claim_refusal(claim_node, claim_record)
+                if refusal:
+                    raise SystemExit("[evo] " + refusal)
+                errs = eseal.verify(self.store.repo, claim_record.get("proposal_seal"),
+                                    label=f"claim {claim_record.get('id')} proposal")
+                if errs:
+                    raise SystemExit("[evo] the claim changed since it was filed; decision not applied - "
+                                     "restore the proposal file to its filed bytes, or reject this gate and "
+                                     "re-file with 'evo claim':\n  - "
+                                     + "\n  - ".join(errs))
         gate["status"] = "approved" if approve else "rejected"
         if gate.get("kind") == "idea_approval" and not approve:
             gate["retry_stage"] = retry_stage
@@ -910,18 +1088,18 @@ class GateMixin:
         self.store.event(actor, "gate_decided", gate=gate["id"], kind=gate["kind"],
                          decision=gate["status"], note=note)
         kind, subj = gate["kind"], gate.get("subject", {})
-        # R7 audit: on these kinds a REJECT leaves the subject's task open and
+        # On these kinds a REJECT leaves the subject's task open and
         # unchanged, so the user's correction note lived only on the gate row -
         # a fresh session re-read the same card/bundle with no trace of what
         # the user actually asked for, and a blind resubmit burned an attempt.
         # Route the note into the still-open task's rejection surface (the
         # bundle prints it verbatim) and re-render the card from it.
         if not approve and str(note or "").strip() and kind in ("human_study_confirm", "abandon_request"):
-            # R11-016 + sweep G-1: the owner is matched by IDENTITY, never by
-            # status - a task parked by a hold (paused+queued_after_hold) or
-            # stuck used to miss the delivery entirely, so the user's exact
-            # corrections lived only in gate history and the reopened card
-            # showed a generic rejection. A paused/stuck owner gets the note
+            # The owner is matched by IDENTITY, never by status - a task
+            # parked by a hold (paused+queued_after_hold) or stuck must not
+            # miss the delivery, or the user's exact corrections would live
+            # only in gate history and the reopened card would show a
+            # generic rejection. A paused/stuck owner gets the note
             # stamped now; its own reopen path rematerializes the card from
             # current truth (last_errors included).
             target = next(
@@ -964,7 +1142,7 @@ class GateMixin:
                                  resources=econfig.resource_limits(self.cfg))
         elif kind == "infra_canary_blocked":
             if not approve and self.st.get("infra_revision_pending"):
-                # C5 (correctness audit): inside a facts-revision window this
+                # Inside a facts-revision window this
                 # reject means "give up on the revision", NOT "stop the
                 # project" - the mid-rounds project rolls back to the proven
                 # facts and continues (same semantics as the drill
@@ -974,7 +1152,7 @@ class GateMixin:
                     self._rollback_infra_revision(drill, note=note)
                     return
             if not approve:
-                # G-5: every semantic stop lands through the one writer
+                # Every semantic stop lands through the one writer
                 self.st["bootstrap_terminated"] = True
                 self._write_terminal_phase(
                     "infrastructure canary blocked and resources not supplied",
@@ -984,9 +1162,9 @@ class GateMixin:
             # On approval infra_drill is still absent from bootstrap_done, so
             # the scheduler creates a fresh task and the engine issues a fresh nonce.
         elif kind == "resource_approval":
-            # R9 (external audit r6): decide on LIVE capacity. The approve side
-            # already capped its grant, but reject ran on the frozen deficit and
-            # destroyed a node whose increase was no longer needed at all.
+            # Decide on LIVE capacity. The approve side caps its grant on live
+            # capacity; a reject on the frozen deficit would destroy a node
+            # whose increase is not needed at all.
             if not subj.get("probe_cap_over") and not self._resource_deficit(subj.get("request") or {}):
                 gate["status"] = "cancelled"
                 gate["resolved_at"] = eutil.utc_now()
@@ -1016,7 +1194,7 @@ class GateMixin:
                                      additions=probe_over, note=note)
                 else:
                     overrides = self.st.setdefault("resource_overrides", {})
-                    # R7: grant what is STILL missing, capped at what the user
+                    # Grant what is STILL missing, capped at what the user
                     # was shown - capacity released between presentation and
                     # decision must not be double-purchased into the contract.
                     shown = {str(u): float(a) for u, a in (subj.get("deficit") or {}).items()
@@ -1068,7 +1246,7 @@ class GateMixin:
                     raise SystemExit("[evo] the PROPOSED facts changed since this gate opened - the "
                                      "approval must adopt exactly the bytes it reviewed; re-run "
                                      "'evo revise-infra' to open a fresh gate for the new proposal")
-                # J1 (interruption audit): the swap must never leave a
+                # The swap must never leave a
                 # window where the facts file is ABSENT (every command dies at
                 # the frozen-contract assertion with no documented recovery).
                 # COPY the old bytes aside, then ONE atomic replacement writes
@@ -1099,7 +1277,7 @@ class GateMixin:
                 self.store.event(actor, "infra_revision_adopted",
                                  changed_blocks=(subj or {}).get("changed_blocks"),
                                  archived=archived_rel, note=note)
-                # S1 (liveness audit): an OPEN launch card would hold the
+                # An OPEN launch card would hold the
                 # one-open-card floor forever - the scheduler then never
                 # reaches the 2c branch that mints the canary re-proof, while
                 # the card's own submission is refused with
@@ -1124,7 +1302,7 @@ class GateMixin:
                             "stage_watch", "infra_drill"):
                         self._rematerialize(t)
                     elif t.get("status") == "open" and t.get("type") == "open_round":
-                        # D5 (cold-start audit): the strategist plans lane
+                        # The strategist plans lane
                         # COUNT from the slot quota on its card - a revised
                         # quota must reach the open strategy card too
                         self._refresh_open_round_task(t)
@@ -1144,17 +1322,14 @@ class GateMixin:
             lane = self.store.get_lane(self.st, subj.get("lane"))
             if lane:
                 # Which rewind stages exist depends on WHAT THE LANE IS, and the
-                # two families own disjoint ones.  This used to be written as
-                # "purpose != targeted_ablation" to mean "is a candidate", which
-                # was true only while those were the only two purposes: once
-                # probe/maintenance existed the negative form matched them too,
-                # so rejecting a probe with --retry-stage mature drove it into
-                # candidate-only machinery (resynthesis, winner theory) and left
-                # it parked in a status its own route sequence never contains.
-                # Both families are now named positively, off the one route
-                # table.  Legacy lanes predating the axis carry no purpose at
-                # all; econfig.lane_purpose reads those as candidates, matching
-                # what the rest of the engine already assumes for them.
+                # two families own disjoint ones.  Both are named positively,
+                # off the one route table - never as "purpose !=
+                # targeted_ablation" meaning "is a candidate", a negative form
+                # that would match probe/maintenance too and drive a rejected
+                # probe into candidate-only machinery (resynthesis, winner
+                # theory), parked in a status its own route never contains.
+                # A lane record with no purpose reads as a candidate
+                # (econfig.lane_purpose), as everywhere else in the engine.
                 purpose = econfig.lane_purpose(lane)
                 instrumental_seq = eflow.INSTRUMENTAL_SEQ.get(purpose)
                 if approve:
@@ -1217,7 +1392,8 @@ class GateMixin:
             if node:
                 active = node.get("repeat_attempt") or {}
                 if str(active.get("source_run") or "") != str(subj.get("source_run") or ""):
-                    raise SystemExit("[evo] repeat-spend gate no longer matches the active failed attempt")
+                    raise SystemExit("[evo] repeat-spend gate no longer matches the active failed attempt; "
+                                     "nothing recorded - run 'evo next' for the current card")
                 if approve:
                     node.pop("repeat_attempt", None)
                     self.store.event(actor, "repeat_spend_authorized", node=node["id"],
@@ -1226,7 +1402,7 @@ class GateMixin:
                 else:
                     self._abandon_node(node, f"replacement execution rejected: {note or 'no note'}")
         elif kind == "repeat_measure":
-            # v11.1 P4: approval buys back exactly one measurement. The node
+            # Approval buys back exactly one measurement. The node
             # keeps its normal life either way - rejection just keeps the
             # single-run verdict as measured, with the decision on record.
             node = self.node(str(subj.get("node") or ""))
@@ -1238,7 +1414,7 @@ class GateMixin:
                         "lines": list(subj.get("lines") or []),
                         "base_seed": subj.get("base_seed"), "seed": subj.get("seed"),
                         "approved_at": eutil.utc_now(), "gate": gate.get("id"),
-                        # R9-002: approval hands the repeat to the ENGINE - a
+                        # Approval hands the repeat to the ENGINE - a
                         # full workflow+eval pair of first-class RUNs. The
                         # resume snapshot is how a user waive restores the
                         # node's pre-repeat position without replaying the
@@ -1259,15 +1435,61 @@ class GateMixin:
                     self.store.event(actor, "repeat_measure_rejected", node=node["id"],
                                      cell=subj.get("cell"), note=note)
         elif kind == "escalation":
-            if subj.get("task"):
+            if subj.get("reason") == "resources_busy" and subj.get("task"):
+                # A launch that keeps finding the shared machine busy is an
+                # OPEN card, not a stuck one, so the stuck-epoch arm below
+                # (whose staleness test is "still stuck?") would retire this
+                # decision as superseded. Approve = keep waiting: the card
+                # stays open and the wait window restarts from this decision
+                # (esched._submit_launch_busy measures from it). Reject = stop
+                # waiting: nothing was trained; the node is abandoned like any
+                # other launch that never happened.
                 task = self.store.get_task(self.st, subj["task"])
-                # R9 (external audit r6): an escalation is a decision ABOUT a
+                if task is None or task.get("status") not in ("open", "paused"):
+                    stale = ("the task no longer exists" if task is None
+                             else f"the launch card is now '{task.get('status')}'")
+                    gate["status"] = "cancelled"
+                    gate["resolved_at"] = eutil.utc_now()
+                    gate["note"] = (f"superseded before this decision: {stale} "
+                                    f"(recorded decision: {'approve' if approve else 'reject'})")
+                    self.store.event(actor, "gate_cancelled", gate=gate["id"],
+                                     reason="escalation_subject_settled", detail=stale, note=note)
+                    self.save()
+                    return {"gate": gate["id"], "status": gate["status"]}
+                if approve:
+                    render = task.setdefault("_render", {})
+                    blocks = [(str(row[0]), list(row[1]))
+                              for row in (render.get("extra_blocks") or [])
+                              if isinstance(row, (list, tuple)) and len(row) == 2
+                              and str(row[0]) != "Busy-resources decision"]
+                    wait_note = " ".join(str(note or "").split())
+                    blocks.append(("Busy-resources decision",
+                                   [f"- {gate.get('id')}: keep waiting"
+                                    + (f" - {wait_note}" if wait_note else "")
+                                    + f"; the {econfig.busy_wait_minutes(self.cfg)}-minute window restarts "
+                                    "from this decision"]))
+                    render["extra_blocks"] = blocks
+                    self._rematerialize(task)
+                    self.store.event(actor, "stage_launch_busy_wait_continued", task=task["id"],
+                                     gate=gate["id"], note=note)
+                else:
+                    task["status"] = "cancelled"
+                    task.pop("_render", None)
+                    task["updated_at"] = eutil.utc_now()
+                    self._abandon_task_subject(
+                        task, note, reason=f"the user stopped waiting on busy resources for launch card "
+                                           f"{task['id']}: {note or 'no note'}")
+                    self.store.event(actor, "stage_launch_busy_wait_stopped", task=task["id"],
+                                     gate=gate["id"], note=note)
+            elif subj.get("task"):
+                task = self.store.get_task(self.st, subj["task"])
+                # An escalation is a decision ABOUT a
                 # specific stuck epoch. If that task was meanwhile settled
                 # (cancelled by the documented non-launch protocol, waived,
-                # superseded), approving it used to resurrect a task nobody can
+                # superseded), approving it must not resurrect a task nobody can
                 # discharge - a launch card bound to a now-terminal RUN accepts
                 # neither bind, nor confirm-not-launched, nor any submit shape.
-                # S2 (liveness audit): while a facts revision awaits its
+                # While a facts revision awaits its
                 # re-proof, rejecting the drill's escalation must NOT bury a
                 # full mid-rounds project - the honest semantics is "give up
                 # on the revision": roll the approved facts back to the
@@ -1293,7 +1515,7 @@ class GateMixin:
                                     f"(recorded decision: {'approve' if approve else 'reject'})")
                     self.store.event(actor, "gate_cancelled", gate=gate["id"],
                                      reason="escalation_subject_settled", detail=stale, note=note)
-                    # R11-012 (blocker): cancelling the gate is only HALF the
+                    # Cancelling the gate is only HALF the
                     # transition - the stuck owner task must be settled in the
                     # SAME decision, or it waits forever for a decision object
                     # that no longer exists (a launch card bound to a terminal
@@ -1313,11 +1535,11 @@ class GateMixin:
                     return {"gate": gate["id"], "status": gate["status"]}
                 if approve and task:
                     task["attempts"] = 0
-                    # R11-014: EVERY stuck/paused->open flip goes through the
+                    # EVERY stuck/paused->open flip goes through the
                     # same one-open floor - approving an escalation while a
-                    # sibling ordinary task is already open used to mint the
+                    # sibling ordinary task is already open would mint a
                     # second live authority card (MULTI_OPEN_TASKS that
-                    # doctor --fix could not converge).
+                    # doctor --fix cannot converge).
                     other_open = next(
                         (t for t in self.st.get("tasks", [])
                          if t is not task and t.get("status") == "open"
@@ -1359,8 +1581,8 @@ class GateMixin:
                             event="evolution_stopped", note=note)
             elif subj.get("lane"):
                 lane = self.store.get_lane(self.st, subj["lane"])
-                # R11 matrix sweep (M3): the lane/node escalation arms get the
-                # SAME staleness recheck the task arm has had since R9 - a
+                # The lane/node escalation arms get the
+                # SAME staleness recheck as the task arm - a
                 # decision about a subject that meanwhile reached a terminal
                 # state must retire as superseded, never resurrect it.
                 if lane is not None and lane.get("status") in ("done", "abandoned"):
@@ -1401,7 +1623,7 @@ class GateMixin:
             elif subj.get("node"):
                 node = self.node(subj["node"])
                 if node is not None and node.get("status") in ("concluded", "abandoned"):
-                    # (M3 mirror of the lane arm above)
+                    # 
                     gate["status"] = "cancelled"
                     gate["resolved_at"] = eutil.utc_now()
                     gate["note"] = (f"superseded before this decision: node is "
@@ -1416,7 +1638,7 @@ class GateMixin:
                         node["stage_failures"] = 0
                         node["eval_failures"] = 0
                         node["fix_cycles"] = 0
-                        # R9 (external audit r6): do NOT discard a pending
+                        # Do NOT discard a pending
                         # repeat_attempt here. This escalation only resets the
                         # code-FIX budget; the repeat_attempt is a separate,
                         # still-unapproved replacement-workflow/eval SPEND whose
@@ -1426,7 +1648,7 @@ class GateMixin:
                         # decision may clear it.
                         intent = subj.get("repair_intent")
                         if isinstance(intent, dict):
-                            # R7: a typed-repair exhaustion approval must also
+                            # A typed-repair exhaustion approval must also
                             # RESTORE the fix intent the non-exhausted path
                             # writes - a bare counter reset re-ran the same
                             # deterministic failure with nothing changed.
@@ -1444,4 +1666,41 @@ class GateMixin:
                     f"user declined to continue after round "
                     f"{subj.get('after_rounds')} (round_continue rejected)",
                     event="evolution_stopped", after_rounds=subj.get("after_rounds"), note=note)
+        elif kind == "posthoc_claim":
+            # Checked (record, node, staleness, proposal seal) before the gate
+            # row changed, above.
+            record = next(c for c in self.st.get("posthoc_claims", [])
+                          if str(c.get("id") or "") == str(subj.get("claim") or ""))
+            node = self.node(str(subj.get("node") or ""))
+            if approve:
+                self._apply_posthoc_claim(node, record, gate=gate, note=note, actor=actor)
+            else:
+                record["status"] = "rejected_by_user"
+                record["closed_at"] = eutil.utc_now()
+                self.store.event(actor, "posthoc_claim_rejected", claim=record.get("id"),
+                                 node=node.get("id"), note=note)
+        elif kind == "instrument_correction":
+            import eseal
+            record = next((c for c in self.st.get("corrections", [])
+                           if str(c.get("id") or "") == str(subj.get("correction") or "")), None)
+            node = self.node(str(subj.get("node") or ""))
+            if record is None or node is None:
+                raise SystemExit("[evo] instrument correction gate names an unknown correction/node")
+            if approve:
+                # the bytes the judge ruled on must be the bytes applied
+                errs = eseal.verify(self.store.repo, record.get("proposal_seal"),
+                                    label=f"correction {record.get('id')} proposal")
+                errs += eseal.verify(self.store.repo, record.get("review_seal"),
+                                     label=f"correction {record.get('id')} review")
+                if errs:
+                    raise SystemExit("[evo] the proposal or ruling changed since the judge ruled; decision "
+                                     "not applied - restore those files to their ruled bytes, or reject this "
+                                     "gate and re-file with 'evo correct-instrument':\n  - "
+                                     + "\n  - ".join(errs))
+                self._apply_instrument_correction(node, record, gate=gate, note=note, actor=actor)
+            else:
+                record["status"] = "rejected_by_user"
+                record["closed_at"] = eutil.utc_now()
+                self.store.event(actor, "instrument_correction_rejected", correction=record.get("id"),
+                                 node=node.get("id"), note=note)
         return {"gate": gate["id"], "status": gate["status"]}

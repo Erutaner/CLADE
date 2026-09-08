@@ -1,4 +1,4 @@
-"""Per-task artifact validators for the v10 scientific-program engine.
+"""Per-task artifact validators for the scientific-program engine.
 
 Design rule: validators never judge science; they enforce structure that makes
 hollow work impossible to submit unnoticed:
@@ -13,13 +13,13 @@ hollow work impossible to submit unnoticed:
     overwrites) and a plan that would retrain an available shared artifact must
     consume it or waive reuse explicitly;
   - claimed theory survives an adversarial challenge with rigor set only by T;
-  - (v8) formal lanes carry a POSED problem (typed symbols, Given, Want) and a
+  - formal lanes carry a POSED problem (typed symbols, Given, Want) and a
     derivation as a numbered step chain whose premises the engine resolves -
     decorative notation and orphan steps are rejections, not style issues;
-  - (v8) the novelty regime is mode-dependent: engineering runs demand fit and
+  - the novelty regime is mode-dependent: engineering runs demand fit and
     non-triviality (borrowing published mechanisms is legitimate); research
     runs demand difference from the nearest published work on top of that;
-  - (v8) high-complexity implementations pass a fidelity audit whose claim->code
+  - high-complexity implementations pass a fidelity audit whose claim->code
     map is string-checked against the real files.
 """
 from __future__ import annotations
@@ -33,6 +33,7 @@ import statistics
 from pathlib import Path
 from typing import Any
 
+import eamend
 import eartifact
 import ecanary
 import econfig
@@ -69,7 +70,7 @@ CORE_PALETTE_SOURCE_FIELDS = (
     "transfer_conditions", "failure_modes",
 )
 
-# v8 formal problem ladder ---------------------------------------------------------
+# Formal problem ladder ------------------------------------------------------------
 # Symbol declaration line in a PROBLEM doc's Setup section:
 #   - sym: W : R^{d x k} - the value-field weight matrix
 SYM_LINE = re.compile(r"^\s*[-*]\s*sym:\s*(\S+)\s*:\s*([^-\n]+?)\s*-\s*(.+?)\s*$", re.M)
@@ -86,7 +87,7 @@ BUILD_OPERATOR_ROW = re.compile(
 PROBE_FIELD_ROW = re.compile(
     r"^\s*PROBE_FIELD:\s*([A-Za-z][A-Za-z0-9_.-]{0,63})\s*->\s*`?([\w./\\-]+\.\w{1,8})`?\s*::\s*CODE:\s*(.+?)\s*$",
     re.M)
-# Artifact wiring rows (v10.2): the highest-frequency infrastructure error is
+# Artifact wiring rows: the highest-frequency infrastructure error is
 # code reading the wrong artifact or saving to an undeclared place, and no
 # check bound the declared consumes/produces contract to actual code.  These
 # rows are the fidelity-style literal binding for that contract: source token
@@ -130,11 +131,19 @@ class Ctx:
         self._memo: dict[str, Any] = {}
 
     # -- common loaders -------------------------------------------------------
+    def amended_digests(self) -> dict[str, str]:
+        """path -> digest of its latest recorded notebook amendment."""
+        cached = self._memo.get("amended_digests")
+        if cached is None:
+            cached = eamend.latest_digests(self.store) if self.store is not None else {}
+            self._memo["amended_digests"] = cached
+        return cached
+
     def dossier_ids(self) -> tuple[set[str], set[str], set[str]]:
-        """(B, V, F) ids. R9 (external audit r6): SOURCE-AWARE. The addendum is
+        """(B, V, F) ids, SOURCE-AWARE. The addendum is
         a close-round output whose validator only checks B rows, so unioning
-        V/F from it let an agent mint a phantom invariant that then satisfied
-        the evaluate comparability gate. Invariants/facts come from the sealed
+        V/F from it would let an agent mint a phantom invariant that then
+        satisfies the evaluate comparability gate. Invariants/facts come from the sealed
         bootstrap dossier only; the addendum may contribute bottlenecks (B)."""
         cached = self._memo.get("dossier_ids")
         if cached is None:
@@ -153,7 +162,7 @@ class Ctx:
         return cached
 
     def draft_ledgers(self) -> set[str]:
-        """Ledgers whose UNACCEPTED suffix this validation may see (R9).
+        """Ledgers whose UNACCEPTED suffix this validation may see.
 
         A ledger task validates the rows it is submitting right now, including
         their cross-references to each other, so its own draft must be visible
@@ -166,13 +175,13 @@ class Ctx:
             self._memo.pop(key, None)
 
     def _accepted(self, name: str, rows: list[dict]) -> list[dict]:
-        """Committed view of an append-only ledger (R9, external audit r6).
+        """Committed view of an append-only ledger.
 
-        The acceptance watermark froze prefix IMMUTABILITY but no reader ever
-        applied it, so rows appended by a task that was later rejected and
-        cancelled stayed visible: they were displayed in bundles, resolved
-        citations and satisfied coverage duties as if a ledger validator had
-        passed them. Consumers now see only accepted history; the ledger's OWN
+        The acceptance watermark freezes prefix IMMUTABILITY, and every reader
+        applies it: rows appended by a task that was later rejected and
+        cancelled must not stay visible - displayed in bundles, resolving
+        citations and satisfying coverage duties as if a ledger validator had
+        passed them. Consumers see only accepted history; the ledger's OWN
         validator still reads the raw file so its unaccepted suffix stays
         repairable."""
         if name in self.draft_ledgers():
@@ -210,7 +219,7 @@ class Ctx:
         return int(self.cfg.get("budgets", {}).get("evidence_recent_year", 0))
 
 
-    # -- v8 additions ----------------------------------------------------------
+    # -- research-mode accessors ------------------------------------------------
     def is_research(self) -> bool:
         return econfig.is_research(self.cfg)
 
@@ -225,7 +234,7 @@ class Ctx:
     def sota_ids(self) -> set[str]:
         return {str(r.get("id") or "") for r in self.sota_rows()}
 
-    # -- v9 additions ----------------------------------------------------------
+    # -- phenomenon ledger ------------------------------------------------------
     def obs_ids(self) -> set[str]:
         """Ids in the phenomenon ledger (OBSERVATIONS.jsonl) - quantitative
         anomalies mined from this graph's own runs, citable as diagnosis
@@ -303,7 +312,7 @@ def probe_artifact_errors(ctx: Ctx, path: str, required_fields: list[str], *, wh
 
 def idea_probe_seed_template_errors(cfg: dict, mp: dict, *, purpose: str = "",
                                     intent: str = "") -> list[str]:
-    """v12 (field deadlock T0611): cross-check probe mode x artifact template
+    """Cross-check probe mode x artifact template
     BEFORE the idea seals. The plan layer copies the sealed probe verbatim
     (SPEC_PROBE_BINDING), so a combination admitted at maturation and refused
     at planning is a jointly unsatisfiable contract with no legal submission.
@@ -339,7 +348,7 @@ def expected_probe_observations(spec: dict) -> list[dict]:
     if probe.get("mode") == "same_run" and seeds:
         return [{"seed": seed, "artifact": str(econfig.resolve_seed_template(template, seed))}
                 for seed in seeds]
-    # v12 (field deadlock T0611): an eval-only intervention under preplanned
+    # An eval-only intervention under preplanned
     # complete-workflow replication may read the sealed per-seed checkpoints
     # and keep one observation per seed - mirror the same_run expansion when
     # the sealed template says so. (Rule: any probe mode x template combination
@@ -429,9 +438,9 @@ def probe_result_errors(ctx: Ctx, spec: dict, metrics: dict, *, where: str,
         # must not make an explicit same-RUN disposition impossible.
         return []
     if not isinstance(block, dict):
-        # R6 blind-operator audit: this error used to name no schema while the
+        # This error must carry the schema itself: the
         # only card carrying the example (evaluate) cannot be scheduled until
-        # the envelope already exists - circular disclosure. Self-describe.
+        # the envelope already exists - circular disclosure otherwise.
         example = {"mode": probe.get("mode"), "signal": probe.get("signal"),
                    "expect": probe.get("expect"),
                    "required_fields": [str(x) for x in (probe.get("required_fields") or [])],
@@ -455,7 +464,7 @@ def probe_result_errors(ctx: Ctx, spec: dict, metrics: dict, *, where: str,
     if not isinstance(rows, list) or len(rows) != len(expected_rows):
         errs.append(f"EVAL_PROBE_OBSERVATIONS: {where}: expected {len(expected_rows)} observation record(s)")
         rows = []
-    # (identity sweep #28) observation set membership goes through the
+    #  observation set membership goes through the
     # canonical spelling on BOTH sides - a raw-string keyed set judged a
     # legal spelling variant of a declared probe landing as "unexpected"
     expected_by_artifact = {eutil.norm_uri(str(row["artifact"])): row for row in expected_rows}
@@ -497,17 +506,23 @@ def probe_result_errors(ctx: Ctx, spec: dict, metrics: dict, *, where: str,
     return errs
 
 
-def mechanism_probe_assessment(probe: dict | None, metrics: dict) -> dict:
-    """Mechanically settle a frozen intermediate-signal predicate."""
-    if not isinstance(probe, dict) or not probe.get("signal"):
-        return {"status": "not_applicable"}
-    rule = probe.get("decision_rule") if isinstance(probe.get("decision_rule"), dict) else {}
-    field = str(rule.get("field") or "")
-    values = [float((row.get("values") or {})[field])
-              for row in ((metrics.get("_mechanism_probe") or {}).get("observations") or [])
-              if isinstance(row, dict) and isinstance((row.get("values") or {}).get(field), (int, float))
-              and not isinstance((row.get("values") or {}).get(field), bool)]
+MECHANISM_STATUSES = ("confirmed", "refuted", "unclear", "deferred", "not_reached", "not_applicable")
+
+
+def settle_decision_rule(rule: dict, values: list[float]) -> dict:
+    """Apply one frozen numeric predicate to sealed observations.
+
+    The line is compared against the aggregate, and the verdict is read with
+    the observations' own scatter in mind: when several seeds were measured,
+    an aggregate that sits within two standard errors of the line is not a
+    verdict either way - it is `unclear`, the same honesty the effect cells
+    get from their noise floors. A single observation has no scatter to
+    consult and settles on the bare comparison, so the design that registered
+    it must have argued that one run resolves the question.
+    """
+    values = [float(v) for v in values]
     aggregation = str(rule.get("aggregation") or "")
+    field = str(rule.get("field") or "")
     if not values or aggregation not in ("mean", "median", "min", "max"):
         return {"status": "unclear", "field": field, "values": values,
                 "reason": "missing observations or invalid frozen aggregation"}
@@ -522,21 +537,45 @@ def mechanism_probe_assessment(probe: dict | None, metrics: dict) -> dict:
 
     threshold, lower, upper = _num("threshold"), _num("lower"), _num("upper")
     if comparison == ">=" and threshold is not None:
-        confirmed = aggregate >= threshold
+        confirmed, distance = aggregate >= threshold, abs(aggregate - threshold)
     elif comparison == "<=" and threshold is not None:
-        confirmed = aggregate <= threshold
+        confirmed, distance = aggregate <= threshold, abs(aggregate - threshold)
     elif comparison == "between" and lower is not None and upper is not None:
         confirmed = lower <= aggregate <= upper
+        distance = min(abs(aggregate - lower), abs(aggregate - upper))
     else:
-        # Same graceful posture as the malformed-aggregation branch above:
-        # a malformed frozen rule yields unclear, never a KeyError crash.
         return {"status": "unclear", "field": field, "values": values,
                 "aggregate": aggregate, "reason": "invalid frozen comparison"}
-    return {"status": "confirmed" if confirmed else "refuted", "field": field,
-            "values": values, "aggregation": aggregation, "aggregate": aggregate,
-            "comparison": comparison,
-            **({"threshold": rule.get("threshold")} if comparison != "between" else
-               {"lower": rule.get("lower"), "upper": rule.get("upper")})}
+    out = {"field": field, "values": values, "aggregation": aggregation, "aggregate": aggregate,
+           "comparison": comparison,
+           **({"threshold": rule.get("threshold")} if comparison != "between" else
+              {"lower": rule.get("lower"), "upper": rule.get("upper")})}
+    scatter_margin = 0.0
+    if len(values) >= 3 and aggregation in ("mean", "median"):
+        scatter_margin = 2.0 * statistics.stdev(values) / math.sqrt(len(values))
+        out["scatter"] = {"observations": len(values), "stderr": scatter_margin / 2.0,
+                          "margin": scatter_margin}
+    if scatter_margin > 0 and distance <= scatter_margin:
+        out["status"] = "unclear"
+        out["reason"] = (f"the {aggregation} sits {distance:g} from the line, inside the "
+                         f"observations' own scatter (2 x standard error = {scatter_margin:g}); "
+                         "the registered seed count cannot resolve this claim")
+        return out
+    out["status"] = "confirmed" if confirmed else "refuted"
+    return out
+
+
+def mechanism_probe_assessment(probe: dict | None, metrics: dict) -> dict:
+    """Settle a registered mechanism probe from the sealed `_mechanism_probe` block."""
+    if not isinstance(probe, dict) or not probe.get("signal"):
+        return {"status": "not_applicable"}
+    rule = probe.get("decision_rule") if isinstance(probe.get("decision_rule"), dict) else {}
+    field = str(rule.get("field") or "")
+    values = [float((row.get("values") or {})[field])
+              for row in ((metrics.get("_mechanism_probe") or {}).get("observations") or [])
+              if isinstance(row, dict) and isinstance((row.get("values") or {}).get(field), (int, float))
+              and not isinstance((row.get("values") or {}).get(field), bool)]
+    return settle_decision_rule(rule, values)
 
 
 def _nontrivial(text: Any, min_len: int, field: str, errs: list[str]) -> None:
@@ -815,8 +854,6 @@ def lane_pointer_binding_errors(ctx: Ctx, lane: dict, *,
     if lane.get("sketches_path"):
         specs.append(("program_seal", [("program_set", str(lane["sketches_path"]))], True))
     if lane.get("tournament_path"):
-        # legacy_extra_roles: a v10-created seal also bound the (since removed)
-        # prose report; tolerated so upgraded projects keep running.
         specs.append(("tournament_seal",
                       [("tournament", str(lane["tournament_path"]))], True))
     if lane.get("problem_path"):
@@ -849,12 +886,12 @@ def lane_pointer_binding_errors(ctx: Ctx, lane: dict, *,
                     "maintenance": ("maintenance_review", ".maintenance-review.md"),
                 }.get(purpose, ("red_team_review", ".review.md"))
                 specs.append(("review_seal", [(review_role, f".evo/ideas/{idea}{review_suffix}")], True))
-    legacy = {"tournament_seal": ("tournament_report",)}
+    amended = ctx.amended_digests()
     for field, expected, exact in specs:
         errs.extend(eseal.binding_errors(
             ctx.store.repo, lane.get(field), expected,
             label=f"lane {lid} {field}", exact=exact, digest_cache=digest_cache,
-            legacy_extra_roles=legacy.get(field, ())))
+            amended=amended))
     return errs
 
 
@@ -937,12 +974,11 @@ def node_pointer_binding_errors(ctx: Ctx, node: dict, *,
             ("outcome", str(node.get("outcome_path") or f".evo/nodes/{nid}/OUTCOME.json")),
             ("node_result", str(node.get("result_doc") or f".evo/nodes/{nid}/NODE_RESULT.md"))], True))
     cache = digest_cache if digest_cache is not None else {}
-    legacy = {"metric_bridge_seal": ("metric_bridge_report",)}
+    amended = ctx.amended_digests()
     for field, expected, exact in specs:
         errs.extend(eseal.binding_errors(
             ctx.store.repo, node.get(field), expected,
-            label=f"node {nid} {field}", exact=exact, digest_cache=cache,
-            legacy_extra_roles=legacy.get(field, ())))
+            label=f"node {nid} {field}", exact=exact, digest_cache=cache, amended=amended))
 
     # The implementation seal contains a variable number of source roles, but
     # the active manifest pointer must still name exactly one sealed row.
@@ -1031,8 +1067,7 @@ def deep_rigor(lane: dict) -> bool:
 
 
 def lane_min_level(lane: dict) -> int:
-    """One lane scope-floor accessor (v9.2 had three copies with two different
-    fallback defaults, 0 vs 2)."""
+    """One lane scope-floor accessor (fallback floor 2)."""
     value = (lane or {}).get("min_level")
     return value if isinstance(value, int) and not isinstance(value, bool) and value >= 1 else 2
 
@@ -1125,9 +1160,29 @@ def v_project_scan(ctx: Ctx, task: dict) -> list[str]:
     if not isinstance(ablation, dict):
         errs.append("DISCOVERY_ABLATION_ASSESSMENT: ablation_assessment object required")
         ablation = {}
-    if ablation.get("recommended_mode") not in econfig.ABLATION_MODES:
-        errs.append(f"DISCOVERY_ABLATION_RECOMMENDATION: recommended_mode must be one of {econfig.ABLATION_MODES}")
+    rec = ablation.get("recommended_budget_multiple")
+    if isinstance(rec, bool) or not isinstance(rec, (int, float)) or not math.isfinite(float(rec)) or rec < 0:
+        errs.append("DISCOVERY_ABLATION_RECOMMENDATION: recommended_budget_multiple must be a number >= 0 "
+                    "(how much of a node's own cost its causal follow-up may spend; 0 = never ablate)")
     _nontrivial(ablation.get("reasoning"), 40, "ablation_assessment.reasoning", errs)
+    kinds = data.get("resource_kinds")
+    if kinds is not None:
+        # What the CODE would consume, with evidence - a proposal the configure
+        # interview confirms with the user (a cloned repository may carry API
+        # calls the user will never make, or single-device code the user will
+        # run on a cluster). The confirmed kinds decide which units the money
+        # questions are asked in.
+        if not isinstance(kinds, list) or not kinds:
+            errs.append("DISCOVERY_RESOURCE_KINDS: resource_kinds must be a non-empty list of "
+                        "{unit, evidence} rows - what this code would consume, with where you saw it")
+        else:
+            for i_row, row in enumerate(kinds):
+                unit = str((row or {}).get("unit") or "") if isinstance(row, dict) else ""
+                if not re.fullmatch(r"[a-z][a-z0-9_]{1,47}", unit):
+                    errs.append(f"DISCOVERY_RESOURCE_KIND_{i_row}: resource_kinds[{i_row}].unit must be a lowercase "
+                                "slug (gpu_hours, api_tokens, wallclock_minutes, ...)")
+                _nontrivial((row or {}).get("evidence") if isinstance(row, dict) else None, 20,
+                            f"resource_kinds[{i_row}].evidence", errs)
     draft = data.get("resource_contract_draft")
     limits = (draft or {}).get("limits") if isinstance(draft, dict) else None
     if not isinstance(limits, dict) or not limits:
@@ -1139,7 +1194,7 @@ def v_project_scan(ctx: Ctx, task: dict) -> list[str]:
             errs.append(f"DISCOVERY_RESOURCE_VALUE: {unit!r} must be a lowercase unit with finite positive limit")
     if len(str((draft or {}).get("basis") or "").strip()) < 20:
         errs.append("DISCOVERY_RESOURCE_BASIS: resource_contract_draft.basis must record what the user stated (>= 20 chars)")
-    # v11.7: the engine-fit assessment - the engine's implicit runnability
+    # The engine-fit assessment - the engine's implicit runnability
     # assumptions made explicit and judged ONCE at the entrance, instead of
     # surfacing as repeated mid-evolution validation failures. F0 is the
     # task-class admission (hard); F5/F6/F7 are shape judgments with evidence.
@@ -1189,7 +1244,7 @@ def v_project_scan(ctx: Ctx, task: dict) -> list[str]:
         errs.append(f"DISCOVERY_FIT_OVERALL: overall must be derived from the verdicts "
                     f"(expected {expected!r}): F0 violated = unfit; any other violated/uncertain "
                     f"= degraded; all holds = fit")
-    # v11.7: readiness - does this project already run end-to-end here, or
+    # Readiness - does this project already run end-to-end here, or
     # does it need a constructive preparation pass before any contract can
     # honestly be frozen? ASK the user; a wrong 'certified_running' just
     # bounces at the canary, but the honest path is to say so now.
@@ -1233,7 +1288,7 @@ def v_configure(ctx: Ctx, task: dict) -> list[str]:
             errs.append("CONFIG_VCS_NOT_GIT: project.vcs='git' but the repo is not a git working tree; "
                         "run 'git init' + an initial commit first, or set vcs='copy'")
         else:
-            # R9 (external audit r6): the error text above always DEMANDED an
+            # The error text above always DEMANDED an
             # initial commit but never checked one - a just-initialized repo
             # with an unborn HEAD sailed through configure and then died at the
             # pre-smoke baseline seal with a raw SystemExit outside any task
@@ -1294,7 +1349,7 @@ def v_infra_interview(ctx: Ctx, task: dict) -> list[str]:
     secs = _require_sections(text, ["contradictions", "unknowns", "resolutions",
                                     "runtime services", "evaluation contract confirmation"],
                              "INFRA_REVIEW", errs, min_chars=20)
-    # LLM-surface auto-detection forcing function (v8): the interview must
+    # LLM-surface auto-detection forcing function: the interview must
     # actively DECIDE whether this platform has model-serving/API/vector/KG
     # surfaces - silently omitting the llm/services blocks is how inference-
     # class experiments discover mid-run that nobody recorded the endpoint.
@@ -1356,10 +1411,16 @@ def v_infra_interview(ctx: Ctx, task: dict) -> list[str]:
     if str(rep.get("mode") or "") not in pmc or "training" not in pmc.lower() or "seed" not in pmc.lower():
         errs.append("INTERVIEW_TRAINING_REPLICATION: the user review must state the approved training-seed "
                     "replication mode and make clear whether full retraining repeats are planned")
-    abl = ((ctx.cfg.get("evidence_policy") or {}).get("ablation") or {})
-    if str(abl.get("mode") or "") not in pmc or "ablation" not in pmc.lower():
-        errs.append("INTERVIEW_ABLATION_POLICY: the user review must state whether targeted ablation nodes are "
-                    "off or allowed, including their one-run cap")
+    multiple = econfig.ablation_budget_multiple(ctx.cfg)
+    if "ablation" not in pmc.lower() or (multiple > 0 and f"{multiple:g}" not in pmc):
+        errs.append("INTERVIEW_ABLATION_POLICY: the user review must state the ablation allowance by number "
+                    f"(evidence_policy.ablation.budget_multiple = {multiple:g}; 0 = the engine opens none)")
+    if "node ceiling" not in pmc.lower():
+        errs.append("INTERVIEW_NODE_CEILING: the user review must state the node ceiling - the most one node may "
+                    "plan to spend per unit, with its source - or that the user chose not to set one")
+    if "devices" not in pmc.lower() and "accelerators" not in pmc.lower():
+        errs.append("INTERVIEW_MAX_DEVICES: the user review must state how many accelerators our jobs may hold at "
+                    "once (resource_contract.max_devices), or that the scheduler decides")
     if not SRC_TAG.search(pmc or ""):
         errs.append("INTERVIEW_EVAL_CONTRACT_SRC: the evaluation-contract confirmation needs a [src: path] tag")
     return errs
@@ -1486,8 +1547,8 @@ def _evidence_schema_errors(rec: dict, i: int, attempts_min: int = 2) -> list[st
 
 
 def ledger_prefix_digest(rows: list) -> str:
-    """Canonical digest of an append-only ledger's row prefix (R7 multi-round
-    audit). Stored on the task at creation, re-checked at submit: the cards
+    """Canonical digest of an append-only ledger's row prefix.
+    Stored on the task at creation, re-checked at submit: the cards
     promise "append, never renumber/rewrite", and without this binding a
     rewrite-oriented tool could replace history and still be ACCEPTED -
     silently rebinding every earlier M#/E#/S# citation."""
@@ -1497,10 +1558,10 @@ def ledger_prefix_digest(rows: list) -> str:
 
 
 def accepted_ledger_rows(st: dict, name: str, rows: list) -> list:
-    """Rows an append-only ledger has actually ACCEPTED (R9, external audit r6).
+    """Rows an append-only ledger has actually ACCEPTED.
 
-    A project with no watermark for this ledger (pre-binding state) keeps the
-    old whole-file behaviour; a watermark ahead of the file is left to the
+    A ledger with no watermark yet reads whole-file; a watermark ahead of the
+    file is left to the
     prefix validators to report rather than silently hiding rows."""
     wm = ((st.get("ledger_accept") or {}).get(name) or {})
     count = wm.get("count")
@@ -1511,7 +1572,7 @@ def accepted_ledger_rows(st: dict, name: str, rows: list) -> list:
 
 def ledger_watermark(st: dict, name: str, rows: list) -> tuple[int, str]:
     """The frozen prefix for a new ledger task: what the LAST ACCEPTED submit
-    validated (R7 external audit). Snapshotting the raw file instead froze a
+    validated. Snapshotting the raw file instead would freeze a
     cancelled task's unvalidated leftovers into immutable history - rows that
     both fail every future whole-ledger validation and may not be repaired.
     Accepted history is immutable; an unaccepted suffix stays repairable.
@@ -1527,13 +1588,11 @@ def ledger_watermark(st: dict, name: str, rows: list) -> tuple[int, str]:
 def stamped_ledger_watermark(st: dict, name: str) -> tuple[int, str]:
     """The watermark ONLY if an acceptance ever stamped it; (0, "") otherwise.
 
-    R8 audit: the sota stamp branch was shadowed for the whole life of R7-R9,
-    so no project has a sota watermark; the full-file fallback then froze
+    Refresh-task creation binds only STAMPED history; with none, nothing is
+    frozen and the task may repair the whole table (its acceptance then
+    stamps the first real watermark). A full-file fallback would freeze
     cancelled tasks' unaccepted tails as immutable prefix - simultaneously
-    must-fix (whole-table checks) and may-not-fix (prefix immutability).
-    Refresh-task creation now binds only STAMPED history; with none, nothing
-    is frozen and the task may repair the whole table (its acceptance then
-    stamps the first real watermark)."""
+    must-fix (whole-table checks) and may-not-fix (prefix immutability)."""
     wm = ((st.get("ledger_accept") or {}).get(name) or {})
     count, digest = wm.get("count"), str(wm.get("digest") or "")
     if isinstance(count, int) and not isinstance(count, bool) and count >= 0 and digest:
@@ -1568,7 +1627,7 @@ def _ledger_prefix_errors(rows: list, prior_count, prior_digest, label: str) -> 
 
 def v_evidence(ctx: Ctx, task: dict) -> list[str]:
     errs: list[str] = []
-    ctx.use_draft_ledgers("evidence")   # R9: this task owns EVIDENCE.jsonl
+    ctx.use_draft_ledgers("evidence")   # This task owns EVIDENCE.jsonl
     recs = ctx.store.evidence()
     errs.extend(_ledger_prefix_errors(recs, task["subject"].get("prior_evidence_count"),
                                       task["subject"].get("prior_digest"), "EVIDENCE.jsonl"))
@@ -1624,7 +1683,7 @@ def v_evidence(ctx: Ctx, task: dict) -> list[str]:
         targeted: set[str] = set()
         for ln in pf.get("lanes") or []:
             if str((ln or {}).get("experiment_purpose") or "candidate") in econfig.INSTRUMENTAL_PURPOSES:
-                continue  # R5: diagnostics don't enter the novelty pipeline
+                continue  # Diagnostics don't enter the novelty pipeline
             targeted.update((ln or {}).get("bottleneck_ids") or [])
         need_b = int(bud.get("evidence_min_per_bottleneck", 0))
         need_br = int(bud.get("evidence_recent_min_per_bottleneck", 0))
@@ -1643,7 +1702,7 @@ def v_evidence(ctx: Ctx, task: dict) -> list[str]:
 
 def v_deep_read(ctx: Ctx, task: dict) -> list[str]:
     errs: list[str] = []
-    # R9: this task owns the mechanism/collision ledgers and appends evidence -
+    # This task owns the mechanism/collision ledgers and appends evidence -
     # its own draft rows (and their cross-references to each other) must be
     # visible to it, while every consumer elsewhere sees accepted history only.
     ctx.use_draft_ledgers("evidence", "mech", "collision")
@@ -1652,7 +1711,7 @@ def v_deep_read(ctx: Ctx, task: dict) -> list[str]:
     origin = str(lane.get("search_origin") or "repair")
     moon = lane.get("intent") == "moonshot"
     all_mech = ctx.store.mech_cards()
-    # R7 multi-round audit: M ids are GLOBAL facts (every later card cites a
+    # M ids are GLOBAL facts (every later card cites a
     # bare M###), but uniqueness was only checked inside the current lane -
     # a cross-lane duplicate was accepted and silently rebound every earlier
     # citation (global consumers are last-row-wins dicts). Check the whole
@@ -1756,7 +1815,7 @@ def v_deep_read(ctx: Ctx, task: dict) -> list[str]:
         _nontrivial(c.get("gain_confound"), 40, f"{cid}.gain_confound", errs)
         if not isinstance(c.get("assumptions"), list) or not c.get("assumptions"):
             errs.append(f"MECH_ASSUMPTIONS: {cid}: 'assumptions' must be a non-empty list")
-        # v10.1: the quote requirement was dropped.  Unlike the critic quotes
+        # The quote requirement was dropped.  Unlike the critic quotes
         # (checked literally against a local document), a paper quote cannot be
         # verified here, and no downstream check reads it - it was a length
         # check pretending to be a grounding check.  The field stays legal.
@@ -1799,7 +1858,7 @@ def v_deep_read(ctx: Ctx, task: dict) -> list[str]:
             # \d{3,4}: agent-numbered append-only ledgers must not have a
             # validator-imposed 1000-id ceiling - a long research run consumes
             # tens of CA ids per round and would otherwise deadlock at CA999
-            # (R1 audit; the tombstone-side regexes already accept 4 digits).
+            # (the tombstone-side regexes accept 4 digits too).
             if not re.fullmatch(r"CA\d{3,4}", eid) or eid in edge_ids:
                 errs.append(f"COLLISION_ID: collision_audits[{i}] needs a globally unique CA### id")
             edge_ids.add(eid)
@@ -1835,10 +1894,10 @@ def v_deep_read(ctx: Ctx, task: dict) -> list[str]:
             bound = [e for e in current if str(e.get("candidate_id") or "") == sid]
             axes = {str(e.get("axis") or "") for e in bound}
             if axes != {"mechanism", "task_effect"}:
-                # R3 operability audit: digest-mismatched edges are silently
+                # Digest-mismatched edges are silently
                 # skipped above (historical attempts legitimately stay in the
-                # append-only ledger), so this error used to blame MISSING
-                # edges the agent had visibly just written. Name the expected
+                # append-only ledger), so this error must not blame MISSING
+                # edges the agent has visibly just written. Name the expected
                 # digest and the mismatch count so the fix is discoverable.
                 errs.append(f"COLLISION_COVERAGE: {sid}: the current frozen set (program_set_digest "
                             f"{str(lane.get('program_set_digest'))}) needs candidate-bound mechanism and "
@@ -1966,19 +2025,16 @@ def v_open_round(ctx: Ctx, task: dict) -> list[str]:
         return errs
     lanes = pf.get("lanes")
     bud, pol = ctx.cfg.get("budgets", {}), ctx.cfg.get("policy", {})
-    # probe/maintenance lanes ride ON TOP of the search-bet count: they are
-    # instrumental work, so they neither crowd out nor stand in for idea lanes.
+    # Instrumental lanes (ablation/probe/maintenance) ride ON TOP of the
+    # search-bet count: they serve an existing result, so they neither crowd
+    # out nor stand in for idea lanes.
     bet_count = (sum(1 for ln in lanes
                      if (ln or {}).get("experiment_purpose") not in econfig.INJECTABLE_PURPOSES)
                  if isinstance(lanes, list) else 0)
     if not isinstance(lanes, list) or not (bud.get("lanes_per_round_min", 1) <= bet_count <= bud.get("lanes_per_round_max", 3)):
-        # "portfolio slots", not "search bets": a targeted ablation occupies a
-        # slot here although the exploit-share arithmetic below rightly refuses
-        # to count it as a search bet - one shared word for two different sets
-        # misled readers of either message.
         errs.append(f"PORTFOLIO_LANE_COUNT: need {bud.get('lanes_per_round_min')}..{bud.get('lanes_per_round_max')} "
-                    f"portfolio lanes (candidates + targeted ablations; probe/maintenance ride on top), "
-                    f"got {bet_count if isinstance(lanes, list) else 'none'}")
+                    f"search-bet lanes (candidate/exploratory/platform; ablation, probe and maintenance "
+                    f"lanes ride on top under their own caps), got {bet_count if isinstance(lanes, list) else 'none'}")
         return errs
     for cap_purpose, cap_key in sorted(econfig.INJECTABLE_CAP_KEYS.items()):
         cap = int(bud.get(cap_key, 1) or 0)
@@ -2007,9 +2063,10 @@ def v_open_round(ctx: Ctx, task: dict) -> list[str]:
             errs.append(f"PORTFOLIO_PURPOSE: {w}: experiment_purpose must be one of "
                         f"{econfig.EXPERIMENT_PURPOSES}")
             purpose = "candidate"
-        if purpose == "targeted_ablation":
-            if econfig.ablation_mode(ctx.cfg) != "targeted":
-                errs.append(f"PORTFOLIO_ABLATION_OFF: {w}: the user-approved ablation policy is off")
+        if purpose == "targeted_ablation" and econfig.ablation_budget_multiple(ctx.cfg) <= 0:
+            errs.append(f"PORTFOLIO_ABLATION_OFF: {w}: evidence_policy.ablation.budget_multiple is 0, so no "
+                        "ablation spend is allowed; raise it on record first: evo amend --path "
+                        ".evo/config.json --from <edited copy> --reason \"...\"")
         if purpose in econfig.INSTRUMENTAL_PURPOSES and intent != "exploit":
             errs.append(f"PORTFOLIO_INSTRUMENTAL_INTENT: {w}: {purpose} is instrumental work on "
                         "exactly one observed parent, not a novelty/theory, root, hybrid or platform bet")
@@ -2044,7 +2101,7 @@ def v_open_round(ctx: Ctx, task: dict) -> list[str]:
         if bad_parents:
             errs.append(f"PORTFOLIO_PARENT_UNKNOWN: {w}: parents {bad_parents!r} must be N### strings")
             parents = [p for p in parents if isinstance(p, str)]
-        # R8 (external audit r5): a repeated parent id satisfied the hybrid
+        # A repeated parent id satisfied the hybrid
         # ">= 2 parents" length check here, then downstream sketch validation
         # demanded BOTH exact equality with the frozen duplicate list AND a
         # unique array - a frozen contract with no satisfying candidate.
@@ -2066,13 +2123,34 @@ def v_open_round(ctx: Ctx, task: dict) -> list[str]:
         for p in plats:
             if p not in plat_ok:
                 errs.append(f"PORTFOLIO_PLATFORM_NOT_ENABLED: {w}: platform {p} is not concluded/enabled")
+        # A lane may build on a node's PROGRAM freely (its numbers are measured).
+        # A lane whose bet rests on a node's MECHANISM being the cause declares
+        # it, and that story must already be settled - inheritance is a check,
+        # not a scheduling of the settlement.
+        premises = ln.get("mechanism_premises")
+        if premises is not None:
+            if not isinstance(premises, list) or any(not isinstance(x, str) for x in premises):
+                errs.append(f"PORTFOLIO_MECHANISM_PREMISES: {w}: mechanism_premises must be a list of node ids "
+                            "whose mechanism this lane treats as an established cause")
+            else:
+                for pid in premises:
+                    prem = idx.get(pid)
+                    status = str((prem or {}).get("mechanism_status") or "")
+                    if prem is None:
+                        errs.append(f"PORTFOLIO_MECHANISM_PREMISE_UNKNOWN: {w}: {pid} does not exist")
+                    elif status not in ("confirmed", "not_applicable"):
+                        errs.append(f"PORTFOLIO_MECHANISM_PREMISE_UNSETTLED: {w}: {pid}'s mechanism is "
+                                    f"{status or 'unsettled'}, so it is not an established cause. Settle it "
+                                    f"first (evo ablate --parent {pid} --question \"...\"), or drop {pid} "
+                                    "from mechanism_premises and build on its PROGRAM (the measured "
+                                    "numbers) instead of its story")
         if intent in ("exploit", "reform") and len(model_parents) != 1:
             errs.append(f"PORTFOLIO_PARENTS_{intent.upper()}: {w}: needs exactly 1 model parent, got {model_parents}")
         if intent == "exploit" and purpose == "candidate" and model_parents \
                 and not ln.get("scaling_followup_of"):
             # Maintenance nodes are frontier-transparent: an exploit may parent
             # the repaired base when the lineage it proxies is on the frontier.
-            # v11.1 (R1 fix): a scaling follow-up's parent is pinned by its own
+            # A scaling follow-up's parent is pinned by its own
             # pre-registration ("after_positive_signal" = parent concluded
             # positive) - requiring settled-promotion frontier membership on
             # top re-created the door-blocked-by-another-rule contradiction.
@@ -2091,7 +2169,7 @@ def v_open_round(ctx: Ctx, task: dict) -> list[str]:
             errs.append(f"PORTFOLIO_HYBRID_ORIGIN: {w}: hybrid search constructs a new coupling and cannot use repair")
         if intent == "platform" and model_parents:
             errs.append(f"PORTFOLIO_PARENTS_PLATFORM: {w}: platform lanes take no model parents")
-        # v11.1 P2: the legal door for pre-registered follow-up scaling. Until
+        # The legal door for pre-registered follow-up scaling. Until
         # now IDEA_SCALING_FOLLOWUP demanded a follow-up node while kernel-dup
         # and research-novelty checks made that node impossible to open.
         sfo = ln.get("scaling_followup_of")
@@ -2125,7 +2203,7 @@ def v_open_round(ctx: Ctx, task: dict) -> list[str]:
                     errs.append(f"PORTFOLIO_SCALING_FOLLOWUP_SIGNAL: {w}: the registered trigger is "
                                 f"after_POSITIVE_signal; parent {sfo} concluded "
                                 f"'{sp.get('verdict')}' - there is no positive signal to scale")
-                # (final audit C23) the pool includes THIS portfolio's other
+                #  the pool includes THIS portfolio's other
                 # lanes - two same-plan lanes naming one parent both predate
                 # lane creation, so state/graph scanning alone missed them.
                 spent = [x for x in list(ctx.st.get("lanes", [])) + list(ctx.g.get("nodes", []))
@@ -2137,7 +2215,7 @@ def v_open_round(ctx: Ctx, task: dict) -> list[str]:
                                 f"follow-up ({str(spent[0].get('id') or spent[0].get('name'))}); one "
                                 "registered plan buys one follow-up - a second requires its own "
                                 "registration on a new node")
-        # v11.1 (R1 fix): the confirmatory door - the only legal way to re-run
+        # The confirmatory door - the only legal way to re-run
         # an exploratory scout's kernel, and it pays FULL rigor (no exemption
         # from predictions/SOTA/novelty duties anywhere on this lane).
         cfo = ln.get("confirmatory_of")
@@ -2154,7 +2232,7 @@ def v_open_round(ctx: Ctx, task: dict) -> list[str]:
                     errs.append(f"PORTFOLIO_CONFIRMATORY_TARGET: {w}: {cfo} is not an exploratory node; "
                                 "only a declared scout's kernel may be re-run for confirmation")
                 if cp.get("retire_reason"):
-                    # R7 audit: a deliberately retired (pruned/archived) scout
+                    # A deliberately retired (pruned/archived) scout
                     # slipped through the copy-exemption door without the
                     # revival its retirement demands - the parent firewall
                     # never fires because a scout is not a model parent.
@@ -2171,7 +2249,7 @@ def v_open_round(ctx: Ctx, task: dict) -> list[str]:
                                 f"candidate, not {purpose} (an exploratory confirming an exploratory "
                                 "would compound exemptions)")
                 if intent == "platform":
-                    # R9 (external audit r6): a platform lane skips evaluation
+                    # A platform lane skips evaluation
                     # entirely and can never own a model record, yet it would
                     # permanently consume the scout's ONE confirmation slot -
                     # the engine would then claim the confirmation was spent
@@ -2210,7 +2288,7 @@ def v_open_round(ctx: Ctx, task: dict) -> list[str]:
     # every earlier version accepted illegal - and the cap is a soft temperament
     # dial, not a correctness gate.  Left as is; the floors, which are the
     # binding research duty, already exclude platforms.
-    # v11.1 P5 (R1 fix): exploratory is rigor-exempt BOTH ways in the research
+    # Exploratory is rigor-exempt BOTH ways in the research
     # shares - and spend-shape-exempt here too: scouts neither dilute the
     # exploit-temperament ratio nor discharge a starved focus direction (their
     # results cannot reach a record, so "service" by scout would be hollow).
@@ -2230,10 +2308,10 @@ def v_open_round(ctx: Ctx, task: dict) -> list[str]:
             and ln.get("experiment_purpose") not in econfig.EXPLORATORY_PURPOSES for ln in lanes):
         errs.append(f"PORTFOLIO_WILDCAT_DUE: round {rid} is a wildcat round (every {wildcat_every}); include one L4 lane (wildcat or moonshot)")
     if _stagnant_window(ctx, int(pol.get("stagnation_rounds", 2))):
-        # v9 dedup: in research mode the round-composition floor
-        # structural-scope portfolio floor already guarantees L3+ supply whenever the
-        # round carries >= 2 idea lanes; re-checking it here was a second rule
-        # for the same duty. The stagnation-L3 rule now bites only where the
+        # In research mode the structural-scope portfolio floor already
+        # guarantees L3+ supply whenever the round carries >= 2 idea lanes;
+        # re-checking it here would be a second rule for the same duty. The
+        # stagnation-L3 rule bites only where the
         # floor does not reach: engineering runs and 1-lane rounds.
         candidate_lanes = [ln for ln in lanes if ln.get("intent") != "platform"
                            and ln.get("experiment_purpose") not in econfig.INSTRUMENTAL_PURPOSES
@@ -2249,7 +2327,7 @@ def v_open_round(ctx: Ctx, task: dict) -> list[str]:
             )
     k2 = int(pol.get("stagnation_moonshot_rounds", 0))
     if k2 and _stagnant_window(ctx, k2):
-        # R7 audit: a scout moonshot is observations-only - it cannot pay the
+        # A scout moonshot is observations-only - it cannot pay the
         # forced full-rigor paradigm escape (the card says so; the adjacent
         # wildcat/L3 checks already exclude scouts; this branch missed it).
         if not any(ln.get("intent") == "moonshot"
@@ -2265,7 +2343,7 @@ def v_open_round(ctx: Ctx, task: dict) -> list[str]:
     # inside every candidate. Platform lanes are
     # infrastructure, not idea bets - they stay out of the mix arithmetic.
     if ctx.is_research():
-        # v11.1 P5: exploratory lanes are rigor-exempt BOTH ways - they neither
+        # Exploratory lanes are rigor-exempt BOTH ways - they neither
         # discharge the research shares nor force other lanes to compensate.
         idea_lanes = [ln for ln in lanes if ln.get("intent") != "platform"
                       and ln.get("experiment_purpose") not in econfig.INSTRUMENTAL_PURPOSES
@@ -2323,7 +2401,7 @@ def v_open_round(ctx: Ctx, task: dict) -> list[str]:
         closed = [r for r in ctx.st.get("rounds", []) if r.get("closed_at")]
         if len(closed) >= negl:
             recent_lane_ids = {lid for r in closed[-negl:] for lid in (r.get("lanes") or [])}
-            # R7 audit: scouts discharge no starved direction (their results
+            # Scouts discharge no starved direction (their results
             # cannot reach a record) - the HISTORICAL served set must apply
             # the same predicate the current-round arithmetic already does,
             # or repeated reconnaissance postpones the promised full-rigor
@@ -2334,7 +2412,7 @@ def v_open_round(ctx: Ctx, task: dict) -> list[str]:
                       and l.get("experiment_purpose") not in econfig.EXPLORATORY_PURPOSES}
             starved = [fid for fid in fds if fid not in served]
     if fds and candidate_lanes_for_mix:
-        # R9 audit + v11.4 reconciliation: the old ">=2 candidates" skip
+        # The old ">=2 candidates" skip
         # silently waived the cap for single-candidate rounds; removing it
         # alone made the two focus rules unsatisfiable for any round smaller
         # than ceil(1/cap) whenever a direction starves - the neglect rule
@@ -2420,7 +2498,7 @@ def _tombstone_identity_errors(ctx: Ctx, text: str, where: str) -> list[str]:
 
 
 def tombstone_criterion_errors(ctx: Ctx, criterion: str, where: str) -> list[str]:
-    """v11.2: a tombstone's absorption criterion is a self-contained anonymous
+    """A tombstone's absorption criterion is a self-contained anonymous
     PREDICATE - it states which variations one published work absorbs, and
     nothing else. Never a direction, never a menu of untested escapes, never
     an identity: the strategist may quote it into a lane brief that a
@@ -2596,14 +2674,13 @@ def _duplicate_evidence_errors(ctx: Ctx, review: str, *, lane_id: str,
             and str(target_node.get("kernel_hash") or "") == candidate_kernel_hash
         if not same_kernel and candidate_kernel_hash and target_node is not None \
                 and target_node.get("idea_doc"):
-            # R9 identity normalization bridge: the two STORED hashes may have
-            # been written under different algorithm eras. Recompute the
-            # target's fingerprint pair from its frozen idea meta and accept
-            # the winner's stored hash if it matches either spelling.
+            # Recompute the target's identity from its frozen idea meta and
+            # accept the winner's hash if it matches (the stored hash and the
+            # recomputation agree unless the record was hand-edited).
             meta = eutil.read_json(eutil.rpath(
                 ctx.store.repo, str(target_node["idea_doc"]).replace(".md", ".meta.json")), {}) or {}
             if meta.get("novelty"):
-                same_kernel = candidate_kernel_hash in eprogram.kernel_fingerprints(meta)
+                same_kernel = eprogram.kernel_identity_matches(candidate_kernel_hash, meta)
         if target_node is None:
             errs.append(f"REVIEW_DUPLICATE_NODE: {target} does not resolve to an existing graph node")
         elif not same_kernel:
@@ -2676,10 +2753,10 @@ def historical_program_blocks(ctx: Ctx, *, ignore_idea: str | None = None) -> tu
                 continue
             contracts[eprogram.candidate_digest(candidate)] = tournament_path
             irreducibility = audit.get("irreducibility") or {}
-            # v12: can_emulate no longer banks the kernel fingerprint. It is a
+            # Can_emulate no longer banks the kernel fingerprint. It is a
             # judgment about a NEIGHBOR's computation, structurally more
             # error-prone than the audit of the candidate's own body
-            # (non_reducible/collage), and a wrong call here used to close the
+            # (non_reducible/collage), and a wrong call here must not close the
             # whole kernel direction graph-wide and permanently. An emulation
             # kill still retires the candidate's exact contract (line above)
             # and still blocks that program's advance inside its own
@@ -2729,15 +2806,13 @@ def historical_program_blocks(ctx: Ctx, *, ignore_idea: str | None = None) -> tu
                            for kid in eprogram.kernel_ids(meta))
             if hard and kernel_hash:
                 kernels[kernel_hash] = source
-                # R10-005: where the rejected idea's program survives, its
-                # identity is registered under EVERY generation's spelling -
-                # a stored legacy hash cannot recognize a consistently
-                # renumbered copy on its own (the same recompute bridge
-                # _duplicate_evidence_errors has always used).
+                # Where the rejected idea's program survives, its recomputed
+                # identity is registered too (it agrees with the stored hash
+                # unless the record was hand-edited).
                 if isinstance(meta.get("program"), dict):
-                    for spelling in eprogram.kernel_fingerprints(meta):
-                        if spelling:
-                            kernels.setdefault(spelling, source)
+                    spelling = eprogram.kernel_fingerprint(meta)
+                    if spelling:
+                        kernels.setdefault(spelling, source)
 
     for node in ctx.g.get("nodes", []):
         if not isinstance(node, dict) or not node.get("kernel_hash"):
@@ -2747,9 +2822,9 @@ def historical_program_blocks(ctx: Ctx, *, ignore_idea: str | None = None) -> tu
             node_meta = eutil.read_json(eutil.rpath(
                 ctx.store.repo, str(node["idea_doc"]).replace(".md", ".meta.json")), {}) or {}
             if isinstance(node_meta.get("program"), dict):
-                for spelling in eprogram.kernel_fingerprints(node_meta):
-                    if spelling:
-                        kernels.setdefault(spelling, f"graph node {node.get('id')}")
+                spelling = eprogram.kernel_fingerprint(node_meta)
+                if spelling:
+                    kernels.setdefault(spelling, f"graph node {node.get('id')}")
     for lane in ctx.st.get("lanes", []):
         if lane.get("status") not in ("red_team", "gate", "approved", "node_created") \
                 or not lane.get("idea") or lane.get("idea") == ignore_idea:
@@ -2759,9 +2834,9 @@ def historical_program_blocks(ctx: Ctx, *, ignore_idea: str | None = None) -> tu
         if meta.get("kernel_hash"):
             kernels[str(meta["kernel_hash"])] = f"active idea {lane.get('idea')}"
             if isinstance(meta.get("program"), dict):
-                for spelling in eprogram.kernel_fingerprints(meta):
-                    if spelling:
-                        kernels.setdefault(spelling, f"active idea {lane.get('idea')}")
+                spelling = eprogram.kernel_fingerprint(meta)
+                if spelling:
+                    kernels.setdefault(spelling, f"active idea {lane.get('idea')}")
     return contracts, kernels
 
 
@@ -2800,7 +2875,7 @@ def v_sketch(ctx: Ctx, task: dict) -> list[str]:
 
     want = econfig.budget(ctx.cfg, "sketches_per_lane")
     if lane.get("scaling_followup_of") or lane.get("confirmatory_of"):
-        # v11.1 (R1/R2 fix): a carbon-copy lane re-runs ONE frozen kernel - a
+        # A carbon-copy lane re-runs ONE frozen kernel - a
         # batch of alternatives is impossible by construction (every extra
         # candidate would be the same core, which the within-batch duplicate
         # rules rightly reject). Exactly one, for BOTH copy species.
@@ -2933,7 +3008,7 @@ def v_sketch(ctx: Ctx, task: dict) -> list[str]:
                 errs.append(f"PROGRAM_CLAIM_GENERALIST: {sid}: generalist must freeze every project target cell")
             if claim.get("kind") == "specialist" and set(claim_targets) == global_targets:
                 errs.append(f"PROGRAM_CLAIM_SPECIALIST: {sid}: specialist must be a strict target subset")
-            # R3 logic audit (fail-early): v_mature enforces these two config-
+            # v_mature enforces these two config-
             # structure conditions AND exact-copy drift from the frozen winner.
             # A winner frozen in violation could therefore never mature - the
             # lane's only exit was death after tournament spend. The wall must
@@ -3004,27 +3079,22 @@ def v_sketch(ctx: Ctx, task: dict) -> list[str]:
         # diversity rules are meaningless (and unsatisfiable) there.
         errs.extend(eprogram.diversity_errors(candidates))
     rejected_contracts, rejected_kernels = historical_program_blocks(ctx)
-    scaling_parent_kernels, scaling_parent_kind = _kernel_carbon_copy_target(
-        ctx, lane.get("scaling_followup_of"))
-    confirm_kernels, _ck = _kernel_carbon_copy_target(ctx, lane.get("confirmatory_of"))
+    scaling_parent_kernels = _kernel_carbon_copy_target(ctx, lane.get("scaling_followup_of"))
+    confirm_kernels = _kernel_carbon_copy_target(ctx, lane.get("confirmatory_of"))
     for cand in candidates:
         digest = eprogram.candidate_digest(cand)
-        # R9 identity normalization: every stored hash may be either spelling
-        # (normalized or legacy); membership and equality checks consult both
-        # so no stored disposition goes blind - and no mandated copy wedges -
-        # across the algorithm change.
-        fp_pair = eprogram.kernel_fingerprints(cand)
-        hit_source = next((rejected_kernels[f] for f in fp_pair if f in rejected_kernels), None)
+        fingerprint = eprogram.kernel_fingerprint(cand)
+        hit_source = rejected_kernels.get(fingerprint)
         if digest in rejected_contracts:
             errs.append(f"PROGRAM_REJECTED_CONTRACT_REPEAT: {cand.get('sketch_id')} exactly repeats a "
                         f"previously rejected executable/effect/resource contract from "
                         f"{rejected_contracts[digest]}")
-        elif hit_source is not None and not (confirm_kernels and set(confirm_kernels) & set(fp_pair)) \
+        elif hit_source is not None and fingerprint not in confirm_kernels \
                 and not lane.get("scaling_followup_of"):
-            # v11.1 (R1 fix): the confirmatory door - reproducing a declared
+            # The confirmatory door - reproducing a declared
             # exploratory scout's kernel under full rigor is the one legal way
             # a graph-node kernel may be run again.
-            # v11.1 (final audit C24): a scaling follow-up lane is FULLY exempt
+            # A scaling follow-up lane is FULLY exempt
             # from the core-repeat block - its kernel legality is owned by the
             # affirmative carbon-copy check below (must equal the parent's,
             # verbatim), so nothing else can ride this exemption; without it,
@@ -3033,27 +3103,9 @@ def v_sketch(ctx: Ctx, task: dict) -> list[str]:
             errs.append(f"PROGRAM_REJECTED_CORE_REPEAT: {cand.get('sketch_id')} repeats a frozen core "
                         f"with an explicit mechanistic/duplicate disposition from {hit_source}")
         if scaling_parent_kernels:
-            # R9: the normalized identity no longer embeds novelty.kind, so a
-            # new-era parent hash matches the verbatim copy directly. A parent
-            # stored under the LEGACY algorithm still needs the historical
-            # kind-substitution arm (its hash embeds the parent's kind).
-            # R10-005: every acceptable parent spelling participates - the
-            # recomputed generations bridge renumbered copies of legacy rows.
-            nov = cand.get("novelty") or {}
-            legacy_neutral = (eprogram.legacy_kernel_fingerprint(
-                {**cand, "novelty": {**nov, "kind": scaling_parent_kind}})
-                if scaling_parent_kind else "")
-            copy_ok = any(eprogram.kernel_identity_matches(k, cand)
-                          for k in scaling_parent_kernels) \
-                or (bool(legacy_neutral) and legacy_neutral in scaling_parent_kernels)
-            if not copy_ok and not scaling_parent_kind:
-                # R2 fix: with the parent's kind unknown the legacy arm is
-                # unsatisfiable - say so instead of gaslighting the agent
-                # with "this core differs".
-                errs.append(f"PROGRAM_SCALING_FOLLOWUP_PARENT_META: {cand.get('sketch_id')}: parent "
-                            f"{lane.get('scaling_followup_of')}'s idea meta (novelty.kind) is unreadable; "
-                            "the carbon-copy check cannot run - restore the parent's .meta.json first")
-                continue
+            # The identity excludes novelty.kind and local numbering, so the
+            # parent's stored hash matches a verbatim copy directly.
+            copy_ok = fingerprint in scaling_parent_kernels
             if not copy_ok:
                 errs.append(f"PROGRAM_SCALING_FOLLOWUP_KERNEL: {cand.get('sketch_id')}: a scaling follow-up "
                             f"lane must re-run its parent's frozen kernel VERBATIM (statements, components, "
@@ -3065,14 +3117,14 @@ def v_sketch(ctx: Ctx, task: dict) -> list[str]:
                             f"effect comparator must be the parent {lane.get('scaling_followup_of')} itself "
                             f"(the same kernel at the base scale), got {comparator!r}")
         if lane.get("confirmatory_of") and not confirm_kernels:
-            # (final audit L17) mirror of the scaling PARENT_META guard: an
+            #  mirror of the scaling PARENT_META guard: an
             # unreadable scout kernel must fail loudly, not skip silently.
             errs.append(f"PROGRAM_CONFIRMATORY_TARGET_META: {cand.get('sketch_id')}: scout "
                         f"{lane.get('confirmatory_of')}'s kernel_hash is unreadable; the carbon-copy "
                         "check cannot run - restore the scout node's record first")
         elif confirm_kernels and not any(eprogram.kernel_identity_matches(k, cand)
                                          for k in confirm_kernels):
-            # v11.1 (R2 fix): the confirmatory promise is enforced, not
+            # The confirmatory promise is enforced, not
             # honor-system - the one program must BE the scout's kernel.
             errs.append(f"PROGRAM_CONFIRMATORY_KERNEL: {cand.get('sketch_id')}: a confirmatory lane must "
                         f"re-run scout {lane.get('confirmatory_of')}'s frozen kernel VERBATIM (statements, "
@@ -3080,35 +3132,26 @@ def v_sketch(ctx: Ctx, task: dict) -> list[str]:
     return errs
 
 
-def _kernel_carbon_copy_target(ctx: Ctx, nid: Any) -> tuple[tuple[str, ...], str]:
-    """(acceptable kernel spellings, novelty.kind) of the node a lane declares
-    it will re-run (scaling_followup_of / confirmatory_of), or ((), "").
-
-    R10-005: the stored hash alone cannot recognize a consistently renumbered
-    copy when it was written by an older identity algorithm (the legacy
-    spelling embeds local OP# labels). Where the target's idea program still
-    exists, its identity is RECOMPUTED under every generation and each
-    spelling is acceptable - same bridge _duplicate_evidence_errors has
-    always used."""
+def _kernel_carbon_copy_target(ctx: Ctx, nid: Any) -> tuple[str, ...]:
+    """Acceptable kernel spellings of the node a lane declares it will re-run
+    (scaling_followup_of / confirmatory_of), or (). The stored hash counts,
+    and so does the identity recomputed from the frozen idea program where it
+    still exists (they agree unless the record was hand-edited)."""
     if not nid:
-        return (), ""
+        return ()
     node = egraph.by_id(ctx.g).get(str(nid)) or {}
     spellings: list[str] = []
     stored = str(node.get("kernel_hash") or "")
     if stored:
         spellings.append(stored)
-    kind = ""
     if node.get("idea_doc"):
         meta = eutil.read_json(eutil.rpath(ctx.store.repo,
                                            str(node["idea_doc"]).replace(".md", ".meta.json")), {}) or {}
-        kind = str(((meta.get("novelty") or {}).get("kind")) or "")
         if isinstance(meta.get("program"), dict):
-            spellings.extend(s for s in eprogram.kernel_fingerprints(meta) if s)
-    seen: list[str] = []
-    for s in spellings:
-        if s not in seen:
-            seen.append(s)
-    return tuple(seen), kind
+            recomputed = eprogram.kernel_fingerprint(meta)
+            if recomputed and recomputed not in spellings:
+                spellings.append(recomputed)
+    return tuple(spellings)
 
 
 def _is_model_parent(ctx: Ctx, pid: str) -> bool:
@@ -3210,7 +3253,7 @@ def v_tournament(ctx: Ctx, task: dict) -> list[str]:
         elif decision == "advance":
             advanced.add(sid)
         _nontrivial(audit.get("reason"), 60, f"{where}.reason", errs)
-        # v11.2: a kill grounded in published work must bank the boundary
+        # A kill grounded in published work must bank the boundary
         # (research mode; engineering-mode borrowing has no boundary to bank).
         if research_mode:
             errs.extend(_published_dup_errors(
@@ -3346,7 +3389,7 @@ def v_tournament(ctx: Ctx, task: dict) -> list[str]:
             research_kernel = str((cand.get("novelty") or {}).get("kind") or "") in eprogram.RESEARCH_NOVELTY
             lane_sota_duty = (ctx.is_research() and econfig.sota_enabled(ctx.cfg)
                               and lane.get("experiment_purpose") not in econfig.EXPLORATORY_PURPOSES)
-            # v12 (field deadlock, L001): a sealed tournament whose
+            # A sealed tournament whose
             # frontier_refs carry a non-exact-comparability S# makes the
             # downstream idea contract jointly unsatisfiable (IDEA_SOTA_DRIFT
             # demands sota_targets equal these refs while
@@ -3516,7 +3559,7 @@ def v_tournament(ctx: Ctx, task: dict) -> list[str]:
 # ---- theory dialectic (lanes with a declared T claim) ---------------------------------
 
 def v_pose(ctx: Ctx, task: dict) -> list[str]:
-    """The formal problem statement (v8). LLMs derive better on well-defined
+    """The formal problem statement. LLMs derive better on well-defined
     problems: before theorizing, a formal lane must POSE one - typed objects,
     named assumptions, a precise Want - like a theoretical physicist writing
     the problem before solving it. Anti-decorative-notation duty: every symbol
@@ -3617,7 +3660,7 @@ def _derivation_chain_errors(ctx: Ctx, lane: dict, deriv: str) -> list[str]:
 
 
 def _toy_check_errors(ctx: Ctx, lane: dict, deriv: str) -> list[str]:
-    """v9: a fully-formalizable chain must COMPUTE. The theorist ships
+    """A fully-formalizable chain must COMPUTE. The theorist ships
     TOY_CHECK.py next to the theory - stdlib-only, instantiates the posed
     objects on a toy instance, asserts >= 1 derivation step numerically, and
     prints 'TOY_CHECK_OK' plus the S# ids it verified. The engine executes it
@@ -3790,8 +3833,10 @@ def _ablation_contract_errors(ctx: Ctx, lane: dict, meta: dict, errs: list[str])
     """
     idx = egraph.by_id(ctx.g)
     model_parents = [p for p in lane.get("parents", []) if p in idx and idx[p].get("role") != "platform"]
-    if econfig.ablation_mode(ctx.cfg) != "targeted":
-        errs.append("ABLATION_POLICY_OFF: the user-approved project policy does not allow targeted ablation nodes")
+    if econfig.ablation_budget_multiple(ctx.cfg) <= 0:
+        errs.append("ABLATION_POLICY_OFF: evidence_policy.ablation.budget_multiple is 0, so no ablation spend "
+                    "is allowed; raise it on record first: evo amend --path .evo/config.json --from "
+                    "<edited copy> --reason \"...\"")
     if len(model_parents) != 1:
         errs.append("ABLATION_PARENT: targeted ablation needs exactly one concluded model parent")
     ablation = meta.get("ablation")
@@ -3863,12 +3908,30 @@ def _ablation_contract_errors(ctx: Ctx, lane: dict, meta: dict, errs: list[str])
     else:
         for i, item in enumerate(held):
             _nontrivial(item, 20, f"ablation.held_constant[{i}]", errs)
-    cap = int((((ctx.cfg.get("evidence_policy") or {}).get("ablation") or {})
-               .get("max_costly_runs_per_node") or 0))
-    if ablation.get("costly_runs") != 1 or cap != 1:
-        errs.append("ABLATION_RUNS: a targeted ablation is exactly one changed-component run; it cannot "
-                    "smuggle a sweep or seed cross-product into the node")
-    for forbidden in ("mechanism_probe", "attribution_waiver", "scaling"):
+    runs = ablation.get("costly_runs")
+    if not isinstance(runs, int) or isinstance(runs, bool) or runs < 1:
+        errs.append("ABLATION_RUNS: costly_runs must be an integer >= 1 - the changed-component runs this "
+                    "diagnostic buys; a sweep or a seed cross-product is never an ablation. Spend above "
+                    "the parent's allowance (evidence_policy.ablation.budget_multiple x the parent's own "
+                    "cost) is not refused here: the user decides it at the gate")
+    _nontrivial(ablation.get("runs_basis"), 40,
+                "ablation.runs_basis (why THIS many runs settle the question: a deterministic pipeline, "
+                "an effect far above any plausible run-to-run spread, the engine's noise arithmetic "
+                "when a floor is recorded, or an interval the evaluation reports itself)",
+                errs)
+    if not isinstance(ablation.get("settles_parent_mechanism"), bool):
+        errs.append("ABLATION_SETTLES_PARENT: settles_parent_mechanism must be true or false - true when the "
+                    "changed factor IS the parent's kernel, so the outcome settles the parent's mechanism "
+                    "(observed -> confirmed, not observed -> refuted, inconclusive -> the parent stays deferred "
+                    "with the attempt on record); false when "
+                    "the ablation isolates some other component")
+    if not isinstance(ablation.get("control_is_clean_program"), bool):
+        errs.append("ABLATION_CLEAN_CONTROL: control_is_clean_program must be true or false - true when the "
+                    "changed-component arm is the parent's program with the kernel simply REMOVED (the natural "
+                    "program to build on if the kernel turns out not to carry the gain); false when the "
+                    "control replaces it with something else (frozen, random, a stand-in) and is a diagnostic "
+                    "only")
+    for forbidden in ("mechanism_probe", "scaling"):
         if meta.get(forbidden) is not None:
             errs.append(f"ABLATION_RECURSIVE_EVIDENCE: targeted ablation must omit {forbidden}; it is already "
                         "the diagnostic run")
@@ -3933,14 +3996,14 @@ _INSTRUMENTAL_FORBIDDEN_META = (
     "change_scope", "program", "novelty", "effect_case", "theory_role", "theory_target",
     "program_digest", "kernel_hash", "kernel_ids", "sketch_id", "diagnosis_digest",
     "hypothesis_ids", "prior_art_card_ids", "nearest_published", "sota_targets",
-    "siblings_distance", "claim_scope", "mechanism_probe", "attribution_waiver",
+    "siblings_distance", "claim_scope", "mechanism_probe",
     "scaling", "dominance", "predictions", "repeat_rule",
 )
 
 
 def critic_isolation_errors(ctx: Ctx, task: dict, *, release: bool,
                             author_types: tuple[str, ...]) -> list[str]:
-    """Provenance discipline for self-judged RELEASE verdicts (v11).
+    """Provenance discipline for self-judged RELEASE verdicts.
 
     The decisive booleans of tournament/red_team/challenge/fidelity are written
     by the same agent that authored the work, with independence existing only
@@ -3991,7 +4054,7 @@ def critic_isolation_errors(ctx: Ctx, task: dict, *, release: bool,
 
 
 def review_provenance_lines(ctx: Ctx, lane: dict) -> list[str]:
-    """Human-facing provenance summary for a lane's release reviews (v11).
+    """Human-facing provenance summary for a lane's release reviews.
 
     This is what makes attest mode REAL: the human at the idea gate sees
     whether the decisive reviews came from the authoring session or a fresh
@@ -4025,7 +4088,7 @@ def review_provenance_lines(ctx: Ctx, lane: dict) -> list[str]:
 
 
 def repeat_rule_errors(cfg: dict, meta: dict, st: dict | None = None) -> list[str]:
-    """v11.1 P4 registration validator (extracted for direct testability).
+    """Repeat-rule registration validator (extracted for direct testability).
 
     Six-boundary contract: single-run tier only (preplanned is the mutually
     exclusive other tier), exactly one decision cell, the literal
@@ -4069,7 +4132,7 @@ def repeat_rule_errors(cfg: dict, meta: dict, st: dict | None = None) -> list[st
 
 
 def node_review_provenance_lines(ctx: Ctx, rid: str) -> list[str]:
-    """v11.1 P6 - the R2 lens the network cut short: implementer-vs-auditor
+    """Implementer-vs-auditor
     session pairing on the WORKFLOW side (implement vs fidelity), per node of
     one round, shown at the round gate. The lane-side twin is
     review_provenance_lines. Records, never blocks - strict stays the
@@ -4102,12 +4165,12 @@ def node_review_provenance_lines(ctx: Ctx, rid: str) -> list[str]:
 
 
 def parent_hold_defects(ctx: Ctx, p: str) -> list[str]:
-    """R9 (external audit r6): a node under an active hold is quarantined -
+    """A node under an active hold is quarantined -
     typically by a pending recovery or a TERMINAL fork diagnosis whose handoff
-    keeps the hold while a replacement is built. Nothing stopped a new lane
-    from adopting exactly that damaged authority as its parent; with the fork
-    handoff now allowed to open a fresh round under the hold, this is the
-    guard that keeps the quarantine meaningful."""
+    keeps the hold while a replacement is built. A new lane must not adopt
+    exactly that damaged authority as its parent; since the fork handoff may
+    open a fresh round under the hold, this is the guard that keeps the
+    quarantine meaningful."""
     holds = erecover.active_holds_for_subject(ctx.st, ctx.g, node=str(p))
     if holds:
         return [f"parent {p} is under active hold(s) {', '.join(holds)} - a pending recovery/fork "
@@ -4120,10 +4183,11 @@ def model_parent_defects(idx: dict, p: str) -> list[tuple[str, str]]:
     """(defect_kind, detail) rows for using node ``p`` as a model parent.
 
     One shared core for the portfolio door, the mid-round intake door and
-    plan_node. Parent legality used to be enforced only at the two doors, so a
-    parent that died AFTER admission - e.g. recover-abort --abandon-node mid
-    round - slipped into execution and the child was silently measured against
-    the baseline comparator instead of its real reference.
+    plan_node. Parent legality is re-checked at plan_node, not only at the two
+    doors: a parent that dies AFTER admission - e.g. recover-abort
+    --abandon-node mid round - must not slip into execution with the child
+    silently measured against the baseline comparator instead of its real
+    reference.
     """
     n = idx.get(p)
     if n is None:
@@ -4131,7 +4195,7 @@ def model_parent_defects(idx: dict, p: str) -> list[tuple[str, str]]:
     rows: list[tuple[str, str]] = []
     tip = egraph.effective_frontier_ancestor(idx, p)
     tip_node = idx.get(tip) or {}
-    # R7 audit: the old combined message ALWAYS named the tip, so when the
+    # The old combined message ALWAYS named the tip, so when the
     # parent itself (e.g. a maintenance proxy) was the pruned object - or both
     # were - following the printed command revived the wrong node and the same
     # error returned verbatim. Name every retired object with its own command.
@@ -4147,7 +4211,7 @@ def model_parent_defects(idx: dict, p: str) -> list[tuple[str, str]]:
                                f"explicit user decision to reopen ({cmds}); any id still listed after a "
                                "revive is the one that remains pruned"))
     elif archived_ids:
-        # R7 audit: retirement (ANY legal reason) waives the node's working-
+        # Retirement (ANY legal reason) waives the node's working-
         # byte/Git duties, so an archived lineage keeps its measured record
         # but may no longer have intact working artifacts - new consumers
         # need the revival the CLI promises ("Future portfolios may extend
@@ -4164,7 +4228,7 @@ def model_parent_defects(idx: dict, p: str) -> list[tuple[str, str]]:
     elif n.get("experiment_purpose") == "diagnostic_probe":
         rows.append(("probe", f"probe {p} is evidence, never lineage; parent the node it probed instead"))
     elif n.get("experiment_purpose") in econfig.EXPLORATORY_PURPOSES:
-        # v11.1 P5 (R1 fix): observations-only everywhere means HERE too - a
+        # Observations-only everywhere means HERE too - a
         # scout's numbers must not become a child's causal comparator. Cite its
         # OB### and open a confirmatory candidate instead.
         rows.append(("exploratory", f"exploratory node {p} is observations-only, never lineage; cite its "
@@ -4189,6 +4253,10 @@ def injected_lane_errors(ctx: Ctx, ln: dict, rid: str) -> list[str]:
     if purpose not in econfig.INJECTABLE_PURPOSES:
         return [f"INJECT_PURPOSE: mid-round intake accepts only "
                 f"{'|'.join(econfig.INJECTABLE_PURPOSES)}, got {purpose!r}"]
+    if purpose == "targeted_ablation" and econfig.ablation_budget_multiple(ctx.cfg) <= 0:
+        errs.append("INJECT_ABLATION_OFF: evidence_policy.ablation.budget_multiple is 0, so no ablation "
+                    "spend is allowed; raise it on record first: evo amend --path .evo/config.json "
+                    "--from <edited copy> --reason \"...\"")
     # The name becomes a path component of the engine-authored lane brief, so
     # it is a slug, not free text: anything else could escape .evo entirely.
     name = str(ln.get("name") or "")
@@ -4222,7 +4290,14 @@ def injected_lane_errors(ctx: Ctx, ln: dict, rid: str) -> list[str]:
             errs.append(f"INJECT_PARENT_{kind.upper()}: {detail}")
         for detail in parent_hold_defects(ctx, p):
             errs.append(f"INJECT_PARENT_HELD: {detail}")
-    cap_key = econfig.INJECTABLE_CAP_KEYS[purpose]
+    cap_key = econfig.INJECTABLE_CAP_KEYS.get(purpose)
+    if cap_key is None:
+        # A targeted ablation has no per-round cap and no one-at-a-time rule:
+        # every program-level win owes one, the moment it is measured, and two
+        # wins in one round mean two ablations. What bounds the spend is the
+        # allowance (budget_multiple x the parent's own cost), the project's
+        # resource contract and the compute slots.
+        return errs
     cap = int((ctx.cfg.get("budgets") or {}).get(cap_key, 1) or 0)
     # The cap counts every instrumental lane the round OPENED, abandoned ones
     # included.  An earlier version counted only lanes that reached the gate, so
@@ -4387,11 +4462,11 @@ def v_maintenance_design(ctx: Ctx, task: dict) -> list[str]:
         errs.append("MAINT_EVIDENCE: maintenance.defect_evidence must cite >= 1 concrete pointer "
                     "(ER###/OB###/N### id or a repo path)")
     else:
-        # R11-015: a ledger id is only evidence while the ledger stands behind
+        # A ledger id is only evidence while the ledger stands behind
         # it. A repair justified by a superseded/retracted observation (its
-        # source node was re-concluded) or by a nonexistent id used to pass as
-        # a bare string - the design froze withdrawn knowledge as its
-        # justification and nothing downstream re-parsed it.
+        # source node was re-concluded) or by a nonexistent id must not pass
+        # as a bare string - the design would freeze withdrawn knowledge as
+        # its justification and nothing downstream re-parses it.
         all_obs = {str(r.get("id")) for r in ctx.store.observations(ctx.st)}
         active_obs = {str(r.get("id")) for r in ctx.store.observations(ctx.st, active_only=True)}
         known_errors = {str(r.get("id")) for r in ctx.store.errors(ctx.st)}
@@ -4570,6 +4645,111 @@ def v_review_ablation(ctx: Ctx, task: dict) -> list[str]:
     return errs
 
 
+MATURE_META_FIELDS = frozenset({
+    "idea", "lane", "title", "sketch_id", "experiment_purpose", "change_scope", "program",
+    "novelty", "program_digest", "kernel_hash", "level", "diagnosis_digest", "hypothesis_ids",
+    "effect_case", "claim_scope", "theory_role", "theory_rigor", "theory_target",
+    "theory_obligations", "theory_audit", "theory_doc", "problem_doc", "parents",
+    "platforms_consumed", "enables", "prior_art_card_ids", "bottleneck_ids", "dominance",
+    "assumptions", "predictions", "mechanism_probe", "nearest_published", "sota_targets",
+    "scaling", "siblings_distance", "repeat_rule", "external_interface_changed",
+    "metric_bridge_needed",
+})
+
+
+def mechanism_probe_errors(ctx: Ctx, mp: dict, lane: dict) -> list[str]:
+    """Shape and cheapness duties of one registered mechanism probe.
+
+    A probe is a cheap, pre-registered measurement of an INTERMEDIATE the
+    mechanism must move, settled by a numeric rule frozen before any data
+    exists. The rule is what later turns into confirmed/refuted, so every
+    part of it is checked here, and the cheaper instruments in the configured
+    order must be argued away before a costlier one is chosen.
+    """
+    errs: list[str] = []
+    _nontrivial(mp.get("signal"), 30, "mechanism_probe.signal (the measurable INTERMEDIATE the "
+                "mechanism must move - an attention statistic, a rate, a curve feature - not the "
+                "declared target result itself)", errs)
+    _nontrivial(mp.get("expect"), 15, "mechanism_probe.expect (which way it moves if the mechanism is real)", errs)
+    mode = str(mp.get("mode") or "")
+    if mode not in econfig.PROBE_MODES:
+        errs.append(f"IDEA_PROBE_MODE: mechanism_probe.mode must be one of {econfig.PROBE_MODES}")
+    errs.extend(idea_probe_seed_template_errors(
+        ctx.cfg, mp, purpose=str(lane.get("experiment_purpose") or ""),
+        intent=str(lane.get("intent") or "")))
+    arms = mp.get("extra_eval_arms")
+    cap = int((ctx.cfg.get("evidence_policy") or {}).get("max_extra_eval_arms_per_node", 0))
+    if not isinstance(arms, int) or arms < 0 or arms > cap:
+        errs.append(f"IDEA_PROBE_EVAL_ARMS: extra_eval_arms must be an integer 0..{cap}")
+    if mode == "eval_intervention" and arms != 1:
+        errs.append("IDEA_PROBE_EVAL_ARM_REQUIRED: eval_intervention is exactly one cheap eval-only "
+                    "arm; use same_run/existing_artifact when zero arms are needed")
+    if mode != "eval_intervention" and arms != 0:
+        errs.append(f"IDEA_PROBE_MODE_ARMS: mode={mode!r} may not add eval arms; only eval_intervention can use the configured cheap-eval allowance")
+    errs.extend(_probe_path_errors(mp.get("artifact"), "mechanism_probe.artifact"))
+    fields = mp.get("required_fields")
+    if not isinstance(fields, list) or not (1 <= len(fields) <= 5):
+        errs.append("IDEA_PROBE_FIELDS: mechanism_probe.required_fields must contain 1..5 numeric JSON keys")
+        fields = []
+    seen_fields: set[str] = set()
+    for i, field in enumerate(fields):
+        name = str(field or "")
+        if not STAGE_METRIC_KEY.fullmatch(name):
+            errs.append(f"IDEA_PROBE_FIELD: required_fields[{i}] must be a metric-key slug")
+        elif name in seen_fields:
+            errs.append(f"IDEA_PROBE_FIELD_DUP: required field {name!r} repeats")
+        seen_fields.add(name)
+    rule = mp.get("decision_rule")
+    if not isinstance(rule, dict):
+        errs.append("IDEA_PROBE_DECISION_RULE: mechanism_probe.decision_rule must freeze a numeric predicate")
+        rule = {}
+    errs.extend(decision_rule_shape_errors(rule, seen_fields, where="mechanism_probe.decision_rule"))
+    if mode == "existing_artifact" and not _probe_path_errors(mp.get("artifact"), "mechanism_probe.artifact"):
+        errs.extend(probe_artifact_errors(ctx, str(mp.get("artifact") or ""), fields,
+                                          where="registered existing-artifact probe"))
+    _nontrivial(mp.get("decision"), 50, "mechanism_probe.decision (which later DAG choice changes)", errs)
+    _nontrivial(mp.get("value_of_information"), 60,
+                "mechanism_probe.value_of_information (why this signal can change a decision)", errs)
+    if mode in econfig.PROBE_MODES:
+        order = list((ctx.cfg.get("evidence_policy") or {}).get("probe_mode_order") or econfig.PROBE_MODES)
+        earlier = order[:order.index(mode)] if mode in order else []
+        rejected = {str((x or {}).get("mode")): str((x or {}).get("reason") or "")
+                    for x in (mp.get("cheaper_modes_rejected") or []) if isinstance(x, dict)}
+        for cheaper in earlier:
+            if len(rejected.get(cheaper, "").strip()) < 30:
+                errs.append(f"IDEA_PROBE_CHEAPER_MODE: choosing {mode} requires a >=30-char reason why cheaper mode {cheaper} cannot answer the question")
+    return errs
+
+
+def decision_rule_shape_errors(rule: dict, fields: set[str], *, where: str) -> list[str]:
+    """The one legal shape of a numeric settlement predicate."""
+    errs: list[str] = []
+    allowed_rule_fields = ({"field", "aggregation", "comparison", "threshold"}
+                           if rule.get("comparison") in (">=", "<=") else
+                           {"field", "aggregation", "comparison", "lower", "upper"})
+    if set(rule) != allowed_rule_fields:
+        errs.append(f"IDEA_PROBE_DECISION_RULE_FIELDS: {where} must use exactly {sorted(allowed_rule_fields)}")
+    if rule.get("field") not in fields:
+        errs.append(f"IDEA_PROBE_DECISION_FIELD: {where}.field must name one required numeric field")
+    if rule.get("aggregation") not in ("mean", "median", "min", "max"):
+        errs.append(f"IDEA_PROBE_DECISION_AGGREGATION: {where}.aggregation must be mean|median|min|max")
+    comparison = rule.get("comparison")
+    if comparison not in (">=", "<=", "between"):
+        errs.append(f"IDEA_PROBE_DECISION_COMPARISON: {where}.comparison must be >=|<=|between")
+    if comparison in (">=", "<="):
+        threshold = rule.get("threshold")
+        if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) \
+                or not math.isfinite(float(threshold)):
+            errs.append(f"IDEA_PROBE_DECISION_THRESHOLD: {where}.threshold must be finite")
+    elif comparison == "between":
+        lower, upper = rule.get("lower"), rule.get("upper")
+        if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(float(v))
+               for v in (lower, upper)) or (isinstance(lower, (int, float)) and
+                                            isinstance(upper, (int, float)) and lower >= upper):
+            errs.append(f"IDEA_PROBE_DECISION_INTERVAL: {where} needs finite lower < upper")
+    return errs
+
+
 def v_mature(ctx: Ctx, task: dict) -> list[str]:
     errs: list[str] = []
     lane = ctx.store.get_lane(ctx.st, task["subject"]["lane"])
@@ -4579,7 +4759,7 @@ def v_mature(ctx: Ctx, task: dict) -> list[str]:
     if purpose in econfig.INSTRUMENTAL_PURPOSES:
         # A typed refusal for EVERY instrumental purpose: a probe/maintenance
         # lane mis-parked in the candidate pipeline (the corruption
-        # LANE_ROUTE_STATUS exists to catch) used to fall through and fail
+        # LANE_ROUTE_STATUS exists to catch) must not fall through and fail
         # deep inside winner/tournament machinery with unrelated noise.
         route = " -> ".join(eflow.INSTRUMENTAL_SEQ.get(purpose) or ())
         return [f"IDEA_INSTRUMENTAL_PIPELINE: a {purpose} lane uses its own route ({route}), "
@@ -4588,10 +4768,10 @@ def v_mature(ctx: Ctx, task: dict) -> list[str]:
     md = _read_md(ctx, task["outputs"][0], errs)
     if meta is None or md is None:
         return errs
-    legacy = sorted({"delta_descriptor", "primary_dimension", "move", "move_fit",
-                     "mech_card_ids", "reframe", "principle"} & set(meta))
-    if legacy:
-        errs.append(f"IDEA_LEGACY_FIELDS: schema-v2 mature meta must omit legacy idea fields {legacy}")
+    unknown = sorted(set(meta) - MATURE_META_FIELDS)
+    if unknown:
+        errs.append(f"IDEA_UNKNOWN_FIELDS: IDEA.meta.json carries fields the contract does not define "
+                    f"{unknown}; the mature card lists every legal key")
     bud = ctx.cfg.get("budgets", {})
     rspec = econfig.result_spec(ctx.cfg)
     idx = egraph.by_id(ctx.g)
@@ -4650,7 +4830,7 @@ def v_mature(ctx: Ctx, task: dict) -> list[str]:
                 errs.append(f"IDEA_ROUTE_FIELD: constructive/theory-derived meta must omit repair-only {field}")
 
     purpose = str(meta.get("experiment_purpose") or "")
-    # v11.1 P5 (R1 fix): exploratory rides the full candidate pipeline through
+    # Exploratory rides the full candidate pipeline through
     # this very task, so the two checks below were jointly unsatisfiable for it
     # (meta='exploratory' tripped the first, meta='candidate' tripped the
     # binding) - the tier died at its own maturation door.
@@ -4699,7 +4879,7 @@ def v_mature(ctx: Ctx, task: dict) -> list[str]:
             improvement_cells = scope.get("improvement_cells")
             parity_cells = scope.get("parity_cells")
             for name, values in (("improvement_cells", improvement_cells), ("parity_cells", parity_cells)):
-                # R5: improvement_cells may be [] (parity-only efficiency);
+                # Improvement_cells may be [] (parity-only efficiency);
                 # parity_cells stays non-empty - with nothing held at parity
                 # the claim is not an efficiency claim at all.
                 required_nonempty = name == "parity_cells"
@@ -4723,13 +4903,13 @@ def v_mature(ctx: Ctx, task: dict) -> list[str]:
     my_sig = str(meta.get("kernel_hash") or "")
     _contracts, hard_kernels = historical_program_blocks(
         ctx, ignore_idea=str(lane.get("idea") or ""))
-    confirm_kernels, _ck = _kernel_carbon_copy_target(ctx, lane.get("confirmatory_of"))
+    confirm_kernels = _kernel_carbon_copy_target(ctx, lane.get("confirmatory_of"))
     if my_sig and my_sig in hard_kernels \
             and not (confirm_kernels and my_sig in confirm_kernels) \
             and not lane.get("scaling_followup_of"):
-        # v11.1 (R1 fix): a confirmatory lane EXISTS to re-run its declared
+        # A confirmatory lane EXISTS to re-run its declared
         # scout's kernel under full rigor - that one duplication is the point.
-        # (final audit C24): scaling follow-up lanes are likewise exempt - the
+        # : scaling follow-up lanes are likewise exempt - the
         # sketch-level carbon-copy check pins their kernel to the parent's, so
         # a hard disposition of their own earlier attempt must not wedge the
         # mandated resubmission.
@@ -4741,7 +4921,7 @@ def v_mature(ctx: Ctx, task: dict) -> list[str]:
         if meta.get("theory_doc") != lane.get("theory_path"):
             errs.append(f"IDEA_THEORY_LINK: meta.theory_doc must be the surviving theory {lane.get('theory_path')!r} "
                         f"(got {meta.get('theory_doc')!r}) - the idea formalizes the theory that survived challenge")
-    # formal-ladder linkage (v8): the idea inherits the posed problem
+    # Formal-ladder linkage: the idea inherits the posed problem
     if lane.get("formal"):
         if meta.get("problem_doc") != lane.get("problem_path"):
             errs.append(f"IDEA_PROBLEM_LINK: meta.problem_doc must be the posed problem "
@@ -4775,15 +4955,15 @@ def v_mature(ctx: Ctx, task: dict) -> list[str]:
             if str(t.get("dimension") or "") not in ("effect", "efficiency", "modeling", "generality"):
                 errs.append(f"IDEA_SOTA_DIMENSION: target {tid}: dimension must be "
                             f"effect|efficiency|modeling|generality - name the axis you beat them on")
-            # v11 front-shift: conclude has ALWAYS refused 'met' for a non-exact
+            # Conclude has ALWAYS refused 'met' for a non-exact
             # protocol comparison (OUTCOME_SOTA_NONCOMPARABLE) - but that fired
             # AFTER training, although the comparability field sat in the SOTA
-            # library at registration time. A doomed claim now dies here,
-            # before any compute, with the same quality bar. R7: conclude's
+            # library at registration time. A doomed claim dies here,
+            # before any compute, with the same quality bar. conclude's
             # refusal is dimension-blind (every non-exact row is barred from
-            # 'met'), so the front-shift must be too - the old effect-only
-            # check even ADVISED "claim a different dimension", steering the
-            # agent into a wall it would hit after full training.
+            # 'met'), so the front-shift must be too - an effect-only check
+            # that ADVISED "claim a different dimension" would steer the
+            # agent into a wall it hits after full training.
             if str((sota_by_id.get(tid) or {}).get("comparability") or "") not in ("", "exact"):
                 errs.append(f"IDEA_SOTA_NONCOMPARABLE: target {tid}: its SOTA entry is marked "
                             f"comparability={str((sota_by_id.get(tid) or {}).get('comparability'))!r}; a "
@@ -4799,7 +4979,7 @@ def v_mature(ctx: Ctx, task: dict) -> list[str]:
                         "sota_targets entry for a research kernel - an idea that cannot name whom it beats is not "
                         "aiming at the frontier")
     if lane.get("experiment_purpose") in econfig.EXPLORATORY_PURPOSES:
-        # v11.1 P5 (doors-drive + final-audit fixes): a scout must not carry
+        # A scout must not carry
         # forward-commitment machinery of ANY kind - beat-claims flow into
         # conclude settlement, predictions get verdicted, a scaling plan's
         # follow-up door demands the scout as model parent (which scouts can
@@ -4818,121 +4998,24 @@ def v_mature(ctx: Ctx, task: dict) -> list[str]:
             if meta.get(fld):
                 errs.append(f"IDEA_EXPLORATORY_{fld.upper().replace('_TARGETS', '').replace('_RULE', '')}: "
                             f"an exploratory idea registers NO {fld} - {why}")
-    # Attribution is mandatory for novel mechanisms, independently of theory.
+    # The mechanism instrument is optional for every idea. An idea that
+    # registers none settles its mechanism as `deferred`: the node is judged on
+    # its frozen effect claim, and the causal question is answered later - by
+    # a targeted ablation - when a descendant actually depends on it. An idea
+    # that DOES register a probe registers a complete, cheap, pre-registered
+    # one; a half-declared probe is worse than none because it later settles a
+    # verdict nobody designed.
     research_kernel = str((meta.get("novelty") or {}).get("kind") or "") in eprogram.RESEARCH_NOVELTY
-    # Probe SHAPE and the waiver/probe mutual exclusion are universal: any idea
-    # that registers a probe registers a valid one (the drifted v9.2 predicates
-    # let an engineering probe with mode='bogus' or no signal slip through and
-    # then diverge downstream). The probe REQUIREMENT stays research-only below.
     if meta.get("mechanism_probe") is not None:
-        if not isinstance(meta.get("mechanism_probe"), dict):
-            errs.append("IDEA_PROBE_SHAPE: mechanism_probe must be an object")
+        mp = meta.get("mechanism_probe")
+        if not isinstance(mp, dict):
+            errs.append("IDEA_PROBE_SHAPE: mechanism_probe must be an object (omit the key entirely to "
+                        "defer the mechanism question)")
         else:
-            if meta["mechanism_probe"].get("mode") not in econfig.PROBE_MODES:
-                errs.append(f"IDEA_PROBE_MODE: mechanism_probe.mode must be one of {econfig.PROBE_MODES}")
-            _nontrivial(meta["mechanism_probe"].get("signal"), 30,
-                        "mechanism_probe.signal (the measurable INTERMEDIATE)", errs)
-            # v12 self-review: the seed-template cross-check is UNIVERSAL like
-            # the shape checks above - a scout's voluntary probe or an
-            # engineering-mode probe hits the same plan-layer template rules,
-            # so admitting '{seed}' here only for research candidates would
-            # recreate the seal-admits/plan-vetoes pair for everyone else.
-            errs.extend(idea_probe_seed_template_errors(
-                ctx.cfg, meta["mechanism_probe"],
-                purpose=str(lane.get("experiment_purpose") or ""),
-                intent=str(lane.get("intent") or "")))
-    if str(meta.get("attribution_waiver") or "").strip() and meta.get("mechanism_probe"):
-        errs.append("IDEA_WAIVER_PROBE_CONFLICT: an attribution_waiver and a mechanism_probe "
-                    "are mutually exclusive - the waiver argues no measurable signal exists, "
-                    "the probe registers one; keep exactly one")
-    if research_kernel and lane.get("intent") != "platform" \
-            and lane.get("experiment_purpose") not in econfig.EXPLORATORY_PURPOSES:
-        # v11.1 P5 (doors-drive fix): the probe/waiver duty exists to license
-        # scientific promotion; a scout's promotion is pinned not_applicable,
-        # so demanding pre-registered probe machinery from it is the same
-        # manufactured-foresight ceremony the tier exists to remove. A scout
-        # MAY still register a probe; it is never forced to.
-        mp = meta.get("mechanism_probe") or {}
-        waiver = str(meta.get("attribution_waiver") or "").strip()
-        if waiver:
-            if len(waiver) < 40:
-                errs.append("IDEA_ATTRIBUTION_WAIVER: attribution_waiver needs >= 40 chars - why no "
-                            "measurable intermediate signal exists for this mechanism")
-        else:
-            _nontrivial(mp.get("signal"), 30, "mechanism_probe.signal (the measurable INTERMEDIATE the "
-                        "mechanism must move - an attention statistic, a rate, a curve feature - not the "
-                        "declared target result itself)", errs)
-            _nontrivial(mp.get("expect"), 15, "mechanism_probe.expect (which way it moves if the mechanism is real)", errs)
-            mode = str(mp.get("mode") or "")
-            if mode not in econfig.PROBE_MODES:
-                errs.append(f"IDEA_PROBE_MODE: mechanism_probe.mode must be one of {econfig.PROBE_MODES}")
-            arms = mp.get("extra_eval_arms")
-            cap = int((ctx.cfg.get("evidence_policy") or {}).get("max_extra_eval_arms_per_node", 0))
-            if not isinstance(arms, int) or arms < 0 or arms > cap:
-                errs.append(f"IDEA_PROBE_EVAL_ARMS: extra_eval_arms must be an integer 0..{cap}")
-            if mode == "eval_intervention" and arms != 1:
-                errs.append("IDEA_PROBE_EVAL_ARM_REQUIRED: eval_intervention is exactly one cheap eval-only "
-                            "arm; use same_run/existing_artifact when zero arms are needed")
-            if mode != "eval_intervention" and arms != 0:
-                errs.append(f"IDEA_PROBE_MODE_ARMS: mode={mode!r} may not add eval arms; only eval_intervention can use the configured cheap-eval allowance")
-            errs.extend(_probe_path_errors(mp.get("artifact"), "mechanism_probe.artifact"))
-            fields = mp.get("required_fields")
-            if not isinstance(fields, list) or not (1 <= len(fields) <= 5):
-                errs.append("IDEA_PROBE_FIELDS: mechanism_probe.required_fields must contain 1..5 numeric JSON keys")
-                fields = []
-            seen_fields: set[str] = set()
-            for i, field in enumerate(fields):
-                name = str(field or "")
-                if not STAGE_METRIC_KEY.fullmatch(name):
-                    errs.append(f"IDEA_PROBE_FIELD: required_fields[{i}] must be a metric-key slug")
-                elif name in seen_fields:
-                    errs.append(f"IDEA_PROBE_FIELD_DUP: required field {name!r} repeats")
-                seen_fields.add(name)
-            rule = mp.get("decision_rule")
-            if not isinstance(rule, dict):
-                errs.append("IDEA_PROBE_DECISION_RULE: mechanism_probe.decision_rule must freeze a numeric predicate")
-                rule = {}
-            allowed_rule_fields = ({"field", "aggregation", "comparison", "threshold"}
-                                   if rule.get("comparison") in (">=", "<=") else
-                                   {"field", "aggregation", "comparison", "lower", "upper"})
-            if set(rule) != allowed_rule_fields:
-                errs.append(f"IDEA_PROBE_DECISION_RULE_FIELDS: decision_rule must use exactly "
-                            f"{sorted(allowed_rule_fields)}")
-            if rule.get("field") not in seen_fields:
-                errs.append("IDEA_PROBE_DECISION_FIELD: decision_rule.field must name one required numeric field")
-            if rule.get("aggregation") not in ("mean", "median", "min", "max"):
-                errs.append("IDEA_PROBE_DECISION_AGGREGATION: decision_rule.aggregation must be mean|median|min|max")
-            comparison = rule.get("comparison")
-            if comparison not in (">=", "<=", "between"):
-                errs.append("IDEA_PROBE_DECISION_COMPARISON: decision_rule.comparison must be >=|<=|between")
-            if comparison in (">=", "<="):
-                threshold = rule.get("threshold")
-                if isinstance(threshold, bool) or not isinstance(threshold, (int, float)) \
-                        or not math.isfinite(float(threshold)):
-                    errs.append("IDEA_PROBE_DECISION_THRESHOLD: decision_rule.threshold must be finite")
-            elif comparison == "between":
-                lower, upper = rule.get("lower"), rule.get("upper")
-                if any(isinstance(v, bool) or not isinstance(v, (int, float)) or not math.isfinite(float(v))
-                       for v in (lower, upper)) or (isinstance(lower, (int, float)) and
-                                                    isinstance(upper, (int, float)) and lower >= upper):
-                    errs.append("IDEA_PROBE_DECISION_INTERVAL: decision_rule needs finite lower < upper")
-            if mode == "existing_artifact" and not _probe_path_errors(mp.get("artifact"), "mechanism_probe.artifact"):
-                errs.extend(probe_artifact_errors(ctx, str(mp.get("artifact") or ""), fields,
-                                                  where="registered existing-artifact probe"))
-            _nontrivial(mp.get("decision"), 50, "mechanism_probe.decision (which later DAG choice changes)", errs)
-            _nontrivial(mp.get("value_of_information"), 60,
-                        "mechanism_probe.value_of_information (why this signal can change a decision)", errs)
-            if mode in econfig.PROBE_MODES:
-                order = list((ctx.cfg.get("evidence_policy") or {}).get("probe_mode_order") or econfig.PROBE_MODES)
-                earlier = order[:order.index(mode)] if mode in order else []
-                rejected = {str((x or {}).get("mode")): str((x or {}).get("reason") or "")
-                            for x in (mp.get("cheaper_modes_rejected") or []) if isinstance(x, dict)}
-                for cheaper in earlier:
-                    if len(rejected.get(cheaper, "").strip()) < 30:
-                        errs.append(f"IDEA_PROBE_CHEAPER_MODE: choosing {mode} requires a >=30-char reason why cheaper mode {cheaper} cannot answer the question")
+            errs.extend(mechanism_probe_errors(ctx, mp, lane))
     dom = meta.get("dominance")
     if kind == "efficiency" and dom is None and (scope.get("improvement_cells") or []):
-        # R5: a parity-only efficiency claim has no quality cell to threshold;
+        # A parity-only efficiency claim has no quality cell to threshold;
         # its win is settled by the resource regime's improvement_axes.
         errs.append("IDEA_DOMINANCE_REQUIRED: efficiency claims with quality improvement_cells need "
                     "an absolute pre-registered dominance threshold")
@@ -4984,7 +5067,7 @@ def v_mature(ctx: Ctx, task: dict) -> list[str]:
             cap = int((ctx.cfg.get("evidence_policy") or {}).get("max_scaling_costly_arms", 0))
             if not isinstance(costly_arms, int) or not (1 <= costly_arms <= cap):
                 errs.append(f"IDEA_SCALING_COSTLY_ARMS: follow-up scaling costly_arms must be 1..{cap}")
-    # v11.1 P4: pre-registered on-the-line repeat rule (single-run mode only).
+    # Pre-registered on-the-line repeat rule (single-run mode only).
     errs.extend(repeat_rule_errors(ctx.cfg, meta, st=ctx.st))
     # parents must match the lane contract
     lane_model = [p for p in lane.get("parents", []) if _is_model_parent(ctx, p)]
@@ -5032,7 +5115,7 @@ def v_mature(ctx: Ctx, task: dict) -> list[str]:
         if len(enables) < 2:
             errs.append("IDEA_ENABLES: platform ideas must list >= 2 concrete future nodes/uses they unlock in meta.enables")
     elif lane.get("experiment_purpose") in econfig.EXPLORATORY_PURPOSES:
-        # v11.1 P5: reconnaissance declared at admission is exactly the case
+        # Reconnaissance declared at admission is exactly the case
         # where forcing numeric foresight manufactures noise - predictions are
         # OPTIONAL here, and the lane already paid with observations-only
         # status (no frontier, no records, no research-share credit).
@@ -5053,7 +5136,7 @@ def v_mature(ctx: Ctx, task: dict) -> list[str]:
         if not isinstance(p.get("value"), (int, float)):
             errs.append(f"IDEA_PREDICTION_VALUE: {pid}: numeric 'value' required (a pre-registered number, not a direction)")
         if "slice" in p:
-            # R4 science audit: the settlement reads the GLOBAL result_key; a
+            # The settlement reads the GLOBAL result_key; a
             # slice annotation would be displayed at the approval gate and then
             # silently ignored at settlement - refuse the dishonest shape.
             errs.append(f"IDEA_PREDICTION_SLICE: {pid}: slice-scoped predictions are not engine-settleable "
@@ -5063,7 +5146,7 @@ def v_mature(ctx: Ctx, task: dict) -> list[str]:
     claimed_result_keys = {str((cells.get(cid) or {}).get("result_key") or "") for cid in claim_targets}
     if lane.get("intent") != "platform" and preds and not any(p.get("metric") in claimed_result_keys for p in preds):
         errs.append("IDEA_PREDICTION_SCOPE: at least one registered prediction must test a result_key in claim_scope.target_cells")
-    # novelty + sibling distance - MODE-DEPENDENT (v8):
+    # Novelty + sibling distance - MODE-DEPENDENT:
     #   research: the idea must DIFFER from the nearest published work (novelty
     #     is a goal); engineering: the idea may BORROW the published mechanism
     #     wholesale, but must argue the ADAPTATION - why it fits THIS project's
@@ -5089,7 +5172,7 @@ def v_mature(ctx: Ctx, task: dict) -> list[str]:
         _nontrivial(s.get("difference"), 40, f"siblings_distance[{s.get('node')}].difference", errs)
     missing_sibs = [n["id"] for n in sib_nodes if n["id"] not in listed]
     if lane.get("intent") != "platform" and missing_sibs:
-        # R7 audit: the old [:5] slice revealed the required set five ids at a
+        # The old [:5] slice revealed the required set five ids at a
         # time, so literally following each rejection exhausted the default
         # three attempts on a fully repairable task. Name the WHOLE duty.
         shown = missing_sibs[:30]
@@ -5114,7 +5197,7 @@ def v_mature(ctx: Ctx, task: dict) -> list[str]:
                               "causal derivation", "prior-art boundary",
                               "implementation sketch", "risks"]
         if lane.get("experiment_purpose") not in econfig.EXPLORATORY_PURPOSES:
-            # v11.1 P5 (R1 fix): the numeric-predictions section is exactly the
+            # The numeric-predictions section is exactly the
             # foresight ceremony an exploratory lane is exempt from; demanding
             # the heading while the count check waived the content taught cold
             # agents to fabricate numbers that then got verdicted.
@@ -5172,11 +5255,11 @@ def v_red_team(ctx: Ctx, task: dict) -> list[str]:
     _require_sections(review, wanted, "review", errs, min_chars=60)
     _check_quotes(QUOTE_LINE.findall(review), idea_md, "review", errs, min_quotes=2)
     if m and m.group(1) == "REJECT_DUPLICATE":
-        # v11.2: a published-work duplicate death must BANK its boundary. One
+        # A published-work duplicate death must BANK its boundary. One
         # criterion line, so later rounds inherit "what that work absorbs"
         # instead of re-walking it; deliberately placed here (not inside
-        # _duplicate_evidence_errors) so historical pre-v11.2 reviews keep
-        # their hard-disposition status unchanged.
+        # _duplicate_evidence_errors) so a review's hard-disposition status
+        # never depends on this walk.
         rt_target = next(iter(DUPLICATE_TARGET_RE.findall(review)), "")
         if rt_target.startswith("CA") and ctx.is_research():
             # (engineering CA targets are already rejected wholesale by the
@@ -5211,10 +5294,10 @@ def load_spec(ctx: Ctx, relp: str, errs: list[str]) -> dict | None:
 
 def _resolved_uri_variants(uri: str, spec: dict | None) -> set[str]:
     """Every canonical spelling a declared product URI can take at runtime:
-    the raw form plus each preplanned-seed expansion. R9 audit: reservation
-    compared raw strings only, so `out/{seed}.pt` and a sibling's literal
-    `out/1.pt` never collided on paper while the filesystem resolved them to
-    one file. R10-002: remote scheme URIs participate too - the registry law
+    the raw form plus each preplanned-seed expansion. Reservation must never
+    compare raw strings only, or `out/{seed}.pt` and a sibling's literal
+    `out/1.pt` would never collide on paper while the filesystem resolves them
+    to one file. Remote scheme URIs participate too - the registry law
     makes a producer URI globally unique, so two pending specs declaring one
     remote landing are a reservation conflict exactly like two local ones."""
     out: set[str] = set()
@@ -5222,7 +5305,7 @@ def _resolved_uri_variants(uri: str, spec: dict | None) -> set[str]:
     if not raw:
         return out
     out.add(eutil.norm_uri(raw))
-    # R11-003: seed expansion applies to REMOTE templates too -
+    # Seed expansion applies to REMOTE templates too -
     # resolve_seed_template is pure string substitution, and the runtime
     # (claims, registration) expands both alike; keeping the remote template
     # unexpanded made `oss://b/x/{seed}.pt` and a sibling's literal
@@ -5247,7 +5330,7 @@ def _resolved_product_uris(spec: dict) -> set[str]:
 
 def _pending_uri_producer(ctx: Ctx, uri: str, exclude_node: str | None = None,
                           *, spec: dict | None = None) -> str | None:
-    """R9: the node id of a NON-TERMINAL node whose frozen spec already
+    """The node id of a NON-TERMINAL node whose frozen spec already
     declares ``uri`` as a product landing (registry rows cover only produced
     artifacts; reservation must cover pending producers too). Comparison is
     over seed-RESOLVED canonical variants on both sides."""
@@ -5265,7 +5348,7 @@ def _pending_uri_producer(ctx: Ctx, uri: str, exclude_node: str | None = None,
         other = eutil.read_json(eutil.rpath(ctx.store.repo, spec_rel), None)
         if not isinstance(other, dict):
             continue
-        # R10-002: overlap-aware (directory product vs a child path inside it)
+        # Overlap-aware (directory product vs a child path inside it)
         theirs = _resolved_product_uris(other)
         if any(eutil.paths_overlap(w, t) for w in wanted for t in theirs):
             return nid
@@ -5281,7 +5364,7 @@ def _stage_errors(ctx: Ctx, spec: dict, *, role: str, where: str,
     if workflow is not None and not isinstance(workflow, dict):
         return [f"SPEC_WORKFLOW_SHAPE: {where}: workflow must be an object with a stages list"]
     if "train" in spec:
-        errs.append(f"SPEC_TRAIN_SCHEMA_UNSUPPORTED: {where}: top-level 'train' is not part of the v9.2 "
+        errs.append(f"SPEC_TRAIN_SCHEMA_UNSUPPORTED: {where}: top-level 'train' is not part of the spec "
                     "schema; declare scheduler-visible procedures only under workflow.stages")
     if isinstance(workflow, dict) and "stages" in workflow and not isinstance(workflow.get("stages"), list):
         errs.append(f"SPEC_WORKFLOW_STAGES_SHAPE: {where}: workflow.stages must be a list")
@@ -5464,7 +5547,7 @@ def _stage_errors(ctx: Ctx, spec: dict, *, role: str, where: str,
                             f"the infra artifact_store.uri_template with a run id unique to this node+stage)")
                 continue
             variants = _resolved_uri_variants(uri, spec) or {eutil.norm_uri(uri)}
-            # R11-004: intra-spec uniqueness is the overlap relation too - a
+            # Intra-spec uniqueness is the overlap relation too - a
             # declared directory product and a sibling stage's child path
             # inside it are one physical landing.
             if variants & uris or any(eutil.paths_overlap(v, u)
@@ -5472,7 +5555,7 @@ def _stage_errors(ctx: Ctx, spec: dict, *, role: str, where: str,
                 errs.append(f"SPEC_ARTIFACT_URI_DUP: {pw}: uri {uri} repeats or overlaps another "
                             "declared product inside this spec (seed-resolved forms compared)")
             uris |= variants
-            # R11-003/004: the registry check runs over EVERY seed-resolved
+            # The registry check runs over EVERY seed-resolved
             # spelling (a template must collide with a registered literal
             # expansion) and uses the overlap relation (a registered
             # directory product vs a later child path).
@@ -5484,11 +5567,11 @@ def _stage_errors(ctx: Ctx, spec: dict, *, role: str, where: str,
                             f"directory-overlap forms compared) - reusing an output path silently "
                             f"overwrites checkpoints; derive a fresh run id for this node+stage")
             else:
-                # R9 (external audit r6): the registry only knows PRODUCED
+                # The registry only knows PRODUCED
                 # artifacts - two not-yet-produced specs could reserve the same
                 # URI and the second producer to land just logged a conflict
                 # event while overwriting the first's bytes. Reservation must
-                # cover pending producers too. R9 follow-up: both sides are
+                # cover pending producers too. Both sides are
                 # compared over seed-RESOLVED canonical variants, so a
                 # template and a sibling's literal expansion collide on paper
                 # exactly as they do on disk.
@@ -5523,7 +5606,7 @@ def _stage_errors(ctx: Ctx, spec: dict, *, role: str, where: str,
                                 f"available artifacts may be consumed")
                 else:
                     consumed_ids.add(aid)
-                    # R11-010: the card that authored this spec carried a
+                    # The card that authored this spec carried a
                     # machine receipt of the registry it rendered. If the
                     # artifact's generation or digest moved between card
                     # materialization and this acceptance, the author reasoned
@@ -5541,7 +5624,7 @@ def _stage_errors(ctx: Ctx, spec: dict, *, role: str, where: str,
                             f"generation {rec.get('generation')}); the refreshed card now lists the "
                             f"current registry - re-read the Shared artifacts block and resubmit a spec "
                             f"reasoned against the artifact's CURRENT content")
-                    # R11-005: a producer that is mid-revision (a typed fix or
+                    # A producer that is mid-revision (a typed fix or
                     # an implementation redo is already scheduled) is ABOUT to
                     # regenerate these bytes; freezing the binding now
                     # guarantees a later launch rejection with no ordinary
@@ -5567,7 +5650,7 @@ def _stage_errors(ctx: Ctx, spec: dict, *, role: str, where: str,
         # reuse duty: an equivalent available artifact must be consumed or explicitly waived
         skey = str(s.get("stage_key") or "").strip()
         if skey:
-            # F5: under preplanned replication the spec key is a '{seed}'
+            # Under preplanned replication the spec key is a '{seed}'
             # template while the registry stores seed-resolved keys; compare
             # each RESOLVED spelling or the duty can never fire.
             seeds = econfig.workflow_seeds(spec) or [None]
@@ -5577,8 +5660,8 @@ def _stage_errors(ctx: Ctx, spec: dict, *, role: str, where: str,
                     if seed_value is not None else skey
                 if resolved not in candidate_keys:
                     candidate_keys.append(resolved)
-            # R11-018: the duty covers EVERY resolved seed lane, not the
-            # first hit - one consumed match used to silence the check for
+            # The duty covers EVERY resolved seed lane, not the
+            # first hit - one consumed match must not silence the check for
             # every remaining seed's existing product.
             uncovered = []
             for k in candidate_keys:
@@ -5600,19 +5683,14 @@ def _stage_errors(ctx: Ctx, spec: dict, *, role: str, where: str,
     return errs
 
 
-def budget_band_floor_of(run: dict | None) -> float | None:
-    """Highest validity band actually applied when this RUN's evidence sealed.
-
-    v12 era-gating: the tolerance band (econfig.budget_tolerance) is a mutable
-    governance control whose changes affect FUTURE ingestions only. Lowering
-    it later must not turn a lawfully-sealed RUN into a permanent replay
-    violation (doctor, normalized re-checks). The floor comes from the overage
-    disclosure rows stamped at seal time; a RUN sealed with no overage needs
-    no floor.
-    """
-    rows = (run or {}).get("budget_overages_within_tolerance") or []
-    bands = [float(row.get("band") or 0.0) for row in rows if isinstance(row, dict)]
-    return max(bands) if bands else None
+def _cap_exceeded_message(code: str, where: str, usage_key: str, unit: str, actual: Any,
+                          limit: Any) -> str:
+    return (f"{code}: {where}: {usage_key}.{unit}={actual} exceeds the declared cap {limit}. The RUN's "
+            "execution stands and its evidence waits; nothing is rerun for this. A cap is a notebook "
+            "number: if it was mis-derived and the real cost is acceptable, correct it on record - "
+            "'evo amend --path <the node's NODE_SPEC.json> --from <edited copy> --reason ...' raising "
+            f"budget.limits.{unit} - then 'evo run-reconcile --run <this RUN>' re-ingests THIS same "
+            "evidence. The charged usage never changes; only the validity judgment does")
 
 
 def stage_result_errors(ctx: Ctx, stage: dict, metrics_file: str | None,
@@ -5620,8 +5698,7 @@ def stage_result_errors(ctx: Ctx, stage: dict, metrics_file: str | None,
                         metrics_data: Any = _STAGE_RESULT_UNREAD,
                         expected_seed: Any | None = None,
                         expected_metrics_file: str | None = None,
-                        expected_ledger_file: str | None = None,
-                        budget_band_floor: float | None = None) -> list[str]:
+                        expected_ledger_file: str | None = None) -> list[str]:
     """Validate a completed canonical workflow stage against its declared cap.
 
     The engine cannot meter an external cluster itself, but it can require the
@@ -5637,7 +5714,8 @@ def stage_result_errors(ctx: Ctx, stage: dict, metrics_file: str | None,
         if metrics_data is _STAGE_RESULT_UNREAD else metrics_data
     if not isinstance(data, dict):
         return [f"STAGE_RESULT_SHAPE: {where}: metrics_file must contain a JSON object"]
-    if expected_metrics_file is not None             and eutil.norm_uri(str(metrics_file or "")) != eutil.norm_uri(expected_metrics_file):
+    if expected_metrics_file is not None \
+            and eutil.norm_uri(str(metrics_file or "")) != eutil.norm_uri(expected_metrics_file):
         errs.append(f"STAGE_RESULT_METRICS_PATH: {where}: metrics_file must equal the seed-resolved declared "
                     f"path {expected_metrics_file!r}, got {metrics_file!r}")
     if expected_seed is not None and _seed_token(data.get("seed")) != _seed_token(expected_seed):
@@ -5658,27 +5736,20 @@ def stage_result_errors(ctx: Ctx, stage: dict, metrics_file: str | None,
     if not isinstance(usage, dict):
         errs.append(f"STAGE_RESULT_USAGE: {where}: metrics JSON needs usage for every declared budget unit")
         usage = {}
-    band = max(econfig.budget_tolerance(ctx.cfg), float(budget_band_floor or 1.0))
     for unit, limit in limits.items():
         actual = usage.get(unit)
         if isinstance(actual, bool) or not isinstance(actual, (int, float)) or \
                 not math.isfinite(float(actual)) or float(actual) < 0:
             errs.append(f"STAGE_RESULT_USAGE_VALUE: {where}: usage.{unit} must be finite and >= 0")
-        elif isinstance(limit, (int, float)) and float(actual) > float(limit) * band + 1e-12:
-            # v12: validity band (see econfig.budget_tolerance). The recorded
-            # usage stays the actual measurement either way; only the
-            # valid/invalid judgment moves with the band.
-            errs.append(f"STAGE_RESULT_BUDGET_EXCEEDED: {where}: usage.{unit}={actual} exceeds declared cap "
-                        + (f"{limit} * stage_budget_tolerance {band} = {float(limit) * band:g}" if band > 1.0
-                           else f"{limit} (strict)")
-                        + "; the RUN's execution stands and its evidence waits: if the overage is "
-                          "acceptable, raise the config key stage_budget_tolerance (>= actual/cap) and "
-                          "'evo run-reconcile --run <this RUN>' re-ingests THIS evidence - no rerun")
+        elif isinstance(limit, (int, float)) and float(actual) > float(limit) + 1e-12:
+            errs.append(_cap_exceeded_message("STAGE_RESULT_BUDGET_EXCEEDED", where, "usage",
+                                              str(unit), actual, limit))
     if ((stage.get("control") or {}).get("mode") == "preregistered_adaptive"):
         _nontrivial(data.get("stop_reason"), 15,
                     f"{where}.stop_reason (which preregistered stopping condition fired)", errs)
     if econfig.stage_requires_ledger(stage):
-        if expected_ledger_file is not None                 and eutil.norm_uri(str(ledger_file or "")) != eutil.norm_uri(expected_ledger_file):
+        if expected_ledger_file is not None \
+                and eutil.norm_uri(str(ledger_file or "")) != eutil.norm_uri(expected_ledger_file):
             errs.append(f"STAGE_RESULT_LEDGER_PATH: {where}: ledger_file must equal the seed-resolved declared "
                         f"path {expected_ledger_file!r}, got {ledger_file!r}")
         if not ledger_file or not _exists(ctx, ledger_file):
@@ -5700,7 +5771,7 @@ def stage_result_errors(ctx: Ctx, stage: dict, metrics_file: str | None,
                     not math.isfinite(float(observed)):
                 errs.append(f"STAGE_RESULT_GATE_METRIC: {where}: continuation gate needs finite numeric "
                             f"summary.{metric}; a missing gate observation is an evidence failure, not a scientific stop")
-    # R8 audit: a completed stage must have PRODUCED its declared products.
+    # A completed stage must have PRODUCED its declared products.
     # Well-shaped metrics said nothing about the output contract, so a job
     # that silently wrote no checkpoint still advanced the workflow (the
     # registry row went invalid with nobody reading the result), and after an
@@ -5861,13 +5932,28 @@ def training_replication_errors(ctx: Ctx, spec: dict, *, role: str, where: str) 
                     "every declared seed repeats every workflow stage")
 
     policy = econfig.training_replication_policy(ctx.cfg)
-    should_repeat = policy.get("mode") == "preplanned" and role != "platform" and purpose == "candidate"
-    if should_repeat:
+    # Who decides the run count: the project protocol for candidates, the
+    # approved causal design for a targeted ablation (its costly_runs, sized
+    # by noise arithmetic), and one recorded seed for everything else.
+    expected_runs: int | None = None
+    expected_agg: str | None = None
+    if purpose == "targeted_ablation":
+        costly = (spec.get("ablation") or {}).get("costly_runs") if isinstance(spec.get("ablation"), dict) else None
+        want = int(costly) if isinstance(costly, int) and not isinstance(costly, bool) and costly >= 1 else 1
+        if want > 1:
+            expected_runs = want
+    elif policy.get("mode") == "preplanned" and role != "platform" and purpose == "candidate":
         expected_runs = policy.get("planned_runs")
         expected_agg = policy.get("aggregation")
-        if mode != "preplanned" or runs != expected_runs or aggregation != expected_agg:
-            errs.append(f"SPEC_TRAINING_REPLICATION_POLICY: {where}: the approved project protocol requires "
-                        f"preplanned runs={expected_runs}, aggregation={expected_agg}")
+    if expected_runs is not None:
+        if mode != "preplanned" or runs != expected_runs or (
+                aggregation != expected_agg if expected_agg else aggregation not in ("mean", "median")):
+            errs.append(f"SPEC_TRAINING_REPLICATION_POLICY: {where}: "
+                        + (f"the approved project protocol requires preplanned runs={expected_runs}, "
+                           f"aggregation={expected_agg}" if expected_agg else
+                           f"the approved causal design registered costly_runs={expected_runs}; the spec "
+                           "must run exactly that many complete seeds (mode=preplanned, aggregation "
+                           "mean|median)"))
         if source == "workflow":
             # A continuation gate would let one seed skip later stages, which is
             # no longer the same complete-run protocol. Aggregate decisions are
@@ -5876,7 +5962,7 @@ def training_replication_errors(ctx: Ctx, spec: dict, *, role: str, where: str) 
             if gated:
                 errs.append(f"SPEC_TRAINING_REPLICATION_PARTIAL_WORKFLOW: {where}: preplanned seed repeats must "
                             f"traverse the complete workflow; continuation gates are present on {gated}")
-            resolved_uris: dict[str, str] = {}  # keyed by canonical spelling (identity sweep #8)
+            resolved_uris: dict[str, str] = {}  # Keyed by canonical spelling
             for i, stage in enumerate(stages):
                 sw = f"{where}.stage[{i}]({stage.get('name')})"
                 for field in ("launch", "metrics_file"):
@@ -5917,8 +6003,9 @@ def training_replication_errors(ctx: Ctx, spec: dict, *, role: str, where: str) 
                         "may satisfy preplanned repeats from existing artifacts")
     else:
         if mode != "single" or runs != 1 or aggregation != "none":
-            errs.append(f"SPEC_TRAINING_REPLICATION_SINGLE: {where}: this node is not covered by a preplanned "
-                        "repeat protocol and must use one recorded seed with no aggregation")
+            errs.append(f"SPEC_TRAINING_REPLICATION_SINGLE: {where}: this node registered one training run "
+                        "(no preplanned protocol or causal design asks for more) and must use one "
+                        "recorded seed with no aggregation")
     return errs
 
 
@@ -6031,9 +6118,6 @@ def _spec_errors(ctx: Ctx, spec: dict, *, expect_role: str, expect_parents: list
                         and planned.get(str(unit), 0.0) > float(value) + 1e-9:
                     errs.append(f"SPEC_PROBE_BUDGET_EXCEEDED: {where}: planned {unit} "
                                 f"{planned.get(str(unit), 0.0):g} exceeds the approved probe cap {value:g}")
-    if "evidence_budget" in spec:
-        errs.append(f"SPEC_EVIDENCE_BUDGET_LEGACY: {where}: evidence_budget/extra_costly_arms was ambiguous; "
-                    "use evidence_plan for cheap checks and the separate training_replication/ablation contracts")
     evidence_plan = spec.get("evidence_plan")
     if not isinstance(evidence_plan, dict):
         errs.append(f"SPEC_EVIDENCE_PLAN: {where}: evidence_plan object required for explicit cheap checks")
@@ -6061,12 +6145,37 @@ def _spec_errors(ctx: Ctx, spec: dict, *, expect_role: str, expect_parents: list
         if cp is not None and cp not in idx:
             errs.append(f"SPEC_CODE_PARENT_UNKNOWN: {where}: code_parent {cp!r} not in graph")
         model_parents = [p for p in (spec.get("parents") or []) if p in idx and idx[p].get("role") != "platform"]
-        if role == "variant" and cp not in model_parents:
-            errs.append(f"SPEC_CODE_PARENT_VARIANT: {where}: variant code_parent must be its model parent")
-        if role == "hybrid" and cp not in model_parents:
-            errs.append(f"SPEC_CODE_PARENT_HYBRID: {where}: hybrid code_parent must be one of its model parents")
+        # A parent whose kernel an ablation refuted has a control version -
+        # the program without that story - and that control is the code to
+        # build on; it serves as code_parent next to the parent itself.
+        controls = [str((idx[p].get("refuted_kernel") or {}).get("control") or "")
+                    for p in model_parents if isinstance(idx[p].get("refuted_kernel"), dict)]
+        legal_code_parents = model_parents + [c for c in controls if c and c in idx]
+        if role == "variant" and cp not in legal_code_parents:
+            errs.append(f"SPEC_CODE_PARENT_VARIANT: {where}: variant code_parent must be its model parent"
+                        + (f" or that parent's control version {controls}" if any(controls) else ""))
+        if role == "hybrid" and cp not in legal_code_parents:
+            errs.append(f"SPEC_CODE_PARENT_HYBRID: {where}: hybrid code_parent must be one of its model parents"
+                        + (f" or a parent's control version {controls}" if any(controls) else ""))
         if role in ("root", "platform") and cp is None:
             errs.append(f"SPEC_CODE_PARENT_ROOT: {where}: root/platform must name a code_parent (which codebase to start from, usually the baseline)")
+    estimate = spec.get("cost_estimate")
+    if estimate is not None:
+        # The agent's own forecast of the full run, per resource unit, with
+        # the basis it rests on (a rehearsal measurement, a prior run, scale
+        # reasoning). The engine prints it beside the declared caps and the
+        # user's node ceiling; it never extrapolates on its own.
+        if not isinstance(estimate, dict) or not isinstance(estimate.get("per_unit"), dict) \
+                or not estimate.get("per_unit"):
+            errs.append(f"SPEC_COST_ESTIMATE: {where}: cost_estimate must be an object {{per_unit: {{unit: value}}, "
+                        "basis}} - the agent's forecast of what one full run of this node costs")
+        else:
+            for unit, value in estimate["per_unit"].items():
+                if not re.fullmatch(r"[a-z][a-z0-9_]{1,47}", str(unit or "")) or isinstance(value, bool) or \
+                        not isinstance(value, (int, float)) or not math.isfinite(float(value)) or float(value) < 0:
+                    errs.append(f"SPEC_COST_ESTIMATE_VALUE: {where}: cost_estimate.per_unit.{unit} must be a "
+                                "lowercase unit with a finite number >= 0")
+            _nontrivial(estimate.get("basis"), 20, f"{where}.cost_estimate.basis (what the forecast rests on)", errs)
     smoke = spec.get("smoke_plan")
     if not isinstance(smoke, list) or not smoke:
         errs.append(f"SPEC_SMOKE: {where}: smoke_plan must be a non-empty list of steps")
@@ -6082,9 +6191,14 @@ def _spec_errors(ctx: Ctx, spec: dict, *, expect_role: str, expect_parents: list
                     try:
                         int(stp.get(fld))
                     except (TypeError, ValueError):
-                        # a sealed spec with "300s" here would wedge the node at
-                        # run-smoke with no revision verb - refuse pre-seal
                         errs.append(f"SPEC_SMOKE_STEP: {where}: smoke_plan[{i}].{fld} must be an integer")
+            rows = stp.get("must_exist")
+            if rows is not None and (not isinstance(rows, list) or any(not isinstance(x, str) for x in rows)):
+                errs.append(f"SPEC_SMOKE_STEP: {where}: smoke_plan[{i}].must_exist must be a list of paths")
+            try:
+                econfig.smoke_must_contain(stp)
+            except ValueError as exc:
+                errs.append(f"SPEC_SMOKE_STEP: {where}: smoke_plan[{i}].{exc}")
     if role == "platform":
         if not isinstance(spec.get("enables"), list) or len(spec.get("enables") or []) < 2:
             errs.append(f"SPEC_ENABLES: {where}: a platform must list >= 2 prospective consumers/uses in 'enables'")
@@ -6094,7 +6208,7 @@ def _spec_errors(ctx: Ctx, spec: dict, *, expect_role: str, expect_parents: list
             errs.append(f"SPEC_EVAL: {where}: eval.run and eval.metrics_file required")
         harness = ev.get("harness")
         if harness is not None:
-            # E9 (2025+ survey): hardware-in-the-loop / interactive evaluation
+            # Hardware-in-the-loop / interactive evaluation
             # uses trial-count semantics, not seed replication, and must
             # disclose its manual-reset and non-determinism protocol.
             if not isinstance(harness, dict) or str(harness.get("type") or "") not in (
@@ -6114,7 +6228,7 @@ def _spec_errors(ctx: Ctx, spec: dict, *, expect_role: str, expect_parents: list
                                 "cannot control it")
         protocol = ev.get("protocol")
         if isinstance(protocol, dict) and str(protocol.get("type") or "") == "streaming":
-            # E4: order-dependent (online-within-eval) protocols freeze the
+            # Order-dependent (online-within-eval) protocols freeze the
             # episode order and declare sequential dependence explicitly.
             order_rel = str(protocol.get("episode_order_file") or "")
             order_bad = (not order_rel or order_rel.startswith(("/", "\\"))
@@ -6133,7 +6247,7 @@ def _spec_errors(ctx: Ctx, spec: dict, *, expect_role: str, expect_parents: list
             errs.append(f"SPEC_EVAL_TRANSDUCTIVE: {where}: eval.transductive must be an object")
             transductive = None
         if transductive is not None:
-            # E4: test-time training may see a cell's UNLABELED inputs when the
+            # Test-time training may see a cell's UNLABELED inputs when the
             # contract says so and the reward/verifier is argued label-free.
             cells_known = set(econfig.cell_spec(ctx.cfg))
             t_cells = transductive.get("cells") if isinstance(transductive, dict) else None
@@ -6162,7 +6276,7 @@ def _spec_errors(ctx: Ctx, spec: dict, *, expect_role: str, expect_parents: list
         if missing_axes or extra_axes:
             errs.append(f"SPEC_RESOURCE_ACCOUNTING_AXES: {where}: resource_accounting must use exactly "
                         f"{spec_axes}; missing={missing_axes}, extra={extra_axes}")
-        # R10-019: extension axes were frozen with an accounting method at
+        # Extension axes were frozen with an accounting method at
         # configure time (they enter every candidate vector, receipt and
         # frontier comparison) - the NODE_SPEC row must copy that method
         # verbatim, or a spec could silently swap to another allowed method
@@ -6202,7 +6316,7 @@ def _spec_errors(ctx: Ctx, spec: dict, *, expect_role: str, expect_parents: list
             if not econfig.tracked_budget(eval_budget, ctx.cfg):
                 errs.append(f"SPEC_EVAL_PROJECT_BUDGET: {where}: at least one eval budget unit must appear in the "
                             "user-confirmed project resource_contract")
-        # judge pinning (v8): LLM-as-judge / simulated-user evals are comparable
+        # Judge pinning: LLM-as-judge / simulated-user evals are comparable
         # across nodes ONLY under the identical judge config. A node that
         # declares a judge must match the baseline's exactly - judge drift
         # silently voids every verdict in the graph.
@@ -6214,14 +6328,14 @@ def _spec_errors(ctx: Ctx, spec: dict, *, expect_role: str, expect_parents: list
                 errs.append(f"SPEC_JUDGE_MISMATCH: {where}: eval.judge must EQUAL the baseline's judge "
                             f"config (baseline: {base_ev.get('judge')!r}) - model, version and params "
                             f"pinned; a drifted judge voids cross-node comparability")
-            # arena/pairwise protocol pinning (v8): win-rates and Elo are only
+            # Arena/pairwise protocol pinning: win-rates and Elo are only
             # comparable under the identical opponent pool, harness version and
             # sampling setup - pin the whole protocol object like the judge
             if ev.get("protocol") is not None and base_ev.get("protocol") != ev.get("protocol"):
                 errs.append(f"SPEC_PROTOCOL_MISMATCH: {where}: eval.protocol must EQUAL the baseline's "
                             f"(baseline: {base_ev.get('protocol')!r}) - opponent pool / harness version / "
                             f"sampling params pinned; a drifted arena voids every win-rate in the graph")
-    # service dependencies (v8): experiments lean on runtime surfaces beyond the
+    # Service dependencies: experiments lean on runtime surfaces beyond the
     # trainer - a served model (RL rollouts, distillation teachers, judge loops),
     # a KG/SPARQL endpoint (KGQA retrieval), a vector store, a sandbox. A spec
     # declares requires_llm / requires_services; every name must resolve to the
@@ -6240,7 +6354,7 @@ def _spec_errors(ctx: Ctx, spec: dict, *, expect_role: str, expect_parents: list
             req.add(str(name))
     if req:
         have = einfra.service_names(ctx.store, ctx.cfg, ctx.g)
-        # E3: a service pinned as pinning="recorded" in the infra facts is a
+        # A service pinned as pinning="recorded" in the infra facts is a
         # drifting external surface; comparisons must consume or produce a
         # service_snapshot artifact (or state an explicit waiver).
         recorded = einfra.recorded_service_names(ctx.store, ctx.cfg)
@@ -6275,7 +6389,7 @@ def _spec_errors(ctx: Ctx, spec: dict, *, expect_role: str, expect_parents: list
                             f"it) before planning runs against it")
     errs.extend(_stage_errors(ctx, spec, role=str(role or "?"), where=where,
                               exclude_node=exclude_node, receipts=receipts))
-    # v11.7: under project.rehearsal=full_chain every staged non-baseline spec
+    # Under project.rehearsal=full_chain every staged non-baseline spec
     # must plan its tiny full-chain pass up front - the duty is discovered at
     # planning time, not at the first launch refusal.
     if str((ctx.cfg.get("project") or {}).get("rehearsal") or "") == "full_chain" \
@@ -6286,7 +6400,7 @@ def _spec_errors(ctx: Ctx, spec: dict, *, expect_role: str, expect_parents: list
 
 
 def v_provision(ctx: Ctx, task: dict) -> list[str]:
-    """Project preparation (v11.7, pre-configure): the mechanic did whatever
+    """Project preparation (pre-configure): the mechanic did whatever
     CONSTRUCTIVE work the supplied project needed - fetch/wire data, build a
     minimal evaluation, fix bugs - until a first real end-to-end number
     exists, or reports TYPED blockers the user can act on. Every scientific
@@ -6390,7 +6504,7 @@ def spec_wiring_expectations(spec: dict) -> tuple[list[str], list[str]]:
 
 
 def artifact_wiring_errors(ctx: Ctx, node: dict, spec: dict, text: str) -> list[str]:
-    """Bind the declared consumes/produces contract to literal code (v10.2).
+    """Bind the declared consumes/produces contract to literal code.
 
     Wrong read paths and undeclared save locations were the highest-frequency
     infrastructure failure, and the cheapest place to catch them is implement
@@ -6448,7 +6562,7 @@ def artifact_wiring_errors(ctx: Ctx, node: dict, spec: dict, text: str) -> list[
 
 
 def maintenance_boundary_errors(ctx: Ctx, node: dict, spec: dict) -> list[str]:
-    """Enforce a maintenance change_boundary against the ACTUAL diff (v10.2 R2).
+    """Enforce a maintenance change_boundary against the ACTUAL diff.
 
     `files_in_scope` was validated for shape and never compared to anything -
     a declaration with no consequence, i.e. exactly the ceremony this engine
@@ -6508,7 +6622,7 @@ def maintenance_boundary_errors(ctx: Ctx, node: dict, spec: dict) -> list[str]:
     # its hashes are not), so this works identically in git and copy mode, and
     # runtime landing artifacts stay excluded because the walker already
     # excludes them from every manifest.
-    # v11: reuse the manifest the copy-mode diff above already built (the
+    # Reuse the manifest the copy-mode diff above already built (the
     # double build hashed every workarea byte twice per validation, ~2s wasted
     # per submit at a 1GB checkout); membership needs only the PATH SET, so the
     # git-mode build skips hashing entirely.
@@ -6531,12 +6645,9 @@ def maintenance_boundary_errors(ctx: Ctx, node: dict, spec: dict) -> list[str]:
 
 
 def is_probe_active(meta: dict) -> bool:
-    """THE probe-activity predicate: a valid mechanism_probe not silenced by an
-    attribution waiver. v9.2 kept two drifted copies (one waiver-aware, one
-    not), so a waivered idea had to declare a probe it was forbidden to run."""
+    """THE probe-activity predicate: the idea registered a well-formed mechanism probe."""
     idea_probe = (meta or {}).get("mechanism_probe")
-    return isinstance(idea_probe, dict) and idea_probe.get("mode") in econfig.PROBE_MODES \
-        and not str((meta or {}).get("attribution_waiver") or "").strip()
+    return isinstance(idea_probe, dict) and idea_probe.get("mode") in econfig.PROBE_MODES
 
 
 def _probe_plan_errors(ctx: Ctx, spec: dict, meta: dict, *, where: str) -> list[str]:
@@ -6594,7 +6705,7 @@ def _probe_plan_errors(ctx: Ctx, spec: dict, meta: dict, *, where: str) -> list[
         if re.search(r"\b(train|finetune|optimizer|backward|gradient)\b", cmd, re.I):
             errs.append(f"SPEC_PROBE_COMMAND_TRAINING: {where}: probe command appears to launch training; "
                         "an eval intervention may only inspect fixed artifacts")
-        # v12 (field deadlock T0611): under preplanned complete-workflow
+        # Under preplanned complete-workflow
         # replication the sealed checkpoints are per-seed, so an eval-only
         # intervention may legitimately keep one observation per seed - the
         # same situation in which the same_run branch REQUIRES '{seed}'. The
@@ -6661,10 +6772,11 @@ def v_plan_node(ctx: Ctx, task: dict) -> list[str]:
                         "recover the parent first")
         for detail in parent_hold_defects(ctx, str(p)):
             errs.append(f"PLAN_PARENT_HELD: {detail}")
-    # R10-010: the EXECUTION source axis gets the same quarantine check as
+    errs.extend(refuted_kernel_disposition_errors(ctx, spec, meta))
+    # The EXECUTION source axis gets the same quarantine check as
     # the scientific parents - a held baseline (e.g. under a fork_project
-    # diagnosis) used to re-enter through code_parent because this walk only
-    # covered meta.parents.
+    # diagnosis) must not re-enter through code_parent while this walk
+    # covers only meta.parents.
     code_parent = str(spec.get("code_parent") or "") if isinstance(spec, dict) else ""
     if code_parent and code_parent not in {str(p) for p in (meta.get("parents") or [])}:
         for detail in parent_hold_defects(ctx, code_parent):
@@ -6672,7 +6784,7 @@ def v_plan_node(ctx: Ctx, task: dict) -> list[str]:
                         "execution source either")
     if spec.get("experiment_purpose") != meta.get("experiment_purpose"):
         errs.append("SPEC_EXPERIMENT_PURPOSE_BINDING: spec.experiment_purpose must equal the approved idea")
-    # v11.1 (R2 fix): custody bindings key on "carries an audited program"
+    # Custody bindings key on "carries an audited program"
     # (candidate AND exploratory), not on == "candidate" - the scout's spec
     # must execute the tournament-audited kernel like any candidate's.
     if meta.get("experiment_purpose") in ("candidate", "exploratory"):
@@ -6795,10 +6907,10 @@ def workflow_protected_implementation_paths(ctx: Ctx, node: dict) -> list[str]:
     }
     spec = eutil.read_json(eutil.rpath(ctx.store.repo, str(node.get("spec") or "")), {}) or {}
     probe = spec.get("probe_execution") if isinstance(spec.get("probe_execution"), dict) else {}
-    # F10: eval_intervention probes run AFTER the workflow by definition, and
+    # Eval_intervention probes run AFTER the workflow by definition, and
     # producer_stage='evaluation' marks evaluation-owned same-run logging;
-    # neither is workflow authority. v9.2 protected eval_intervention code and
-    # thereby forced full retraining for evaluation-only probe fixes.
+    # neither is workflow authority; protecting eval_intervention code would
+    # force full retraining for evaluation-only probe fixes.
     probe_is_workflow_owned = (str(probe.get("mode") or "") != "eval_intervention"
                                and str(probe.get("producer_stage") or "") != "evaluation")
     if probe_is_workflow_owned:
@@ -6824,7 +6936,7 @@ _EXECUTION_SOURCE_SUFFIXES = {
     ".c", ".cc", ".cpp", ".cxx", ".h", ".hpp", ".cu", ".go", ".rs", ".rb", ".pl",
 }
 
-# R9: volatile run by-products a stage may legitimately append to; they stay
+# volatile run by-products a stage may legitimately append to; they stay
 # OUTSIDE the sealed execution closure (recorded residual - a dependency
 # disguised under one of these names is not covered).
 _VOLATILE_BYPRODUCT = re.compile(
@@ -6965,7 +7077,7 @@ def _runtime_output_roots(ctx: Ctx, node: dict, workdir: Path) -> list[Path]:
     evaluation = spec.get("eval") if isinstance(spec.get("eval"), dict) else {}
     if evaluation.get("metrics_file"):
         raw_paths.add(str(evaluation["metrics_file"]))
-    # R6 blind-operator audit: a smoke step's declared observable landings
+    # A smoke step's declared observable landings
     # (must_exist / must_contain files) are runtime outputs too - the sealed
     # spec's own smoke command creates them, a pre-seal self-test (which the
     # implement card explicitly authorizes) legitimately leaves them in the
@@ -6978,9 +7090,12 @@ def _runtime_output_roots(ctx: Ctx, node: dict, workdir: Path) -> list[Path]:
         for me_path in (step.get("must_exist") or []):
             if isinstance(me_path, str) and me_path:
                 raw_paths.add(me_path)
-        for mc in (step.get("must_contain") or []):
-            if isinstance(mc, dict) and str(mc.get("file") or ""):
-                raw_paths.add(str(mc["file"]))
+        try:
+            rows = econfig.smoke_must_contain(step)
+        except ValueError:
+            rows = []
+        for mc in rows:
+            raw_paths.add(str(mc["file"]))
     probe = spec.get("probe_execution") if isinstance(spec.get("probe_execution"), dict) else {}
     if probe.get("smoke_artifact"):
         raw_paths.add(str(probe["smoke_artifact"]))
@@ -7040,7 +7155,7 @@ def build_implementation_manifest(ctx: Ctx, node: dict, *, paths_only: bool = Fa
                 # Untracked SOURCE files are rejected at approval; skipping
                 # them here keeps the manifest consistent with that rejection.
                 continue
-            # R9 (external audit r6): untracked NON-source files that survive
+            # Untracked NON-source files that survive
             # the runtime-root exclusion are execution dependencies the commit
             # does not cover (runtime.yaml, tokenizer vocab, a compiled .dll
             # the formal smoke produced, a weights sidecar). Skipping them
@@ -7067,7 +7182,7 @@ def implementation_manifest_errors(ctx: Ctx, node: dict, *,
                                    workdir_map: dict[str, Path] | None = None) -> list[str]:
     """Audit the sealed execution closure against the workarea.
 
-    v11 cost levers, each preserving the audit's verdicts:
+    Cost levers, each preserving the audit's verdicts:
     - ``known_digests`` ({abs path: digest}) carries digests THIS invocation
       already computed while sealing; the on-disk manifest row must still equal
       the known value (write-integrity preserved), only the byte re-read goes.
@@ -7099,7 +7214,7 @@ def implementation_manifest_errors(ctx: Ctx, node: dict, *,
     known = known_digests or {}
     expected: dict[str, str] = {}
     errs: list[str] = []
-    # R8/N003 audit: a row whose path is CURRENTLY gitignored and not source
+    # A row whose path is CURRENTLY gitignored and not source
     # is enforced as advisory only. gitignore is the project's own standing
     # declaration "runtime by-product, not reviewed implementation" - a
     # per-launch bookkeeping file in that class is rewritten by every stage,
@@ -7258,7 +7373,7 @@ def v_implement(ctx: Ctx, task: dict) -> list[str]:
         ctx, spec, role=str(node.get("role") or ""), where=f"implementation({nid})",
         current_node_id=nid))
     probe_execution = spec.get("probe_execution") if isinstance(spec.get("probe_execution"), dict) else None
-    # v10.1: "workarea" (the engine already knows the workdir) and "self test"
+    # "workarea" (the engine already knows the workdir) and "self test"
     # (the engine runs smoke itself) were presence-only sections nobody read.
     # "deviations" stays: it is real context for the fidelity auditor.
     sections = ["mechanism to code map", "deviations"]
@@ -7413,7 +7528,7 @@ def v_implement(ctx: Ctx, task: dict) -> list[str]:
 
 
 def v_fidelity(ctx: Ctx, task: dict) -> list[str]:
-    """Implementation-fidelity audit (v8): complex ideas invite lazy builds -
+    """Implementation-fidelity audit: complex ideas invite lazy builds -
     the report maps every mechanism claim to a code location WITH a literal
     snippet the engine string-checks against the real file. A coding agent
     cannot narrate fidelity into existence."""
@@ -7570,7 +7685,7 @@ def v_sota_scan(ctx: Ctx, task: dict) -> list[str]:
     (same dataset/metric when they exist; at minimum a very close task), each
     with the headline number, so ideas can be bound to beat named entries."""
     errs: list[str] = []
-    # R9: this task OWNS the ledger, so it validates the RAW file (its own
+    # This task OWNS the ledger, so it validates the RAW file (its own
     # unaccepted suffix is exactly what it must repair); consumers elsewhere
     # see only the accepted prefix via ctx.sota_rows().
     ctx.use_draft_ledgers("sota")
@@ -7621,11 +7736,11 @@ def v_sota_scan(ctx: Ctx, task: dict) -> list[str]:
         elif comparability == "exact" and cid in cells and str(hm.get("metric")) not in {
                 str((cells[cid] or {}).get("metric") or ""), str((cells[cid] or {}).get("result_key") or "")}:
             errs.append(f"SOTA_EXACT_METRIC: {rid}: exact comparison headline metric must match cell {cid}")
-    # R7 audit follow-up: the card orders a cross-source noise synthesis and
+    # The card orders a cross-source noise synthesis and
     # promises the engine preserves it for the USER - without this check the
     # promised handoff surface could silently not exist (submit ACCEPTed with
-    # the synthesis skipped entirely). Old tasks without the declared output
-    # are exempt (backward compatibility).
+    # the synthesis skipped entirely). A task that never declared the output
+    # owes none.
     noise_rel = next((o for o in (task.get("outputs") or [])
                       if str(o).endswith("SOTA_NOISE.md")), None)
     if noise_rel:
@@ -7661,6 +7776,81 @@ def v_smoke(ctx: Ctx, task: dict) -> list[str]:
             [str(x) for x in (probe.get("required_fields") or [])],
             where=f"node {nid} probe smoke"))
     return errs
+
+
+def workflow_spend_review(ctx: Ctx, node: dict, spec: dict | None = None) -> tuple[list[str], list[str]]:
+    """Facts for the workflow gate, and the reasons (if any) a person must
+    look before compute is spent: (lines, reasons).
+
+    Four numbers side by side, none of them invented by the engine: the caps
+    the node declared (its commitment), the agent's own cost estimate with the
+    basis it rests on (a rehearsal measurement, a prior run, scale reasoning),
+    what the tiny rehearsal actually took, and the user's node ceiling. The
+    one comparison the engine makes is against that ceiling - a declared cap
+    or an estimate above it puts the gate in front of a person in every
+    autonomy mode. Everything else is printed for the reader."""
+    spec = spec if isinstance(spec, dict) else (
+        eutil.read_json(eutil.rpath(ctx.store.repo, str(node.get("spec") or "")), {}) or {})
+    stage_caps = dict(econfig.stage_budget_totals(spec))
+    eval_caps = dict(econfig.eval_budget(spec))
+    ceiling = econfig.node_ceiling(ctx.cfg)
+    source = econfig.node_ceiling_source(ctx.cfg) or "unset"
+    lines: list[str] = []
+    reasons: list[str] = []
+    lines.append("- declared caps (the node's commitment): stages "
+                 + (", ".join(f"{u} {v:g}" for u, v in sorted(stage_caps.items())) or "none")
+                 + "; eval " + (", ".join(f"{u} {v:g}" for u, v in sorted(eval_caps.items())) or "none"))
+    estimate = spec.get("cost_estimate") if isinstance(spec.get("cost_estimate"), dict) else {}
+    per_unit = {str(u): float(v) for u, v in (estimate.get("per_unit") or {}).items()
+                if isinstance(v, (int, float)) and not isinstance(v, bool)} if isinstance(estimate.get("per_unit"), dict) else {}
+    if per_unit:
+        lines.append("- the agent's estimate of one full run: "
+                     + ", ".join(f"{u} ~{v:g}" for u, v in sorted(per_unit.items()))
+                     + f" [{str(estimate.get('basis') or '').strip()}]")
+    else:
+        lines.append("- the agent's estimate: none recorded (spec.cost_estimate - the declared caps stand alone)")
+    receipt = eutil.read_json(erehearsal.receipt_path(ctx.store, str(node.get("id") or "")), None)
+    if isinstance(receipt, dict) and receipt.get("started_at") and receipt.get("ended_at"):
+        try:
+            import datetime as _dt
+            a = _dt.datetime.fromisoformat(str(receipt["started_at"]).replace("Z", "+00:00"))
+            b = _dt.datetime.fromisoformat(str(receipt["ended_at"]).replace("Z", "+00:00"))
+            lines.append(f"- the tiny rehearsal took {max(0.0, (b - a).total_seconds()):.0f} s end to end "
+                         f"(status {receipt.get('status') or '?'}; a few steps per stage, not a projection)")
+        except ValueError:
+            pass
+    if ceiling:
+        lines.append(f"- node ceiling ({source}): " + ", ".join(f"{u} {v:g}" for u, v in sorted(ceiling.items())))
+        # the node's commitment is its stages plus its eval, per unit
+        node_caps: dict[str, float] = dict(stage_caps)
+        for unit, value in eval_caps.items():
+            node_caps[unit] = node_caps.get(unit, 0.0) + value
+        for unit, cap in sorted(node_caps.items()):
+            ceil = ceiling.get(unit)
+            if ceil is not None and cap > ceil:
+                reasons.append(f"declared {unit} cap {cap:g} (stages + eval) exceeds the node ceiling "
+                               f"{ceil:g} ({source})")
+        for unit, value in sorted(per_unit.items()):
+            ceil = ceiling.get(unit)
+            if ceil is not None and value > ceil:
+                reasons.append(f"the agent's estimate {unit} ~{value:g} exceeds the node ceiling {ceil:g} ({source})")
+    else:
+        lines.append("- node ceiling: none recorded (resource_contract.node_ceiling; a person sets or estimates it "
+                     "at the infrastructure interview)")
+    meta = _idea_meta(ctx, node) or {}
+    if str(meta.get("change_scope") or "") == "local":
+        import eresource  # local: eresource imports this module
+        for pid in (node.get("parents") or []):
+            parent = egraph.by_id(ctx.g).get(str(pid)) or {}
+            if parent.get("role") == "platform":
+                continue
+            spent = eresource.node_charged_usage(ctx.st, str(pid))
+            if spent:
+                lines.append(f"- parent {pid} actually cost (a local change usually costs about the same): "
+                             + ", ".join(f"{u} {v:g}" for u, v in sorted(spent.items())))
+    if reasons:
+        lines.append("- a person decides before this trains: " + "; ".join(reasons))
+    return lines, reasons
 
 
 def v_metric_bridge(ctx: Ctx, task: dict) -> list[str]:
@@ -7725,17 +7915,18 @@ def v_metric_bridge(ctx: Ctx, task: dict) -> list[str]:
 
 
 def _terminal_launch_immutable_errors(ctx: Ctx, run: dict, data: dict) -> list[str]:
-    """R8 (external audit r5): a pre-launch reconcile can seal a RUN's terminal
+    """A pre-launch reconcile can seal a RUN's terminal
     evidence package (complete + quarantined) while its launch task is still
-    open. run-update/run-reconcile both refuse to touch a terminal package -
-    but the leftover completed-mode launch overwrote it and re-sealed the SAME
-    attempt with different bytes as the new active revision. A launch against
+    open. run-update/run-reconcile both refuse to touch a terminal package,
+    and the leftover completed-mode launch must not overwrite it either,
+    re-sealing the SAME attempt with different bytes as the new active
+    revision. A launch against
     a complete package may only CONFIRM the identical bytes (whose absorption
     then adopts the quarantined package); any different execution needs a new
     RUN or a reviewed recovery."""
     if str(run.get("evidence_status") or "") != "complete":
         return []
-    # R9 (external audit r6): the guard was completed-mode only, but a stale
+    # The guard was completed-mode only, but a stale
     # BACKGROUND launch card submitted after a pre-launch reconcile sealed the
     # package could still redirect the ledger field and trigger a re-ingest of
     # different bytes over the terminal snapshot. Background mode confirms only
@@ -7766,7 +7957,7 @@ def _terminal_launch_immutable_errors(ctx: Ctx, run: dict, data: dict) -> list[s
 
 
 def _artifact_binding_errors(ctx: Ctx, node: dict) -> list[str]:
-    """R8 (external audit r5): the frozen spec consumes a LOGICAL AR id, but
+    """The frozen spec consumes a LOGICAL AR id, but
     the plan bound specific bytes (generation + content digest, engine-recorded
     at node creation). A producer fix that re-generates the same AR in place
     must not let this consumer silently execute on different input bytes."""
@@ -7796,7 +7987,7 @@ def _artifact_binding_errors(ctx: Ctx, node: dict) -> list[str]:
                         f"--node {node.get('id')} --artifact {aid} --note <why>`; otherwise recover the producer "
                         "back to the sealed generation - never silently execute on different bytes")
             continue
-        # R9 (external audit r6): the registry digest and the frozen binding
+        # The registry digest and the frozen binding
         # come from the SAME registration-time snapshot, so an in-place
         # overwrite of the underlying local file left both equal while the
         # bytes changed. Re-hash the live bytes at the moment external spend
@@ -7855,9 +8046,12 @@ def v_stage_launch(ctx: Ctx, task: dict) -> list[str]:
     if str(data.get("stage") or "") != expect_stage:
         errs.append(f"LAUNCH_STAGE: LAUNCH.json stage must be '{expect_stage}' (the node's current stage), got {data.get('stage')!r}")
     if data.get("mode") not in ("background", "completed"):
-        errs.append("LAUNCH_MODE: LAUNCH.json mode must be 'background' or 'completed'")
+        errs.append("LAUNCH_MODE: LAUNCH.json mode must be 'background' or 'completed' (or 'busy' with a "
+                    "note when the shared machine has no free devices - that report is a wait, "
+                    "not a launch, and spends no attempt)")
     if data.get("mode") == "background" and not str(data.get("job") or "").strip():
         errs.append("LAUNCH_JOB: background launches must record a 'job' identifier (how to check status)")
+    errs.extend(launch_device_errors(ctx, run, data))
     if run.get("job") and str(data.get("job") or "").strip() \
             and str(data.get("job")) != str(run.get("job")):
         # both modes: a completed-mode conflict would otherwise surface as a raw
@@ -7872,7 +8066,7 @@ def v_stage_launch(ctx: Ctx, task: dict) -> list[str]:
                   if str(s.get("name") or "") == expect_stage), {})
     strict_seed_paths = ((spec.get("training_replication") or {}).get("mode") == "preplanned")
     repeat_lane = bool(task["subject"].get("repeat_measure"))
-    # v11.7: real spend rides only a proven chain - the tiny full-chain
+    # Real spend rides only a proven chain - the tiny full-chain
     # rehearsal receipt must exist, authenticate, and bind the CURRENT
     # implementation seal. The repeat lane re-runs a proven pipeline.
     if not repeat_lane and erehearsal.required(ctx.cfg, node, spec):
@@ -7882,7 +8076,7 @@ def v_stage_launch(ctx: Ctx, task: dict) -> list[str]:
                     "proof is still owed - new stage spend waits for it (run 'evo next'; the "
                     "engine presents the canary task)")
     if repeat_lane and stage and expected_seed is not None:
-        # R9-002/R10-012: the repeat lane lands at the spec's OWN resolved
+        # The repeat lane lands at the spec's OWN resolved
         # paths (one resolution rule for every attempt); identity enforced
         expected_metrics = str(econfig.resolve_seed_template(stage.get("metrics_file") or "", expected_seed))
         expected_ledger = str(econfig.resolve_seed_template(stage.get("ledger_file") or "", expected_seed)) \
@@ -7917,6 +8111,47 @@ def v_stage_launch(ctx: Ctx, task: dict) -> list[str]:
     return errs
 
 
+def devices_in_use(st: dict, *, except_run: str | None = None) -> int:
+    """Accelerators held by RUNs that are launched and not yet terminal."""
+    import erun  # local: erun is light but imported lazily elsewhere too
+    total = 0
+    for run in (st or {}).get("runs", []):
+        if str(run.get("id") or "") == str(except_run or ""):
+            continue
+        if not run.get("job") or erun.is_terminal(run):
+            continue
+        devices = run.get("devices")
+        if isinstance(devices, int) and not isinstance(devices, bool) and devices > 0:
+            total += devices
+    return total
+
+
+def launch_device_errors(ctx: Ctx, run: dict, data: dict) -> list[str]:
+    """The launch report may say how many accelerators the job took and what
+    it changed from the plan; both are records. The one rule is the user's
+    allowance on how many accelerators our jobs hold at once."""
+    errs: list[str] = []
+    devices = data.get("devices")
+    if devices is not None and (isinstance(devices, bool) or not isinstance(devices, int) or devices < 1):
+        errs.append("LAUNCH_DEVICES: 'devices' must be a positive integer (accelerators this job holds) when given")
+        devices = None
+    deviation = data.get("deviation")
+    if deviation is not None and len(str(deviation).strip()) < 10:
+        errs.append("LAUNCH_DEVIATION: 'deviation' says what this launch changed from the plan and why "
+                    "(fewer devices, another batch size, another precision ...) - >= 10 chars, or omit it")
+    allowance = econfig.max_devices(ctx.cfg)
+    if allowance is not None and isinstance(devices, int) and data.get("mode") != "completed":
+        held = devices_in_use(ctx.st, except_run=str((run or {}).get("id") or ""))
+        if held + devices > allowance:
+            errs.append(f"LAUNCH_DEVICES_OVER_ALLOWANCE: this job would hold {devices} accelerator(s) on top of "
+                        f"{held} already held by our running jobs, above the {allowance} the user allowed "
+                        "(resource_contract.max_devices) - the receipt is not accepted. Stop the job if it is "
+                        "already running, then either wait and report mode 'busy' (no attempt is spent), "
+                        "relaunch with fewer devices, or raise the allowance on record "
+                        "(evo amend --path .evo/config.json ...)")
+    return errs
+
+
 def stage_metrics_of(ctx: Ctx, nid: str) -> dict[str, dict]:
     """Summary metrics and resource use of every active finished stage run."""
     out: dict[str, dict] = {}
@@ -7934,7 +8169,7 @@ def stage_metrics_of(ctx: Ctx, nid: str) -> dict[str, dict]:
                              if isinstance(v, (int, float)) and not isinstance(v, bool)})
                 if nums:
                     stage_name = str(r.get("stage") or "stage")
-                    # R9-002: the repeat lane's rows must never shadow the base
+                    # The repeat lane's rows must never shadow the base
                     # attempt's rows in the evidence view - key them by seed
                     key = (f"seed={r.get('replica_seed')}/{stage_name}"
                            if int(r.get("replica_total") or 1) > 1 or r.get("repeat_measure_attempt")
@@ -8019,7 +8254,7 @@ def metric_evidence_errors(ctx: Ctx, key: str, raw: Any,
     """
     expected = training_replication if isinstance(training_replication, dict) \
         and training_replication.get("mode") == "preplanned" else None
-    # v11.1 P4: a user-approved repeat_measure on THIS metric is the one legal
+    # A user-approved repeat_measure on THIS metric is the one legal
     # way a single-run project reports a 2-run set - and once approved, the
     # aggregate is mandatory, or approval would be free to ignore. A waived
     # approval (evo waive-repeat: the repeat physically could not run) releases
@@ -8042,10 +8277,10 @@ def metric_evidence_errors(ctx: Ctx, key: str, raw: Any,
         return [] if math.isfinite(float(raw)) else [f"EVAL_METRIC_VALUE: '{key}' must be finite"]
     if not isinstance(raw, dict):
         return [f"EVAL_METRIC_MISSING: metrics.json must contain '{key}' as a finite number or explicit interval object"]
-    legacy = sorted(set(raw) & {"mean", "std", "n"})
-    if legacy:
-        return [f"EVAL_METRIC_LEGACY_AGGREGATE: '{key}' uses {legacy}; mean/std/n is ambiguous about "
-                "samples versus repeated training. Use value + uncertainty with explicit method/unit_count/"
+    ambiguous = sorted(set(raw) & {"mean", "std", "n"})
+    if ambiguous:
+        return [f"EVAL_METRIC_AGGREGATE_AMBIGUOUS: '{key}' uses {ambiguous}; a mean/std/n object is ambiguous "
+                "about samples versus repeated training. Use value + uncertainty with explicit method/unit_count/"
                 "procedure/source, "
                 "or report a scalar"]
     if "training_replication" in raw:
@@ -8060,14 +8295,14 @@ def metric_evidence_errors(ctx: Ctx, key: str, raw: Any,
             repeat_run = next((r for r in st_runs
                                if r.get("id") == (node or {}).get("repeat_eval_run")), None)
             if rm.get("engine_run") and repeat_run is None:
-                # R9-002: an engine-run buy-back may only aggregate sealed
+                # An engine-run buy-back may only aggregate sealed
                 # engine facts - before the repeat RUN settles there is no
                 # second number to report, and no citation can substitute.
                 errs2.append(f"EVAL_REPEAT_RUN_PENDING: '{key}': the engine-run repeat evaluation has "
                              "not settled yet; the 2-run aggregate cites sealed engine RUNs only - "
                              "let the scheduler finish the repeat lane first")
             elif repeat_run is not None and has_repo:
-                # R9-002: the repeat is a first-class engine RUN - its row is
+                # The repeat is a first-class engine RUN - its row is
                 # pinned to the sealed repeat measurement exactly like the
                 # base row is pinned below (neither number is negotiable).
                 sealed_rep = econfig.result_value(
@@ -8086,28 +8321,12 @@ def metric_evidence_errors(ctx: Ctx, key: str, raw: Any,
                                      f"measurement {sealed_rep}; the repeat buys a second number, "
                                      "never an editable one")
                     src = str(r.get("source") or "").strip()
-                    if eutil.norm_uri(src) != eutil.norm_uri(rep_src_expected)                             and src != str(repeat_run.get("id") or ""):
+                    if eutil.norm_uri(src) != eutil.norm_uri(rep_src_expected) \
+                            and src != str(repeat_run.get("id") or ""):
                         errs2.append(f"EVAL_REPEAT_SOURCE_RUN: '{key}': the repeat row's source must "
                                      f"cite the sealed repeat RUN - use its sealed metrics path "
                                      f"{rep_src_expected!r} (or the RUN id {repeat_run.get('id')!r})")
-            else:
-                # R8 (external audit r5), legacy pre-engine-run approvals: the
-                # bought-back second run has no engine RUN behind it (recorded
-                # degraded delivery) - its source citation is its ONLY custody,
-                # so it must at least resolve to something checkable: an
-                # existing repo path or a registered artifact.
-                for r in (raw.get("training_replication") or {}).get("runs") or []:
-                    if isinstance(r, dict) and _seed_token(r.get("seed")) == repeat_token and has_repo:
-                        src = str(r.get("source") or "").strip()
-                        registered = (eartifact.by_id(reg).get(src) if src and reg else None) \
-                            or (eartifact.find_by_uri(reg, src) if src and reg else None)
-                        if src and not _exists(ctx, src) and not registered:
-                            errs2.append(f"EVAL_REPEAT_SOURCE_MISSING: '{key}': the repeat run's source "
-                                         f"{src!r} must be an existing repo path or a registered "
-                                         "artifact - the manual repeat's only custody is a checkable "
-                                         "citation (if the repeat physically cannot run, the USER may "
-                                         "release the duty: 'evo waive-repeat --node ... --note ...')")
-            # v11.1 (R1 fix): the base run's reported value must equal the
+            # The base run's reported value must equal the
             # SEALED raw eval measurement the engine already holds - the first
             # run's truth is not negotiable at aggregation time.
             sealed = None
@@ -8171,7 +8390,7 @@ def metric_evidence_errors(ctx: Ctx, key: str, raw: Any,
     source = str(unc.get("source") or "")
     registered = eartifact.by_id(ctx.reg).get(source) if source else None
     registered = registered or (eartifact.find_by_uri(ctx.reg, source) if source else None)
-    # R7: a registry row authorizes the interval only while it is AVAILABLE -
+    # A registry row authorizes the interval only while it is AVAILABLE -
     # an invalid/stale AR (producer pruned, artifact superseded) with a dead
     # URI could still license bounds that then voted in noninferiority and
     # dominance decisions with no seal anyone could audit.
@@ -8200,7 +8419,7 @@ def _raw_binding_close(a: Any, b: Any) -> bool:
 
 
 def normalized_raw_binding_errors(ctx: Ctx, node: dict, metrics: dict) -> list[str]:
-    """R7 external audit: normalization interprets the sealed eval RUN - it
+    """Normalization interprets the sealed eval RUN - it
     never re-measures. Every configured point value, per-seed replication row,
     producer-sealed uncertainty bound and producer-reported usage unit must
     equal the sealed raw measurement; the analyst may only ADD what the
@@ -8263,17 +8482,11 @@ def normalized_raw_binding_errors(ctx: Ctx, node: dict, metrics: dict) -> list[s
             errs.append(f"EVAL_NORMALIZED_RAW_USAGE: _usage.{unit}: normalized value {norm_u.get(unit)!r} "
                         f"!= sealed raw usage {v} (RUN {run.get('id')}); usage is measured by the "
                         "producer, never restated by the analyst")
-    # R9 (external audit r6): the binding only compared units PRESENT in raw, so
+    # The binding only compared units PRESENT in raw, so
     # an analyst could INVENT an execution fact the producer never reported
     # (e.g. _usage.trials_completed on a physical harness) and the downstream
     # gate believed it. Normalization copies usage; it never adds to it.
-    # Era carve-out: trials_completed may be SUPPLIED on the normalized side
-    # when the sealed raw lacks it - that is the pre-R9 reporting channel, and
-    # closing it wedged in-flight upgrades between this error and
-    # EVAL_HARNESS_TRIALS (raw sealed without the key is immutable). Fresh
-    # raw carries the key (absorption/launch enforce it), so the verbatim
-    # binding above governs it from then on and this window self-retires.
-    invented = sorted(k for k in norm_u if k not in raw_u and k != "trials_completed")
+    invented = sorted(k for k in norm_u if k not in raw_u)
     if invented:
         errs.append(f"EVAL_NORMALIZED_RAW_USAGE_INVENTED: _usage keys {invented} do not exist in the "
                     f"sealed raw usage of RUN {run.get('id')}; the producer measures execution facts - "
@@ -8282,7 +8495,7 @@ def normalized_raw_binding_errors(ctx: Ctx, node: dict, metrics: dict) -> list[s
 
 
 def human_study_artifacts_digest(ctx: Ctx, metrics: dict) -> tuple[str, list[dict]]:
-    """R7 external audit: the user's human-study approval must bind the RAW
+    """The user's human-study approval must bind the RAW
     response bytes, not only the normalized summary that cites them. Returns
     (combined digest, per-cell rows) over every human_study cell's
     study_artifact content; a missing/unreadable file digests as ''."""
@@ -8337,16 +8550,8 @@ def evaluation_result_errors(ctx: Ctx, spec: dict, metrics_file: str | None, *, 
                              metrics_data: Any = _STAGE_RESULT_UNREAD,
                              allow_probe_unavailable: bool = False,
                              probe_artifact_sources: dict[str, str] | None = None,
-                             node: dict | None = None,
-                             enforce_harness_trials: bool = True,
-                             budget_band_floor: float | None = None) -> list[str]:
-    """Validate evaluation resource use against its local approved cap.
-
-    ``enforce_harness_trials=False`` is the doctor's historical-replay mode:
-    the physical/interactive ``_usage.trials_completed`` duty landed on the
-    raw side in R9 with no era gate, so replaying it against RUNs sealed
-    BEFORE the duty existed produced a permanent, unfixable diagnostic (raw
-    evidence is immutable). Fresh production paths keep the duty."""
+                             node: dict | None = None) -> list[str]:
+    """Validate evaluation resource use against its local approved cap."""
     if not metrics_file or not _exists(ctx, metrics_file):
         return [f"EVAL_RESULT_METRICS: {where}: evaluation needs an existing metrics_file"]
     data = eutil.read_json(eutil.rpath(ctx.store.repo, metrics_file), None) \
@@ -8365,27 +8570,21 @@ def evaluation_result_errors(ctx: Ctx, spec: dict, metrics_file: str | None, *, 
     if not isinstance(usage, dict):
         errs.append(f"EVAL_RESULT_USAGE: {where}: metrics JSON needs _usage for every eval budget unit")
         return errs
-    band = max(econfig.budget_tolerance(ctx.cfg), float(budget_band_floor or 1.0))
     for unit, limit in limits.items():
         actual = usage.get(unit)
         if isinstance(actual, bool) or not isinstance(actual, (int, float)) or \
                 not math.isfinite(float(actual)) or float(actual) < 0:
             errs.append(f"EVAL_RESULT_USAGE_VALUE: {where}: _usage.{unit} must be finite and >= 0")
-        elif float(actual) > float(limit) * band + 1e-12:
-            # v12: same validity band as the stage side (econfig.budget_tolerance).
-            errs.append(f"EVAL_RESULT_BUDGET_EXCEEDED: {where}: _usage.{unit}={actual} exceeds declared cap "
-                        + (f"{limit} * stage_budget_tolerance {band} = {float(limit) * band:g}" if band > 1.0
-                           else f"{limit} (strict)")
-                        + "; the RUN's execution stands and its evidence waits: if the overage is "
-                          "acceptable, raise the config key stage_budget_tolerance (>= actual/cap) and "
-                          "'evo run-reconcile --run <this RUN>' re-ingests THIS evidence - no rerun")
-    # R9 (external audit r6): trial completion is an EXECUTION fact of a
-    # physical/interactive harness, so the PRODUCER must report it - this check
-    # used to live only on the normalized side, which (with the raw-binding
-    # gap) let an analyst invent the number. Enforced on both sides here so the
+        elif float(actual) > float(limit) + 1e-12:
+            errs.append(_cap_exceeded_message("EVAL_RESULT_BUDGET_EXCEEDED", where, "_usage",
+                                              str(unit), actual, limit))
+    # Trial completion is an EXECUTION fact of a
+    # physical/interactive harness, so the PRODUCER must report it - a check
+    # living only on the normalized side would let an analyst invent the
+    # number. Enforced on both sides here so the
     # raw run carries it and normalization can only copy it.
     harness = (spec.get("eval") or {}).get("harness")
-    if enforce_harness_trials and isinstance(harness, dict) \
+    if isinstance(harness, dict) \
             and harness.get("type") in ("physical", "interactive"):
         preregistered = harness.get("trials")
         completed = usage.get("trials_completed")
@@ -8459,7 +8658,7 @@ def v_eval_launch(ctx: Ctx, task: dict) -> list[str]:
         errs.append("EVAL_LAUNCH_MODE: EVAL_LAUNCH.json mode must be 'background' or 'completed'")
     if data.get("mode") == "background" and not str(data.get("job") or "").strip():
         errs.append("EVAL_LAUNCH_JOB: background evals must record a 'job' identifier (how to check status)")
-    # v11.7: same rehearsal enforcement as stage launches (belt - a staged
+    # Same rehearsal enforcement as stage launches (belt - a staged
     # node reaches eval only through its stages, but an evaluation authorized
     # on an unproven chain would still be real spend on unproven wiring).
     _eval_node = egraph.by_id(ctx.g).get(str(task["subject"].get("node") or "")) or {}
@@ -8483,7 +8682,7 @@ def v_eval_launch(ctx: Ctx, task: dict) -> list[str]:
         elif task["subject"].get("repeat_measure") and run \
                 and str(run.get("declared_metrics_file") or "") \
                 and eutil.norm_uri(str(mf)) != eutil.norm_uri(str(run.get("declared_metrics_file"))):
-            # R9-002: same landing-identity rule absorption enforces - reject
+            # Same landing-identity rule absorption enforces - reject
             # at the launch instead of accept-then-wedge on evidence_pending
             errs.append(f"EVAL_LAUNCH_REPEAT_LANDING: the repeat evaluation must land at the "
                         f"evaluation's own declared landing {run.get('declared_metrics_file')!r}, "
@@ -8493,13 +8692,13 @@ def v_eval_launch(ctx: Ctx, task: dict) -> list[str]:
             spec = eutil.read_json(eutil.rpath(ctx.store.repo, node.get("spec") or ""), {}) or {}
             errs.extend(evaluation_result_errors(
                 ctx, spec, str(mf), where="completed evaluation",
-                # R6 blind-operator audit: this used to pass True, so the
-                # launch ACCEPTED an envelope-less file and synchronous
-                # absorption immediately wedged the same RUN on
+                # Passing True here would let the
+                # launch ACCEPT an envelope-less file while synchronous
+                # absorption immediately wedges the same RUN on
                 # evidence=incomplete - accept-then-wedge. A completed launch
                 # now faces the same probe duty its own absorption enforces;
                 # the waiver stays exactly where it belongs (signed gap).
-                # R9-002: the repeat buy-back lane carries no probe duty at
+                # The repeat buy-back lane carries no probe duty at
                 # all (mechanism authority stays with the sealed base head) -
                 # its absorption waives the envelope, so the launch must too.
                 allow_probe_unavailable=(bool(task["subject"].get("repeat_measure"))
@@ -8599,19 +8798,14 @@ def v_evaluate(ctx: Ctx, task: dict) -> list[str]:
         spec = eutil.read_json(eutil.rpath(ctx.store.repo, node.get("spec") or ""), {}) or {}
         probe_unavailable = active_probe_unavailable(ctx, node)
         probe_sources = active_probe_snapshot_map(ctx, node)
-        eval_run_row = next((r for r in ctx.st.get("runs", [])
-                             if str(r.get("id") or "") == str(node.get("eval_run") or "")), None)
         errs.extend(evaluation_result_errors(
             ctx, spec, task["outputs"][0], where=f"node {nid} normalized evaluation",
             metrics_data=metrics, allow_probe_unavailable=probe_unavailable,
-            probe_artifact_sources=probe_sources, node=node,
-            # the normalized _usage copies the sealed raw run's numbers; honor
-            # the band that sealed them (v12 era-gating)
-            budget_band_floor=budget_band_floor_of(eval_run_row)))
+            probe_artifact_sources=probe_sources, node=node))
         errs.extend(normalized_raw_binding_errors(ctx, node, metrics))
         errs.extend(human_study_cell_errors(ctx, metrics, where=f"node {node['id']} evaluation"))
-        # (the physical/interactive trials duty now lives in
-        # evaluation_result_errors so the RAW producer carries it too - R9)
+        # (the physical/interactive trials duty lives in
+        # evaluation_result_errors so the RAW producer carries it too)
         if "_resource_measurements" in metrics:
             errs.append("EVAL_EFFECT_RESOURCES_ENGINE_OWNED: analyst metrics must omit "
                         "_resource_measurements; raw measurements live in the sealed eval payload only")
@@ -8625,7 +8819,7 @@ def v_evaluate(ctx: Ctx, task: dict) -> list[str]:
         errs.extend(resource_receipt_errors(ctx, node))
     _require_sections(report, ["setup", "results", "comparability"], "EVAL_REPORT", errs)
     if any(c.get("role") in ("target", "guardrail") and c.get("goal_threshold") is not None
-           for c in econfig.evaluation_cells(ctx.cfg)):
+           for c in settlement_cells(ctx, node)):
         results_text = eutil.find_section(eutil.md_sections(report), "results") or ""
         if "goal" not in results_text.lower():
             errs.append("EVAL_ABSOLUTE_GOALS: Results must report absolute goal met/not-met separately from relative status")
@@ -8633,7 +8827,7 @@ def v_evaluate(ctx: Ctx, task: dict) -> list[str]:
         comp = eutil.find_section(eutil.md_sections(report), "comparability") or ""
         cited = set(re.findall(r"\bV\d+\b", comp))
         _b_ids, v_ids, _f_ids = ctx.dossier_ids()
-        # v10.1: bind the walk to REAL dossier invariants (any "V1" token used
+        # Bind the walk to REAL dossier invariants (any "V1" token used
         # to pass regardless of the dossier).  Projects whose dossier declares
         # no V# keep the old any-token duty.
         if v_ids and not (cited & v_ids):
@@ -8662,7 +8856,7 @@ def v_evaluate(ctx: Ctx, task: dict) -> list[str]:
                 if vals and not any((f"{v:g}" in dyn or str(v) in dyn) for v in vals):
                     errs.append("EVAL_STAGE_EVIDENCE_NUMBERS: the stage-evidence section must echo >= 1 "
                                 "recorded stage metric or usage value")
-        # v9: anomaly mining. The eval is where phenomena surface; oral-tier work
+        # Anomaly mining. The eval is where phenomena surface; oral-tier work
         # is overwhelmingly phenomenon-first, so the reading is a duty even when
         # it is 'NONE - <what was checked>'.
         anom = eutil.find_section(eutil.md_sections(report), "anomalies") or ""
@@ -8675,8 +8869,7 @@ def v_evaluate(ctx: Ctx, task: dict) -> list[str]:
             meta_idea = _idea_meta(ctx, node, errs)
         probe = meta_idea.get("mechanism_probe") or {}
         probe_execution = spec.get("probe_execution") if isinstance(spec.get("probe_execution"), dict) else None
-        if probe.get("signal") and probe_execution and \
-                not str(meta_idea.get("attribution_waiver") or "").strip():
+        if probe.get("signal") and probe_execution:
             mc = eutil.find_section(eutil.md_sections(report), "mechanism check") or ""
             if len(mc.strip()) < 60:
                 errs.append("EVAL_MECHANISM: this idea registered a mechanism probe; the report needs a "
@@ -8763,7 +8956,7 @@ def _reference_score(ctx: Ctx, node: dict) -> float | None:
 
 
 def _settlement_floor(ctx: Ctx, node: dict, cell_id: str) -> float:
-    """The noise floor a node's assessment settles with (R4 science audit).
+    """The noise floor a node's assessment settles with.
 
     FROZEN at eval absorb (node.eval_floor_frozen, captured BEFORE the node's
     own seed spread calibrates observed noise) so that (a) another node's
@@ -8771,13 +8964,57 @@ def _settlement_floor(ctx: Ctx, node: dict, cell_id: str) -> float:
     make the frozen evaluation_summary fail its own byte-equality re-check
     (that was a permanent conclude livelock in preplanned mode), and (b) a
     measurement never moves its own ruler. Live floors remain only as the
-    fallback for pre-freeze nodes."""
+    fallback for pre-freeze nodes.
+    The value is the DECISION band: the cell's noise floor times the user's
+    multiple (how many floor widths a real win must clear), both frozen on the
+    node (eval_floor_frozen, eval_floor_multiple_frozen)."""
     frozen = (node or {}).get("eval_floor_frozen")
+    multiple = (node or {}).get("eval_floor_multiple_frozen")
+    if not (isinstance(multiple, (int, float)) and not isinstance(multiple, bool) and float(multiple) > 0):
+        multiple = econfig.noise_floor_multiple(ctx.cfg)
     if isinstance(frozen, dict) and cell_id in frozen:
         value = frozen.get(cell_id)
         if isinstance(value, (int, float)) and not isinstance(value, bool):
-            return float(value)
-    return econfig.noise_floor(ctx.cfg, cell_id, ctx.st)
+            return float(value) * float(multiple)
+    return econfig.noise_floor(ctx.cfg, cell_id, ctx.st) * float(multiple)
+
+
+# The per-cell judged constants a node is measured against. Frozen onto the
+# node at eval absorb (node.eval_cells_frozen) next to its noise floors, so a
+# notebook correction of a margin / worthwhile delta / required flag / goal
+# line changes the ruler for nodes measured AFTER it and never for a node
+# already measured - a measurement's own ruler does not move under it.
+FROZEN_CELL_KEYS = ("min_improvement", "noninferiority_margin", "required", "goal_threshold")
+
+
+def frozen_cell_constants(cfg: dict) -> dict[str, dict]:
+    """{cell_id: {judged constants present in the live cell}} as the contract
+    stands now - what eval absorb writes to node.eval_cells_frozen."""
+    out: dict[str, dict] = {}
+    for c in econfig.evaluation_cells(cfg):
+        cid = str(c.get("id") or "")
+        if cid:
+            out[cid] = {k: c[k] for k in FROZEN_CELL_KEYS if k in c}
+    return out
+
+
+def settlement_cells(ctx: Ctx, node: dict | None) -> list[dict]:
+    """The live evaluation cells overlaid with the ruler this node was measured
+    against (node.eval_cells_frozen). A node without a frozen ruler reads the
+    live cells. Roles, tasks and result keys are structural and always live."""
+    cells = [dict(c) for c in econfig.evaluation_cells(ctx.cfg)]
+    frozen = (node or {}).get("eval_cells_frozen")
+    if not isinstance(frozen, dict):
+        return cells
+    for c in cells:
+        held = frozen.get(str(c.get("id") or ""))
+        if isinstance(held, dict):
+            c.update({k: v for k, v in held.items() if k in FROZEN_CELL_KEYS})
+    return cells
+
+
+def settlement_cell_spec(ctx: Ctx, node: dict | None) -> dict[str, dict]:
+    return {str(c["id"]): c for c in settlement_cells(ctx, node) if c.get("id")}
 
 
 def _cell_result(ctx: Ctx, node: dict, metrics: dict, cell: dict) -> dict:
@@ -8800,7 +9037,7 @@ def _cell_result(ctx: Ctx, node: dict, metrics: dict, cell: dict) -> dict:
         threshold = float(cell["goal_threshold"])
         # Absolute attainment uses the same explicit fixed-evaluation interval
         # as node comparison and Pareto pruning - INCLUDING the noise floor
-        # (v11 R1): a scalar sitting inside the noise band of the threshold
+        # : a scalar sitting inside the noise band of the threshold
         # must settle 'unknown', not 'met'.
         _gp, gfl, gfu = econfig.result_interval_with_floor(new_raw, floor)
         goal_lower = float(gfl if gfl is not None else new_lower)
@@ -8815,7 +9052,7 @@ def _cell_result(ctx: Ctx, node: dict, metrics: dict, cell: dict) -> dict:
                     "goal_status": goal_status})
     if new is None or ref is None:
         return out
-    # v11: unreported scalars are compared with the field's noise floor folded
+    # Unreported scalars are compared with the field's noise floor folded
     # into the delta ONCE - hiding the error bar no longer buys a zero-width
     # interval; an honestly reported interval is used as reported.
     delta, lower, upper = econfig.improvement_interval(new_raw, ref_raw, direction, floor=floor)
@@ -8823,7 +9060,7 @@ def _cell_result(ctx: Ctx, node: dict, metrics: dict, cell: dict) -> dict:
         new_raw, ref_raw, direction, floor=0.0)
     improve = float(cell.get("min_improvement") or 0.0)
     margin = float(cell.get("noninferiority_margin") or 0.0)
-    # ONE application of the floor per settlement (v11 R2). WINS use the
+    # ONE application of the floor per settlement. WINS use the
     # floored lower bound: a scalar victory must clear the noise. The
     # noninferior/regressed split settles on the AS-REPORTED interval against
     # a margin that absorbs the floor ONLY when a side was scalar - flooring
@@ -8856,8 +9093,173 @@ def _idea_meta(ctx: Ctx, node: dict, errs: list[str] | None = None) -> dict:
     return _read_json(ctx, str(node["idea_doc"]).replace(".md", ".meta.json"), sink) or {}
 
 
+REFUTED_KERNEL_ACTIONS = ("built_on_control", "removed", "replaced", "reclaimed")
+
+
+def refuted_kernel_disposition_errors(ctx: Ctx, spec: dict, meta: dict) -> list[str]:
+    """A model parent whose kernel an ablation refuted is a story the data
+    rejected. The child says, in one line the workflow gate and the fidelity
+    audit read, what it did about that kernel: built on the control version
+    (code_parent = the control), removed it, replaced it, or claimed it anew
+    as its own bet. The engine records the declaration; people verify it -
+    it does not pretend to read the code."""
+    errs: list[str] = []
+    if str(meta.get("experiment_purpose") or "candidate") in econfig.INSTRUMENTAL_PURPOSES:
+        return errs
+    idx = egraph.by_id(ctx.g)
+    dispositions = spec.get("refuted_kernel_disposition")
+    rows = dispositions if isinstance(dispositions, list) else ([dispositions] if isinstance(dispositions, dict) else [])
+    by_parent = {str(r.get("parent") or ""): r for r in rows if isinstance(r, dict)}
+    for p in (meta.get("parents") or []):
+        parent = idx.get(str(p)) or {}
+        record = parent.get("refuted_kernel") if isinstance(parent.get("refuted_kernel"), dict) else None
+        if parent.get("role") == "platform" or not record:
+            continue
+        kernels = ", ".join(str(k) for k in (record.get("kernels") or [])) or "its kernel"
+        control = str(record.get("control") or "")
+        exits = (f"declare refuted_kernel_disposition for {p} in the spec: action built_on_control (code_parent "
+                 f"{control})" if control else
+                 f"declare refuted_kernel_disposition for {p} in the spec: no clean trained control exists, so "
+                 "action removed / replaced") + (
+                    ", removed, replaced (say what with), or reclaimed (the kernel is this idea's own bet again); "
+                    "the workflow gate and the fidelity audit read that line")
+        row = by_parent.get(str(p))
+        if row is None:
+            errs.append(f"SPEC_REFUTED_KERNEL_DISPOSITION: parent {p}'s kernel {kernels} was refuted by ablation "
+                        f"{record.get('ablation')} (the gain did not come from it); this node must say what it "
+                        f"did about that kernel - {exits}")
+            continue
+        action = str(row.get("action") or "")
+        if action not in REFUTED_KERNEL_ACTIONS:
+            errs.append(f"SPEC_REFUTED_KERNEL_ACTION: refuted_kernel_disposition[{p}].action must be one of "
+                        f"{REFUTED_KERNEL_ACTIONS}")
+        elif action == "built_on_control":
+            if not control:
+                errs.append(f"SPEC_REFUTED_KERNEL_CONTROL: {p} has no clean trained control version on record "
+                            "(the ablation's control arm was not the clean program); remove or replace the kernel "
+                            "yourself and say so")
+            elif str(spec.get("code_parent") or "") != control:
+                errs.append(f"SPEC_REFUTED_KERNEL_CONTROL: action built_on_control means code_parent is the control "
+                            f"version {control}, got {spec.get('code_parent')!r}")
+        _nontrivial(row.get("note"), 20, f"refuted_kernel_disposition[{p}].note (what exactly, and why)", errs)
+    return errs
+
+
+def _claim_scope(ctx: Ctx, node: dict, meta: dict) -> tuple[str, list[str], dict, list[str]]:
+    """(claim kind, claimed target ids, scope, every project target id).
+
+    Ablations and probes are diagnostics: they observe an evaluation_scope
+    instead of claiming a scope. Maintenance keeps the default generalist
+    coverage - its parity settlement must watch every decision cell."""
+    is_ablation = node.get("experiment_purpose") in ("targeted_ablation", "diagnostic_probe")
+    scope = (meta.get("evaluation_scope") if is_ablation else meta.get("claim_scope")) or {}
+    kind = "diagnostic" if is_ablation else str(scope.get("kind") or "generalist")
+    default_targets = [str(c.get("id")) for c in econfig.target_cells(ctx.cfg)]
+    target_ids = [str(x) for x in (scope.get("target_cells") or default_targets)]
+    return kind, target_ids, scope, default_targets
+
+
+def _aggregate_statuses(statuses: list[str], mode: str, weights: list[float]) -> bool:
+    """One declared aggregation (all | majority | weighted) over cell or task statuses."""
+    wins = sum(1 for s in statuses if s == "improved")
+    if mode == "all":
+        return bool(statuses) and wins == len(statuses)
+    if mode == "majority":
+        return wins > len(statuses) / 2
+    win_w = sum(w for s, w in zip(statuses, weights) if s == "improved")
+    loss_w = sum(w for s, w in zip(statuses, weights) if s == "regressed")
+    return wins > 0 and win_w > loss_w
+
+
+def _lost_statuses(statuses: list[str], mode: str, weights: list[float]) -> bool:
+    """The declared aggregation read in the losing direction.
+
+    A contract saying "this counts as a win only when every cell improves"
+    cannot also mean "it counts as a loss the moment any one cell slips":
+    that reading silently turns every declared aggregation into `all` for
+    wins and `any` for losses, and overrides a cell's own `required: false`.
+    One declared rule, both directions; what is neither won nor lost is the
+    mixed outcome the tradeoff/specialist verdicts exist to name.
+    """
+    flip = {"improved": "regressed", "regressed": "improved"}
+    return _aggregate_statuses([flip.get(s, s) for s in statuses], mode, weights)
+
+
+def _aggregate_claim_groups(ev: dict, cells_by_id: dict, results: dict,
+                            target_ids: list[str]) -> tuple[dict, list[dict]]:
+    """Cell -> task -> group aggregation of the claimed target cells under the
+    contract's declared rules: (tasks_out, groups_out)."""
+    task_specs = {str(t.get("id")): t for t in ev.get("tasks") or []}
+    aggregate, lost = _aggregate_statuses, _lost_statuses
+
+    # Aggregate cells inside each scientific task first. Without this layer, a
+    # task reported with five metrics would receive five votes against a task
+    # reported with one metric merely because it had a denser table.
+    tasks_out: dict[str, dict] = {}
+    for tid, task in task_specs.items():
+        ids = [cid for cid in target_ids if (cells_by_id.get(cid) or {}).get("task") == tid]
+        if not ids:
+            continue
+        statuses = [results[cid]["status"] for cid in ids]
+        weights = [float((cells_by_id.get(cid) or {}).get("weight") or 0) for cid in ids]
+        tasks_out[tid] = {
+            "id": tid, "cells": ids,
+            "wins": sum(1 for s in statuses if s == "improved"),
+            "losses": sum(1 for s in statuses if s == "regressed"),
+            "uncertain": sum(1 for s in statuses if s == "uncertain"),
+            "improved": aggregate(statuses, str(task.get("aggregation") or "all"), weights),
+            "lost": lost(statuses, str(task.get("aggregation") or "all"), weights),
+            "aggregation": task.get("aggregation"), "weight": float(task.get("weight") or 1.0),
+        }
+
+    groups_out: list[dict] = []
+    for group in ev.get("task_groups") or []:
+        tids = [str(t) for t in (group.get("tasks") or []) if str(t) in tasks_out]
+        if not tids:
+            continue
+        task_statuses = ["improved" if tasks_out[tid]["improved"] else
+                         ("regressed" if tasks_out[tid]["lost"] else
+                          ("uncertain" if tasks_out[tid]["uncertain"] else "noninferior"))
+                         for tid in tids]
+        task_weights = [float(tasks_out[tid]["weight"]) for tid in tids]
+        ids = [cid for tid in tids for cid in tasks_out[tid]["cells"]]
+        groups_out.append({
+            "id": group.get("id"), "tasks": tids, "cells": ids,
+            "wins": sum(1 for s in task_statuses if s == "improved"),
+            # Group vetoes operate on the already-aggregated task votes.  A
+            # majority task with two winning cells and one losing cell is an
+            # improved task, not simultaneously a group loss.
+            "losses": sum(1 for s in task_statuses if s == "regressed"),
+            "uncertain": sum(1 for s in task_statuses if s == "uncertain"),
+            "required": bool(group.get("required")),
+            "improved": aggregate(task_statuses, str(group.get("aggregation") or "all"), task_weights),
+            "lost": lost(task_statuses, str(group.get("aggregation") or "all"), task_weights),
+        })
+    return tasks_out, groups_out
+
+
+def _claim_group_rule(ctx: Ctx, results: dict, target_ids: list[str], kind: str,
+                      cells_by_id: dict) -> tuple[dict, list[dict], bool, int, int]:
+    """(tasks_out, groups_out, group_rule_met, need_groups, configured_need_groups).
+
+    The claim's own vote: the user's rule (decision.min_target_groups_improved,
+    each group under its own declared aggregation) evaluated inside the groups
+    the claim covers. A claim that covers fewer groups than the configured
+    number needs every group it covers, so a scoped (specialist) claim votes
+    among its own cells and never inherits a bar it cannot reach. This vote
+    decides whether the claim STANDS - and with it real_win, parenthood and
+    the effect status. Losses elsewhere are recorded, never counted here."""
+    ev = econfig.evaluation_contract(ctx.cfg)
+    tasks_out, groups_out = _aggregate_claim_groups(ev, cells_by_id, results, target_ids)
+    configured = int((ev.get("decision") or {}).get("min_target_groups_improved") or 1)
+    need = max(1, min(configured, len(groups_out))) if groups_out else 1
+    met = (sum(1 for g in groups_out if g["improved"]) >= need) if groups_out else True
+    return tasks_out, groups_out, met, need, configured
+
+
 def effect_contract_assessment(ctx: Ctx, node: dict, metrics: dict,
-                               meta: dict | None = None) -> dict:
+                               meta: dict | None = None, *,
+                               group_rule_met: bool | None = None) -> dict:
     """Settle the frozen E claim against its exact comparator and resources.
 
     The ordinary performance verdict may still compare a hybrid to its
@@ -8881,7 +9283,11 @@ def effect_contract_assessment(ctx: Ctx, node: dict, metrics: dict,
                 "evidence_gaps": [], "targets": {}, "guardrails": {},
                 "resources": {"status": "invalid"}}
 
-    cells = econfig.cell_spec(ctx.cfg)
+    cells = settlement_cell_spec(ctx, node)
+    if group_rule_met is None:
+        kind, target_ids, _scope, _targets = _claim_scope(ctx, node, meta)
+        results = {cid: _cell_result(ctx, node, metrics, c) for cid, c in cells.items()}
+        group_rule_met = _claim_group_rule(ctx, results, target_ids, kind, cells)[2]
     grouped: dict[str, list[dict]] = {}
     for row in effect.get("chain") or []:
         if isinstance(row, dict):
@@ -8909,7 +9315,7 @@ def effect_contract_assessment(ctx: Ctx, node: dict, metrics: dict,
         declared_min = max(float(link.get("minimum_worthwhile_delta") or 0.0) for link in links)
         project_min = float(cell.get("min_improvement") or 0.0)
         threshold = max(declared_min, project_min)
-        # R4 science audit: the frozen E claim was the ONLY decision line in
+        # The frozen E claim was the ONLY decision line in
         # the system that ignored the noise floor - a hidden error bar bought
         # decisive 'met'/'failed' settlements inside the noise band, and this
         # line seeds the inheritance frontier. Same one-application rule as
@@ -8990,6 +9396,7 @@ def effect_contract_assessment(ctx: Ctx, node: dict, metrics: dict,
     ref_actual = comparator.get("effect_resources_realized") \
         if isinstance(comparator.get("effect_resources_realized"), dict) else {}
     axis_rows: dict[str, dict] = {}
+    overrun: dict[str, dict] = {}
     resource_states: list[str] = []
     for axis in econfig.resource_axes(ctx.cfg):
         cand_row = actual.get(axis) if isinstance(actual.get(axis), dict) else {}
@@ -9040,6 +9447,11 @@ def effect_contract_assessment(ctx: Ctx, node: dict, metrics: dict,
             else:
                 relative_ok = False
             status = "met" if cap_ok and relative_ok else "failed"
+            if not cap_ok:
+                cap_f = float(cand_cap)
+                overrun[axis] = {"cap": cap_f, "actual": float(cand_upper),
+                                 "over_pct": (round((float(cand_upper) - cap_f) / cap_f * 100.0, 1)
+                                              if cap_f > 0 else None)}
             if status == "failed":
                 reason = ("realized cost exceeds the frozen candidate cap" if not cap_ok
                           else f"{relation} against the comparator under a "
@@ -9065,9 +9477,31 @@ def effect_contract_assessment(ctx: Ctx, node: dict, metrics: dict,
                        "failed" if "failed" in resource_states else
                        "uncertain" if "uncertain" in resource_states else "met")
 
-    states = target_states + guard_states + [resource_status]
-    status = ("invalid" if "invalid" in states else "failed" if "failed" in states else
-              "uncertain" if "uncertain" in states or not target_states else "met")
+    # The status is the bet's own record on its TARGET rows: `met` when every
+    # row reached its line and the claim's vote passed, `partial` when the
+    # rows split (or every row met but the vote did not), `failed` when no
+    # row reached its line, `invalid` when a comparator or resource policy
+    # does not resolve. Guardrail and resource rows stay recorded below and
+    # feed deliverable / project goal; they do not flip this status. A run
+    # that spent MORE than the frozen resource envelope is written down as
+    # exactly that (resources.overrun: cap, actual, percent over) next to the
+    # gain, so nobody cites it as a matched-budget win - the money is spent,
+    # the numbers are real, and the record says both. The place to stop an
+    # over-budget idea is the workflow gate before it trains.
+    met_rows = sum(1 for s in target_states if s == "met")
+    failed_rows = sum(1 for s in target_states if s == "failed")
+    if "invalid" in target_states or resource_status == "invalid":
+        status = "invalid"
+    elif not target_states:
+        status = "uncertain"
+    elif met_rows == len(target_states):
+        status = "met" if group_rule_met else "partial"
+    elif met_rows and failed_rows:
+        status = "partial"
+    elif failed_rows and not met_rows:
+        status = "failed"
+    else:
+        status = "uncertain"
     # Name every undecided row.  "Uncertain" without its cause is unactionable,
     # and an unactionable block is indistinguishable from a refutation.
     gaps: list[str] = []
@@ -9088,141 +9522,101 @@ def effect_contract_assessment(ctx: Ctx, node: dict, metrics: dict,
                           if row.get("comparator_forecast") == "missed")
     return {"status": status, "comparator_id": comparator_id,
             "comparator_node": comparator.get("id"), "targets": target_rows,
+            "group_rule_met": bool(group_rule_met),
             "guardrails": guard_rows, "evidence_gaps": gaps,
             "resources": {"status": resource_status, "regime": regime, "axes": axis_rows,
+                          "overrun": overrun,
                           "comparator_forecast_missed": mis_forecast}}
 
 
 PROMOTION_STATUSES = ["met", "pending_evidence", "blocked", "not_applicable"]
 
 
-def promotion_status(verdict: str, effect_contract: dict, mechanism_contract: dict, *,
-                     research_kernel: bool, fidelity_settled: bool) -> str:
-    """May this node's frozen scientific claim seed the inheritance frontier?
+def promotion_status(verdict: str, effect_contract: dict, *,
+                     fidelity_settled: bool, real_win: bool | None = None) -> str:
+    """May this node seed the inheritance frontier?
+
+    Inheritance follows the MEASURED win and nothing else: the claim stands
+    (verdict improved / specialist / dominant, or tradeoff with a real win -
+    gains here, losses elsewhere) and the build is audited. The bet's own
+    record - effect_contract_status, whether the pre-registered line was
+    reached - stays next to it as history and is never rewritten; a lost or
+    undecided bet does not veto a lineage that really moved the numbers, and
+    the post-hoc claim door re-prices it on record. An `invalid` contract (a
+    comparator that does not resolve) still blocks: nothing measured can be
+    trusted against nothing.
+
+    Mechanism knowledge - what a probe saw, what an ablation settled - is
+    written next to the node and gates planning PREMISES (a lane may not
+    build on a refuted story), never parenthood: the program's numbers are
+    what a descendant inherits, and a kernel the ablation refuted is not
+    carried into a child (that rule lives at plan time).
 
     A claim decided against and a claim not yet decidable are different states
-    with different remedies: the first needs a new idea, the second needs one
-    more measurement.  Collapsing both into `blocked` made a fixable evidence
-    gap - an unpriced comparator axis, an unclear probe, an outstanding
-    fidelity audit - look exactly like a refuted lineage, so nobody ever went
-    back to close it.  `pending_evidence` says the claim is still alive.
+    with different remedies: the first needs a new idea or a re-scoped claim,
+    the second one more measurement. `pending_evidence` says the claim is
+    still alive.
     """
     contract_status = effect_contract.get("status")
-    mechanism = mechanism_contract.get("status")
-    licensed = (mechanism == "confirmed" if research_kernel
-                else mechanism in ("confirmed", "not_applicable"))
-    if verdict in ("improved", "specialist", "dominant") and contract_status == "met" \
-            and licensed and fidelity_settled:
-        return "met"
     if contract_status == "not_applicable":
         return "not_applicable"
-    # `promising` is a paradigm root landing AT parity with nothing regressed -
-    # strictly stronger evidence than the `inconclusive` that would otherwise
-    # report `pending_evidence`.  Calling it "decided against" inverted the
-    # order of the two outcomes.  `tradeoff` stays: there, a cell really did
-    # regress, and that is a decision.
-    decided_against = (contract_status in ("failed", "invalid")
-                       or mechanism in ("refuted", "unverified")
-                       or verdict in ("regressed", "tradeoff", "screened_out", "failed"))
+    winning = verdict in ("improved", "specialist", "dominant") \
+        or (verdict == "tradeoff" and bool(real_win))
+    if winning and fidelity_settled and contract_status != "invalid":
+        return "met"
+    decided_against = (contract_status == "invalid"
+                       or verdict in ("regressed", "partial", "screened_out", "failed")
+                       or (verdict == "tradeoff" and not real_win))
     return "blocked" if decided_against else "pending_evidence"
 
 
-def computed_assessment(ctx: Ctx, node: dict, metrics: dict) -> dict:
-    """Compute a claim-scoped, multi-cell verdict and its full audit trail."""
-    cells = econfig.evaluation_cells(ctx.cfg)
+def computed_assessment(ctx: Ctx, node: dict, metrics: dict, meta_override: dict | None = None, *,
+                        mechanism_override: dict | None = None) -> dict:
+    """Compute a claim-scoped, multi-cell verdict and its full audit trail.
+
+    ``meta_override`` settles the SAME sealed metrics under another contract
+    (a post-hoc claim); the node's frozen assessment is never touched by it.
+    ``mechanism_override`` ({"status": ...}) settles under a mechanism status
+    already on the node instead of re-running the registered probe. Every
+    cell constant is read from the node's settlement ruler (settlement_cells)."""
+    cells = settlement_cells(ctx, node)
     results = {str(c.get("id")): _cell_result(ctx, node, metrics, c) for c in cells}
-    meta = _idea_meta(ctx, node)
-    effect_contract = effect_contract_assessment(ctx, node, metrics, meta)
-    research_kernel = str((meta.get("novelty") or {}).get("kind") or "") in eprogram.RESEARCH_NOVELTY
-    waiver = str(meta.get("attribution_waiver") or "").strip()
-    mechanism_contract = ({"status": "unverified", "reason": waiver}
-                          if research_kernel and waiver else
-                          mechanism_probe_assessment(meta.get("mechanism_probe"), metrics))
-    # Ablations and probes are diagnostics: they observe an evaluation_scope
-    # instead of claiming a scope.  Maintenance keeps the default generalist
-    # coverage - its parity settlement must watch every decision cell.
-    is_ablation = node.get("experiment_purpose") in ("targeted_ablation", "diagnostic_probe")
-    scope = (meta.get("evaluation_scope") if is_ablation else meta.get("claim_scope")) or {}
-    kind = "diagnostic" if is_ablation else str(scope.get("kind") or "generalist")
-    default_targets = [str(c.get("id")) for c in econfig.target_cells(ctx.cfg)]
-    target_ids = [str(x) for x in (scope.get("target_cells") or default_targets)]
+    meta = meta_override if meta_override is not None else _idea_meta(ctx, node)
+    kind, target_ids, scope, default_targets = _claim_scope(ctx, node, meta)
+    cells_by_id = {str(c.get("id")): c for c in cells if c.get("id")}
+    ev = econfig.evaluation_contract(ctx.cfg)
+    tasks_out, groups_out, group_rule_met, need_groups, configured_need_groups = _claim_group_rule(
+        ctx, results, target_ids, kind, cells_by_id)
+    effect_contract = effect_contract_assessment(ctx, node, metrics, meta, group_rule_met=group_rule_met)
+    probe = meta.get("mechanism_probe") if isinstance(meta.get("mechanism_probe"), dict) else None
+    model_claim = (node.get("role") not in ("baseline", "platform")
+                   and str(node.get("experiment_purpose") or "candidate") in ("candidate", "exploratory"))
+    # Two facts, kept apart. The PROBE's answer - does the trained model use
+    # the part, by the frozen rule over sealed observations - is information
+    # written beside the node. The CAUSAL status - did the part cause the gain
+    # - is settled only by a targeted ablation (counterfactual training); until
+    # one runs it is `deferred`, whatever the probe said, and the engine opens
+    # that ablation itself after a program-level win.
+    if probe and probe.get("signal"):
+        probe_contract = mechanism_probe_assessment(probe, metrics)
+    else:
+        probe_contract = {"status": "not_registered"}
+    if isinstance(mechanism_override, dict) and str(mechanism_override.get("status") or ""):
+        mechanism_contract = dict(mechanism_override)
+    elif model_claim:
+        mechanism_contract = {"status": "deferred",
+                              "reason": "the causal question (does the kernel cause the gain) is settled "
+                                        "only by a targeted ablation; the effect claim settles at program "
+                                        "level and the engine opens the ablation after a program-level win"}
+    else:
+        mechanism_contract = {"status": "not_applicable"}
     efficiency_improvement_ids = [str(x) for x in (scope.get("improvement_cells") or [])]
     efficiency_parity_ids = [str(x) for x in (scope.get("parity_cells") or [])]
     global_guard = [str(c.get("id")) for c in econfig.guardrail_cells(ctx.cfg)]
     guard_ids = list(dict.fromkeys(global_guard + [str(x) for x in (scope.get("guardrail_cells") or [])]))
     all_target_ids = set(default_targets)
     breadth_ids = sorted(all_target_ids - set(target_ids))
-
-    ev = econfig.evaluation_contract(ctx.cfg)
-    cells_by_id = econfig.cell_spec(ctx.cfg)
     task_specs = {str(t.get("id")): t for t in ev.get("tasks") or []}
-
-    def aggregate(statuses: list[str], mode: str, weights: list[float]) -> bool:
-        wins = sum(1 for s in statuses if s == "improved")
-        if mode == "all":
-            return bool(statuses) and wins == len(statuses)
-        if mode == "majority":
-            return wins > len(statuses) / 2
-        win_w = sum(w for s, w in zip(statuses, weights) if s == "improved")
-        loss_w = sum(w for s, w in zip(statuses, weights) if s == "regressed")
-        return wins > 0 and win_w > loss_w
-
-    def lost(statuses: list[str], mode: str, weights: list[float]) -> bool:
-        """The declared aggregation read in the losing direction.
-
-        A contract saying "this counts as a win only when every cell improves"
-        cannot also mean "it counts as a loss the moment any one cell slips":
-        that reading silently turns every declared aggregation into `all` for
-        wins and `any` for losses, and overrides a cell's own `required: false`.
-        One declared rule, both directions; what is neither won nor lost is the
-        mixed outcome the tradeoff/specialist verdicts exist to name.
-        """
-        flip = {"improved": "regressed", "regressed": "improved"}
-        return aggregate([flip.get(s, s) for s in statuses], mode, weights)
-
-    # Aggregate cells inside each scientific task first. Without this layer, a
-    # task reported with five metrics would receive five votes against a task
-    # reported with one metric merely because it had a denser table.
-    tasks_out: dict[str, dict] = {}
-    for tid, task in task_specs.items():
-        ids = [cid for cid in target_ids if (cells_by_id.get(cid) or {}).get("task") == tid]
-        if not ids:
-            continue
-        statuses = [results[cid]["status"] for cid in ids]
-        weights = [float((cells_by_id.get(cid) or {}).get("weight") or 0) for cid in ids]
-        tasks_out[tid] = {
-            "id": tid, "cells": ids,
-            "wins": sum(1 for s in statuses if s == "improved"),
-            "losses": sum(1 for s in statuses if s == "regressed"),
-            "uncertain": sum(1 for s in statuses if s == "uncertain"),
-            "improved": aggregate(statuses, str(task.get("aggregation") or "all"), weights),
-            "lost": lost(statuses, str(task.get("aggregation") or "all"), weights),
-            "aggregation": task.get("aggregation"), "weight": float(task.get("weight") or 1.0),
-        }
-
-    groups_out: list[dict] = []
-    for group in ev.get("task_groups") or []:
-        tids = [str(t) for t in (group.get("tasks") or []) if str(t) in tasks_out]
-        if not tids:
-            continue
-        task_statuses = ["improved" if tasks_out[tid]["improved"] else
-                         ("regressed" if tasks_out[tid]["lost"] else
-                          ("uncertain" if tasks_out[tid]["uncertain"] else "noninferior"))
-                         for tid in tids]
-        task_weights = [float(tasks_out[tid]["weight"]) for tid in tids]
-        ids = [cid for tid in tids for cid in tasks_out[tid]["cells"]]
-        groups_out.append({
-            "id": group.get("id"), "tasks": tids, "cells": ids,
-            "wins": sum(1 for s in task_statuses if s == "improved"),
-            # Group vetoes operate on the already-aggregated task votes.  A
-            # majority task with two winning cells and one losing cell is an
-            # improved task, not simultaneously a group loss.
-            "losses": sum(1 for s in task_statuses if s == "regressed"),
-            "uncertain": sum(1 for s in task_statuses if s == "uncertain"),
-            "required": bool(group.get("required")),
-            "improved": aggregate(task_statuses, str(group.get("aggregation") or "all"), task_weights),
-            "lost": lost(task_statuses, str(group.get("aggregation") or "all"), task_weights),
-        })
 
     # Absolute project/SOTA goals are orthogonal to evolutionary progress. A
     # node can be a useful improvement while the project is still below its
@@ -9241,7 +9635,7 @@ def computed_assessment(ctx: Ctx, node: dict, metrics: dict) -> dict:
             "id": tid, "cells": ids, "met": sum(1 for s in raw if s == "met"),
             "not_met": sum(1 for s in raw if s == "not_met"),
             "unknown": sum(1 for s in raw if s == "unknown"),
-            "goal_met": aggregate(statuses, str(task.get("aggregation") or "all"), weights),
+            "goal_met": _aggregate_statuses(statuses, str(task.get("aggregation") or "all"), weights),
             "weight": float(task.get("weight") or 1.0),
         }
     goal_groups_out: list[dict] = []
@@ -9257,19 +9651,17 @@ def computed_assessment(ctx: Ctx, node: dict, metrics: dict) -> dict:
             "met": sum(1 for s in statuses if s == "improved"),
             "not_met": sum(1 for s in statuses if s == "regressed"),
             "unknown": sum(1 for s in statuses if s == "uncertain"),
-            "goal_met": aggregate(statuses, str(group.get("aggregation") or "all"), weights),
+            "goal_met": _aggregate_statuses(statuses, str(group.get("aggregation") or "all"), weights),
         })
 
-    configured_need_groups = int((ev.get("decision") or {}).get("min_target_groups_improved") or 1)
-    # A specialist result is deliberately not an overall-project pass. It may
-    # establish one scoped scientific win even when the global contract asks
-    # for broader movement; the distinct verdict prevents overclaiming.
-    need_groups = 1 if kind in ("specialist", "diagnostic") else configured_need_groups
     target_wins = [cid for cid in target_ids if results.get(cid, {}).get("status") == "improved"]
     target_losses = [cid for cid in target_ids if results.get(cid, {}).get("status") == "regressed"]
     target_uncertain = [cid for cid in target_ids if results.get(cid, {}).get("status") == "uncertain"]
-    group_success = sum(1 for g in groups_out if g["improved"]) >= need_groups
-    target_success = bool(target_wins) and (group_success if groups_out else True)
+    # A real win = the claim STANDS: at least one claimed cell improved beyond
+    # its floor (times the user's multiple) and margin, and the user's vote
+    # inside the claimed groups passed. Cells that rose without the vote
+    # passing are a `partial` result - recorded, not a parent.
+    real_win = bool(target_wins) and bool(group_rule_met)
     guard_required = bool((ev.get("decision") or {}).get("guardrails_must_be_noninferior", True))
     guard_losses = [cid for cid in guard_ids if results.get(cid, {}).get("status") == "regressed"]
     guard_uncertain = [cid for cid in guard_ids if results.get(cid, {}).get("status") == "uncertain"]
@@ -9307,7 +9699,7 @@ def computed_assessment(ctx: Ctx, node: dict, metrics: dict) -> dict:
     absolute_guardrail_unknown = [cid for cid in absolute_guardrail_ids
                                   if results.get(cid, {}).get("goal_status") == "unknown"]
     goal_groups_met = [str(g.get("id")) for g in goal_groups_out if g.get("goal_met")]
-    # R7: a guardrail-only absolute contract (relative quality target + hard
+    # A guardrail-only absolute contract (relative quality target + hard
     # deployment limit on a guardrail cell) is legal config; judging "has
     # goals" by target goal-tasks alone reported project_goal=None ("not
     # assessed") while the engine had already identified the guardrail breach.
@@ -9318,47 +9710,69 @@ def computed_assessment(ctx: Ctx, node: dict, metrics: dict) -> dict:
                              and not absolute_guardrail_unknown
                              and not guard_losses and not guard_uncertain) if has_absolute_goals else None
 
+    # A loss never outranks a real win in the verdict. What a node WON on its
+    # claimed cells is a measured fact; what it lost elsewhere is another
+    # measured fact. `tradeoff` names both. `partial` is cells that rose
+    # without the claim's vote passing. `regressed` is a node that won
+    # nothing it claimed and lost something. `inconclusive` is nothing decided
+    # beyond noise - never a real win plus a loss. Whether losses on required
+    # cells or guardrails make the node undeliverable is the project-goal
+    # question (deliverable / project_goal_attained), not the verdict's.
+    protected_losses = bool(hard_losses or required_target_losses or required_group_losses)
+    any_loss = bool(protected_losses or breadth_losses or target_losses or guard_losses)
+    # A specialist's scope is its claim. A loss on a cell outside that scope
+    # counts only when one shared checkpoint must carry that cell too;
+    # task-adapted delivery keeps the retained checkpoint there and the
+    # specialist stands on its own cells.
+    same_checkpoint_conflict = ev.get("model_scope") == "single_checkpoint" and bool(breadth_losses)
+    scoped_loss = bool(protected_losses or guard_losses or target_losses or same_checkpoint_conflict) \
+        if kind == "specialist" else any_loss
+    protected_undecided = bool(hard_uncertain or required_uncertain or required_group_uncertain)
     verdict = "inconclusive"
-    if hard_losses or required_target_losses or required_group_losses:
-        verdict = "regressed"
-    elif kind == "efficiency":
+    if kind == "efficiency":
         improvement_statuses = [results.get(cid, {}).get("status") for cid in efficiency_improvement_ids]
         parity_statuses = [results.get(cid, {}).get("status") for cid in efficiency_parity_ids]
         threshold_status = check_prediction(meta.get("dominance") or {}, metrics)
-        if any(s == "regressed" for s in improvement_statuses + parity_statuses):
+        improvement_won = any(s == "improved" for s in improvement_statuses)
+        efficiency_loss = any_loss or any(s == "regressed" for s in improvement_statuses + parity_statuses)
+        if efficiency_loss and not improvement_won:
+            verdict = "regressed"
+        elif efficiency_loss:
             verdict = "tradeoff"
-        elif hard_uncertain or required_uncertain or required_group_uncertain \
-                or any(s == "uncertain" for s in improvement_statuses + parity_statuses):
+        elif protected_undecided or any(s == "uncertain" for s in improvement_statuses + parity_statuses):
             verdict = "inconclusive"
         elif all(s == "improved" for s in improvement_statuses) \
                 and parity_statuses and all(s in ("improved", "noninferior") for s in parity_statuses) \
                 and (threshold_status == "confirmed" if improvement_statuses
-                     else not efficiency_improvement_ids) \
-                and (group_success if efficiency_improvement_ids
                      else str((effect_contract.get("resources") or {}).get("status") or "") == "met"):
-            # R5: parity-only efficiency (improvement_cells []) has no quality
-            # dominance threshold - the resource-side win is settled by the
-            # effect contract's efficiency regime. Quality group_success can
-            # never be true when every claimed cell is held at parity, so the
-            # parity-only branch settles on that frozen resource regime.
+            # No loss anywhere is already established above. Parity-only
+            # efficiency (improvement_cells []) has no quality dominance
+            # threshold - the resource-side win is settled by the effect
+            # contract's efficiency regime.
             verdict = "dominant"
-    elif target_success and not hard_uncertain and not required_uncertain and not required_group_uncertain:
-        if kind == "specialist":
-            same_checkpoint_conflict = ev.get("model_scope") == "single_checkpoint" and bool(breadth_losses)
-            verdict = "tradeoff" if (guard_losses or same_checkpoint_conflict) else "specialist"
-        elif kind == "diagnostic":
-            # This is only the performance effect of a causal diagnostic.  A
-            # performance regression can still be scientifically informative;
-            # the causal settlement is reported separately in ablation_result.
+    elif kind == "diagnostic":
+        # This is only the performance effect of a causal diagnostic.  A
+        # performance regression can still be scientifically informative;
+        # the causal settlement is reported separately in ablation_result.
+        if real_win and not protected_undecided:
             verdict = "tradeoff" if guard_losses else "improved"
-        elif breadth_losses or target_losses or guard_losses:
-            verdict = "tradeoff" if (ev.get("decision") or {}).get("allow_specialist", True) else "regressed"
-        else:
-            verdict = "improved"
-    elif target_losses and not target_wins:
+        elif any_loss and not real_win:
+            verdict = "regressed"
+    elif real_win and scoped_loss:
+        verdict = "tradeoff"
+    elif real_win and not protected_undecided:
+        verdict = "specialist" if kind == "specialist" else "improved"
+    elif target_wins and not group_rule_met:
+        # Some claimed cells really rose, but the claim's own vote did not
+        # pass. When a group that could still swing the vote is undecided
+        # (uncertain cells, neither won nor lost) nothing is settled yet -
+        # inconclusive; otherwise the vote failed on decided rows: `partial`,
+        # honest about both, not a parent as claimed (the post-hoc claim door
+        # can re-scope it to the groups that did rise).
+        vote_undecided = any(g["uncertain"] > 0 and not g["improved"] and not g["lost"] for g in groups_out)
+        verdict = "inconclusive" if vote_undecided else "partial"
+    elif scoped_loss and not real_win:
         verdict = "regressed"
-    elif target_success and (hard_uncertain or required_uncertain or target_uncertain):
-        verdict = "inconclusive"
 
     # Reserve promising-at-parity for a genuinely new full program, not a local
     # irreducible kernel carried by a root label.  Otherwise scope silently
@@ -9388,27 +9802,42 @@ def computed_assessment(ctx: Ctx, node: dict, metrics: dict) -> dict:
         ref = float(pc["reference"])
         rel = float(pc["delta"]) / abs(ref) * 100 if ref else (100.0 if pc["delta"] > 0 else -100.0)
     overall_contract_pass = (kind not in ("specialist", "diagnostic")
-                             and verdict in ("improved", "dominant")
+                             and verdict in ("improved", "dominant") and group_rule_met
                              and effect_contract.get("status") in ("met", "not_applicable"))
+    # Deliverable: the node could ship as the project's model. It really won
+    # (a parity-only dominant counts: same quality, cheaper), the portfolio
+    # rule is met, required cells and guardrails held, and in a
+    # single-checkpoint project nothing outside the claim regressed either
+    # (one checkpoint serves every cell).
+    deliverable = (verdict in ("improved", "specialist", "dominant", "tradeoff")
+                   and (real_win or verdict == "dominant")
+                   and not protected_losses
+                   and not (ev.get("model_scope") == "single_checkpoint" and breadth_losses))
     scientific_promotion_status = promotion_status(
-        verdict, effect_contract, mechanism_contract, research_kernel=research_kernel,
-        fidelity_settled=not node.get("needs_fidelity") or not node.get("fidelity_pending"))
+        verdict, effect_contract,
+        fidelity_settled=not node.get("needs_fidelity") or not node.get("fidelity_pending"),
+        real_win=real_win)
     if node.get("experiment_purpose") in econfig.INSTRUMENTAL_PURPOSES \
             or node.get("experiment_purpose") in econfig.EXPLORATORY_PURPOSES:
         # Instrumental work makes no frozen M/E claim, so it can neither earn
         # nor lose scientific promotion; the research inheritance frontier
         # simply never sees it (maintenance stays frontier-TRANSPARENT).
-        # v11.1 P5: exploratory declared its results observations-only at
+        # Exploratory declared its results observations-only at
         # admission - promotion is pinned not_applicable by construction.
         scientific_promotion_status = "not_applicable"
     return {"verdict": verdict, "display_delta_pct": rel, "claim_kind": kind,
             "overall_contract_pass": overall_contract_pass,
             "effect_contract": effect_contract,
             "effect_contract_status": effect_contract.get("status"),
+            "resource_overrun": (effect_contract.get("resources") or {}).get("overrun") or {},
             "mechanism_contract": mechanism_contract,
             "mechanism_contract_status": mechanism_contract.get("status"),
+            "probe_contract": probe_contract,
+            "probe_contract_status": probe_contract.get("status"),
             "scientific_promotion_status": scientific_promotion_status,
             "configured_min_target_groups_improved": configured_need_groups,
+            "required_target_groups_improved": need_groups,
+            "group_rule_met": group_rule_met,
             "efficiency_improvement_cells": efficiency_improvement_ids,
             "efficiency_parity_cells": efficiency_parity_ids,
             "target_cells": target_ids, "guardrail_cells": guard_ids,
@@ -9419,6 +9848,7 @@ def computed_assessment(ctx: Ctx, node: dict, metrics: dict) -> dict:
             "absolute_guardrail_not_met": absolute_guardrail_not_met,
             "absolute_guardrail_unknown": absolute_guardrail_unknown,
             "project_goal_attained": project_goal_attained,
+            "deliverable": deliverable, "real_win": real_win,
             "target_wins": target_wins, "target_losses": target_losses,
             "guardrail_losses": guard_losses, "guardrail_uncertain": guard_uncertain,
             "required_target_losses": required_target_losses,
@@ -9434,7 +9864,7 @@ def computed_verdict(ctx: Ctx, node: dict, metrics: dict) -> tuple[str, float | 
 
 
 def check_prediction(pred: dict, metrics: dict, floor: float = 0.0) -> str:
-    # R4 science audit: settle with the same one-application floor rule as the
+    # Settle with the same one-application floor rule as the
     # goal line - a scalar within the noise band of its registered threshold
     # is 'inconclusive', not a calibration win/loss (hiding the error bar must
     # not buy decisive settlements in the calibration ledger either).
@@ -9459,7 +9889,7 @@ def pending_infra_errors(ctx: Ctx, nid: str) -> list[str]:
 
 
 def infra_resolution_errors(ctx: Ctx, node: dict, outcome: dict, errs: list[str]) -> None:
-    """The journal must not stay failure-only (v10.2): a node that hit
+    """The journal must not stay failure-only: a node that hit
     infrastructure failures dispositions each one at conclude - either
     `fixed` (surface + what actually worked, the playbook entry every later
     implement/launch bundle receives) or `transient` (no fabricated lesson).
@@ -9549,7 +9979,7 @@ def infra_resolution_errors(ctx: Ctx, node: dict, outcome: dict, errs: list[str]
 
 
 def _observation_evidence_bound(ctx: Ctx, evidence: str) -> bool:
-    """R10 audit: an observation becomes a permanent OB### row every future
+    """An observation becomes a permanent OB### row every future
     idea/diagnosis/recovery may consume as an established fact - its evidence
     must bind SOMETHING that exists: a repo-relative path, a RUN whose sealed
     metrics carry the number, or a registered artifact (AR id or URI). Free
@@ -9564,7 +9994,7 @@ def _observation_evidence_bound(ctx: Ctx, evidence: str) -> bool:
         if _exists(ctx, token):
             return True
         run = runs.get(token)
-        # R11-006: a RUN pointer binds only when the engine actually SEALED
+        # A RUN pointer binds only when the engine actually SEALED
         # the material - evidence_status "complete" is the seal. A RUN whose
         # result the engine itself judged invalid/incomplete (or that never
         # finished) is a pointer to nothing establishable; letting it in put
@@ -9574,7 +10004,7 @@ def _observation_evidence_bound(ctx: Ctx, evidence: str) -> bool:
                 and str(run.get("evidence_status") or "") == "complete":
             return True
         row = by_id.get(token) or eartifact.find_by_uri(ctx.reg, token)
-        # (sweep G-7) an AR reference binds only while the row is available -
+        # An AR reference binds only while the row is available -
         # a stale/invalid row is a name whose bytes nobody can check
         if row is not None and str(row.get("status") or "") == "available":
             return True
@@ -9626,7 +10056,7 @@ def _validate_outcome_knowledge(outcome: dict, errs: list[str], *,
                     (isinstance(lesson.get("tags"), list) and lesson.get("tags")):
                 errs.append(f"OUTCOME_LESSON_TAGS: lessons[{i}]: conditional lessons need non-empty tags")
             if unroutable_lineage and lesson.get("scope") == "lineage":
-                # R9 (external audit r6): lineage lessons route only to tasks
+                # Lineage lessons route only to tasks
                 # whose parent/ancestor set contains the SOURCE node. A node
                 # that can never be a legal model parent (screened_out stop,
                 # diagnostic probe, exploratory scout) never appears in any
@@ -9637,6 +10067,25 @@ def _validate_outcome_knowledge(outcome: dict, errs: list[str], *,
                             "task; use scope 'global' (always shown) or 'conditional' with tags "
                             "(shown to matching lanes)")
     return obs
+
+
+def _seal_value_moved(sealed: Any, live: Any) -> bool:
+    """Did a recorded value change under recomputation? A key the seal never
+    recorded (an assessment field that did not exist when the node was
+    measured) cannot have moved, so dicts are compared over the sealed keys
+    only, recursively; everything else is byte-equality."""
+    if isinstance(sealed, dict) and isinstance(live, dict):
+        return any(k not in live or _seal_value_moved(v, live[k]) for k, v in sealed.items())
+    if isinstance(sealed, list) and isinstance(live, list):
+        return len(sealed) != len(live) or any(_seal_value_moved(a, b) for a, b in zip(sealed, live))
+    return sealed != live
+
+
+def evaluation_seal_moved(sealed: dict, live: dict) -> list[str]:
+    """Top-level assessment fields whose sealed value the recomputation no
+    longer reproduces (sorted); empty when the seal still holds."""
+    return sorted(k for k, v in (sealed or {}).items()
+                  if k not in (live or {}) or _seal_value_moved(v, live[k]))
 
 
 def v_conclude(ctx: Ctx, task: dict) -> list[str]:
@@ -9650,7 +10099,7 @@ def v_conclude(ctx: Ctx, task: dict) -> list[str]:
     _require_sections(result_md, ["what was built", "what happened", "interpretation"], "NODE_RESULT", errs)
     role = node.get("role")
     if role != "platform" and any(c.get("role") in ("target", "guardrail") and c.get("goal_threshold") is not None
-                                   for c in econfig.evaluation_cells(ctx.cfg)):
+                                   for c in settlement_cells(ctx, node)):
         _require_sections(result_md, ["absolute goal status"], "NODE_RESULT", errs)
     verdict = outcome.get("verdict")
     idea_meta: dict = {}
@@ -9664,7 +10113,7 @@ def v_conclude(ctx: Ctx, task: dict) -> list[str]:
             errs.append("OUTCOME_PLATFORM: platform verdict must be enabled|failed")
         if verdict == "enabled":
             arts = outcome.get("enabled_artifacts") or []
-            # R9 (external audit r6): membership in the node's registry rows was
+            # Membership in the node's registry rows was
             # not enough - an 'invalid'/stale row (product missing at register)
             # let a platform mint an enabled-capability verdict for bytes no
             # consumer can ever use. An enabled artifact must resolve to an
@@ -9672,7 +10121,7 @@ def v_conclude(ctx: Ctx, task: dict) -> list[str]:
             # A remote URI (oss://, s3://...) is not locally hashable - its
             # custody is the producer receipt (recorded r5-08 boundary), so the
             # digest requirement applies only where the engine CAN check bytes.
-            # (identity sweep #27) membership goes through the canonical
+            #  membership goes through the canonical
             # spelling - a raw-string set let `a/./b` vs `a/b` and host case
             # variants dodge or fail the check arbitrarily
             avail_uris = {eutil.norm_uri(str(a.get("uri") or ""))
@@ -9705,7 +10154,7 @@ def v_conclude(ctx: Ctx, task: dict) -> list[str]:
                          and any(str((s or {}).get("name") or "") == nm
                                  for s in (n.get("enabled_services") or []))
                          for n in ctx.g.get("nodes", [])):
-                    # R9 (external audit r6): a service slug must have ONE live
+                    # A service slug must have ONE live
                     # owner - consumer specs bind by bare name, so a duplicate
                     # provider made recovery blame the wrong platform and turned
                     # unrelated consumers into its phantom hard descendants.
@@ -9720,9 +10169,19 @@ def v_conclude(ctx: Ctx, task: dict) -> list[str]:
         metrics = _read_json(ctx, metrics_path, errs) or {}
         assessment = computed_assessment(ctx, node, metrics)
         frozen_assessment = node.get("evaluation_summary") or {}
-        if frozen_assessment != assessment:
-            errs.append("OUTCOME_EVALUATION_SEAL_DRIFT: conclusion assessment differs from the one frozen at "
-                        "evaluate; restore the sealed metrics/idea/comparator evidence")
+        moved = (evaluation_seal_moved(frozen_assessment, assessment) if frozen_assessment
+                 else ["no assessment sealed at evaluate"])
+        if moved:
+            cause = ("the node's ruler is frozen, so the sealed metrics, idea meta or comparator "
+                     "evidence moved"
+                     if isinstance(node.get("eval_cells_frozen"), dict) else
+                     "this node was measured before its ruler froze, so a project fact (floor / "
+                     "margin / required / goal line) or the sealed metrics, idea meta or comparator "
+                     "evidence moved")
+            errs.append("OUTCOME_EVALUATION_SEAL_DRIFT: the assessment recomputed now differs from the one "
+                        f"frozen at evaluate (fields: {', '.join(moved[:6])}); {cause} - re-analyse "
+                        f"without compute: evo recover-plan --boundary evaluation --target node:{nid} ; "
+                        "evo recover-apply")
         want, delta = str(assessment["verdict"]), assessment.get("display_delta_pct")
         if verdict != want:
             errs.append(
@@ -9756,7 +10215,7 @@ def v_conclude(ctx: Ctx, task: dict) -> list[str]:
         preds = {p.get("id"): p for p in (idea_meta.get("predictions") or [])}
         outcome_pred_rows = [p for p in (outcome.get("predictions") or []) if isinstance(p, dict)]
         outcome_ids = [str(p.get("id") or "") for p in outcome_pred_rows]
-        # R7: the settlement loop below iterates REGISTERED ids, so duplicate
+        # The settlement loop below iterates REGISTERED ids, so duplicate
         # or invented rows in the outcome array were never visited - while the
         # transition counted the raw array into prediction_stats, letting one
         # conclusion silently inflate the cross-round calibration record.
@@ -9831,23 +10290,25 @@ def v_conclude(ctx: Ctx, task: dict) -> list[str]:
             for a in named:
                 if a not in aids:
                     errs.append(f"OUTCOME_ROOT_CAUSE_ID: {a} is not an assumption id registered by the idea")
-            # F2: the literal honest-unknown is a legal terminal answer; only
-            # a NON-unknown note owes the 40-char explanation (v9.2 demanded
-            # note=='unknown' and then rejected it as too short).
+            # The literal honest-unknown is a legal terminal answer; only
+            # a NON-unknown note owes the 40-char explanation.
             if str(rc.get("note") or "").strip().lower() != "unknown":
                 _nontrivial(rc.get("note"), 40, "root_cause.note", errs)
-        # v9: mechanism attribution settlement - the effect must be shown to flow
-        # through the claimed channel, or the idea is novel decoration on tuning.
+        # The probe's answer. With a registered probe outcome.mechanism.status
+        # is the engine's application of the frozen decision rule to the sealed
+        # observations (information: does the model use the part); without one
+        # it can only say `deferred`. The CAUSAL status is a separate fact the
+        # ablation settles; nothing may be read into the performance numbers.
         probe = idea_meta.get("mechanism_probe") or {}
-        if probe.get("signal") and \
-                not str(idea_meta.get("attribution_waiver") or "").strip():
+        computed_mechanism = str((assessment.get("probe_contract") or {}).get("status") or "")
+        if probe.get("signal"):
             mo = outcome.get("mechanism") or {}
             allowed_status = ("confirmed", "refuted", "unclear")
             if mo.get("status") not in allowed_status:
                 errs.append("OUTCOME_MECHANISM: the idea registered a mechanism probe; outcome.mechanism.status "
                             f"must be one of {allowed_status}; expensive follow-up probes are not registered "
                             "as automatic duties")
-            expected_mechanism = str((assessment.get("mechanism_contract") or {}).get("status") or "unclear")
+            expected_mechanism = computed_mechanism or "unclear"
             if mo.get("status") != expected_mechanism:
                 errs.append(f"OUTCOME_MECHANISM_MISMATCH: mechanism.status must be {expected_mechanism!r}, "
                             "computed from the frozen decision_rule and sealed probe observations")
@@ -9857,6 +10318,12 @@ def v_conclude(ctx: Ctx, task: dict) -> list[str]:
             if evidence != expected_evidence or not _exists(ctx, evidence):
                 errs.append(f"OUTCOME_MECHANISM_EVIDENCE: mechanism.evidence must be {expected_evidence!r}, "
                             "the normalized file whose structured probe block was validated")
+        elif outcome.get("mechanism") is not None:
+            mo = outcome.get("mechanism")
+            if not isinstance(mo, dict) or mo.get("status") != "deferred":
+                errs.append("OUTCOME_MECHANISM_DEFERRED: no mechanism instrument was registered for this node, "
+                            "so outcome.mechanism.status can only be 'deferred' - a causal verdict cannot be "
+                            "read off performance numbers; the ablation the engine opens after a win settles it")
         if idea_meta.get("scaling"):
             so = outcome.get("scaling") or {}
             scaling = idea_meta.get("scaling") or {}
@@ -9866,7 +10333,7 @@ def v_conclude(ctx: Ctx, task: dict) -> list[str]:
             elif not isinstance(so.get("held"), bool):
                 errs.append("OUTCOME_SCALING: reuse-only scaling evidence requires outcome.scaling.held (bool)")
             _nontrivial(so.get("note"), 40, "scaling.note (per-point numbers vs the registered trend)", errs)
-        # SOTA accounting (v8): every SOTA target the idea registered gets an
+        # SOTA accounting: every SOTA target the idea registered gets an
         # honest settlement - met or not, with the numbers or the dimension argued.
         targets = idea_meta.get("sota_targets") or []
         if econfig.sota_enabled(ctx.cfg) and targets:
@@ -9889,7 +10356,7 @@ def v_conclude(ctx: Ctx, task: dict) -> list[str]:
                     elif row.get("comparability") == "exact" and t.get("dimension") == "effect":
                         cell = contract_cells.get(str(t.get("cell") or "")) or {}
                         observed = metric_value(metrics.get(cell.get("result_key")))
-                        # R4 science audit: (a) the beaten number is FROZEN at
+                        # (a) the beaten number is FROZEN at
                         # node creation (a live SOTA-row rewrite must not move
                         # the line a registered claim is settled against);
                         # (b) 'met' uses the floored bound like every other
@@ -9915,7 +10382,7 @@ def v_conclude(ctx: Ctx, task: dict) -> list[str]:
     is_exploratory = node.get("experiment_purpose") in econfig.EXPLORATORY_PURPOSES
     obs = _validate_outcome_knowledge(
         outcome, errs, ctx=ctx,
-        # A probe exists to answer a question; an exploratory lane (v11.1 P5)
+        # A probe exists to answer a question; an exploratory lane
         # exists to SCOUT - both are pointless without at least one ledger
         # observation, which is the only currency exploratory results have.
         require_observations=(node.get("experiment_purpose") == "diagnostic_probe"
@@ -9985,7 +10452,7 @@ def v_scientific_conclude(ctx: Ctx, task: dict) -> list[str]:
     if not isinstance(unreached_rows, list):
         errs.append("SCIENTIFIC_STOP_PREDICTIONS: unreached_predictions list required")
         unreached_rows = []
-    # R9 (external audit r6): the two settlements are mutually exclusive. A
+    # The two settlements are mutually exclusive. A
     # stop DECLARES the predictions unreached (engine-checked set above); the
     # same outcome also carrying ordinary reached `predictions` rows let the
     # shared apply write reached/confirmed stats for a node whose stop just
@@ -9999,7 +10466,7 @@ def v_scientific_conclude(ctx: Ctx, task: dict) -> list[str]:
         errs.append(f"SCIENTIFIC_STOP_PREDICTION_COVERAGE: unreached prediction ids must equal {sorted(registered)}; "
                     f"got {sorted(unreached)}")
     elif len([p for p in unreached_rows if isinstance(p, dict)]) != len(unreached):
-        # R7: the set-compare above tolerated duplicate rows, which the
+        # The set-compare above tolerated duplicate rows, which the
         # transition then counted raw into prediction_stats.
         errs.append("SCIENTIFIC_STOP_PREDICTION_DUP: each registered P# appears exactly once in "
                     "unreached_predictions")
@@ -10021,12 +10488,12 @@ def v_scientific_conclude(ctx: Ctx, task: dict) -> list[str]:
         _nontrivial(rc.get("note"), 40, "root_cause.note", errs)
 
     probe = idea_meta.get("mechanism_probe") or {}
-    if probe.get("signal") and not str(idea_meta.get("attribution_waiver") or "").strip():
+    if probe.get("signal"):
         mechanism = outcome.get("mechanism") or {}
         if mechanism.get("status") not in ("refuted", "unclear", "not_reached"):
             errs.append("SCIENTIFIC_STOP_MECHANISM: an interrupted workflow may report mechanism status "
                         "refuted|unclear|not_reached, never confirmed or silently omitted")
-        # R7: refuted/unclear are ENGINE results computed from sealed probe
+        # Refuted/unclear are ENGINE results computed from sealed probe
         # observations - with no validated snapshot on any of this node's
         # runs there is nothing to compute from, and authoring a status was
         # free-text science (the same stop could be phrased into different
@@ -10048,16 +10515,167 @@ def v_scientific_conclude(ctx: Ctx, task: dict) -> list[str]:
     return errs
 
 
+def sealed_probe_observations(ctx: Ctx, node: dict) -> list[dict]:
+    """The node's settled probe observations: [{artifact, snapshot, seed, values}]
+    read from the sealed normalized evaluation and its RUN-owned snapshots."""
+    metrics_path = str(node.get("eval_metrics_path") or f".evo/nodes/{node.get('id')}/eval/metrics.json")
+    metrics = eutil.read_json(eutil.rpath(ctx.store.repo, metrics_path), {}) or {}
+    snapshots = active_probe_snapshot_map(ctx, node)
+    out: list[dict] = []
+    for row in ((metrics.get("_mechanism_probe") or {}).get("observations") or []):
+        if not isinstance(row, dict):
+            continue
+        declared = str(row.get("artifact") or "")
+        out.append({"artifact": declared, "snapshot": snapshots.get(declared) or "",
+                    "seed": row.get("seed"), "values": dict(row.get("values") or {})})
+    return out
+
+
+CORRECTION_REVIEW_VERDICTS = ("FORMULA_ERROR", "POST_HOC", "INSUFFICIENT")
+
+
+def instrument_proposal_errors(ctx: Ctx, node: dict, data: Any) -> list[str]:
+    """Mechanics of an instrument-correction proposal.
+
+    The engine checks what a machine can: the node has a settled probe
+    verdict, the original rule is quoted exactly, the corrected rule is a
+    legal predicate, every cited raw input equals the number in the sealed
+    artifact, and the corrected values are finite. Whether the FORMULA was
+    really wrong is the independent judge's question.
+    """
+    errs: list[str] = []
+    if not isinstance(data, dict):
+        return ["CORRECTION_SHAPE: the proposal must be a JSON object"]
+    nid = str(node.get("id") or "")
+    if node.get("status") != "concluded" or node.get("role") in ("baseline", "platform"):
+        errs.append("CORRECTION_NODE: only a concluded model node has a settled mechanism verdict to correct")
+    probe_status = str(((node.get("probe_result") or {}) if isinstance(node.get("probe_result"), dict) else {})
+                       .get("status") or "")
+    if probe_status not in ("confirmed", "refuted", "unclear"):
+        errs.append(f"CORRECTION_STATUS: node {nid} has no probe answer to correct "
+                    f"(probe_result.status is {probe_status or 'absent'!r}); only a probe's answer "
+                    "(confirmed/refuted/unclear, computed from a registered rule) can be corrected - the "
+                    "causal question is settled by 'evo ablate', never re-judged from prose")
+    if str(data.get("node") or "") != nid:
+        errs.append(f"CORRECTION_NODE_BINDING: proposal.node must be {nid!r}")
+    meta = _idea_meta(ctx, node)
+    probe = meta.get("mechanism_probe") if isinstance(meta.get("mechanism_probe"), dict) else {}
+    original_rule = probe.get("decision_rule") if isinstance(probe.get("decision_rule"), dict) else {}
+    if not original_rule:
+        errs.append("CORRECTION_NO_PROBE: the idea registered no mechanism probe; nothing was settled by a rule")
+    if data.get("original_rule") != original_rule:
+        errs.append("CORRECTION_ORIGINAL_RULE: original_rule must quote the frozen mechanism_probe.decision_rule "
+                    "exactly (the record must show what is being corrected)")
+    _nontrivial(data.get("argument"), 120,
+                "argument (why the formula is wrong, stated so it holds whatever the verdict was)", errs)
+    _nontrivial(data.get("formula"), 20,
+                "formula (the corrected computation of the gated quantity from the sealed raw fields)", errs)
+    rule = data.get("corrected_rule")
+    if not isinstance(rule, dict):
+        errs.append("CORRECTION_RULE: corrected_rule must be a numeric predicate object")
+        rule = {}
+    field = str(rule.get("field") or "")
+    if not STAGE_METRIC_KEY.fullmatch(field):
+        errs.append("CORRECTION_RULE_FIELD: corrected_rule.field must be a metric-key slug naming the corrected quantity")
+    errs.extend(decision_rule_shape_errors(rule, {field} if field else set(), where="corrected_rule"))
+    inputs = data.get("inputs")
+    if not isinstance(inputs, list) or not inputs or any(not str(x or "").strip() for x in inputs):
+        errs.append("CORRECTION_INPUTS: inputs must list the raw field names read from every sealed artifact")
+        inputs = []
+    sealed = sealed_probe_observations(ctx, node)
+    rows = data.get("observations")
+    if not isinstance(rows, list) or len(rows) != len(sealed) or not sealed:
+        errs.append(f"CORRECTION_OBSERVATIONS: observations must carry exactly one row per sealed probe "
+                    f"observation ({len(sealed)} sealed)")
+        rows = []
+    by_artifact = {row["artifact"]: row for row in sealed}
+    seen: set[str] = set()
+    original_field = str(original_rule.get("field") or "")
+    any_change = data.get("corrected_rule") != original_rule
+    for i, row in enumerate(rows):
+        if not isinstance(row, dict):
+            errs.append(f"CORRECTION_OBSERVATION_{i}: must be an object")
+            continue
+        art = str(row.get("artifact") or "")
+        sealed_row = by_artifact.get(art)
+        if sealed_row is None or art in seen:
+            errs.append(f"CORRECTION_OBSERVATION_{i}_ARTIFACT: {art!r} is not one of the sealed probe "
+                        f"artifacts (or is repeated): {sorted(by_artifact)}")
+            continue
+        seen.add(art)
+        value = row.get("value")
+        if isinstance(value, bool) or not isinstance(value, (int, float)) or not math.isfinite(float(value)):
+            errs.append(f"CORRECTION_OBSERVATION_{i}_VALUE: value must be a finite number")
+        elif original_field and isinstance(sealed_row["values"].get(original_field), (int, float)) \
+                and float(sealed_row["values"][original_field]) != float(value):
+            any_change = True
+        given = row.get("inputs") if isinstance(row.get("inputs"), dict) else {}
+        snapshot_rel = str(sealed_row.get("snapshot") or "")
+        raw = eutil.read_json(eutil.rpath(ctx.store.repo, snapshot_rel), None) if snapshot_rel else None
+        if not isinstance(raw, dict):
+            errs.append(f"CORRECTION_OBSERVATION_{i}_SNAPSHOT: the sealed snapshot for {art!r} is not readable; "
+                        "a correction can only be derived from sealed bytes")
+            continue
+        for key in inputs:
+            k = str(key)
+            recorded = raw.get(k)
+            if isinstance(recorded, bool) or not isinstance(recorded, (int, float)):
+                errs.append(f"CORRECTION_OBSERVATION_{i}_INPUT: sealed artifact {art!r} has no numeric field {k!r}")
+                continue
+            claimed = given.get(k)
+            if isinstance(claimed, bool) or not isinstance(claimed, (int, float)) \
+                    or abs(float(claimed) - float(recorded)) > 1e-9 * max(1.0, abs(float(recorded))):
+                errs.append(f"CORRECTION_OBSERVATION_{i}_INPUT_MISMATCH: inputs.{k}={claimed!r} does not equal "
+                            f"the sealed value {recorded!r} in {art!r}")
+    if rows and not any_change:
+        errs.append("CORRECTION_NO_CHANGE: neither the rule nor any corrected value differs from the sealed "
+                    "settlement; there is nothing to re-judge")
+    return errs
+
+
+def v_instrument_review(ctx: Ctx, task: dict) -> list[str]:
+    errs: list[str] = []
+    subj = task.get("subject") or {}
+    record = next((c for c in (ctx.st.get("corrections") or [])
+                   if str(c.get("id") or "") == str(subj.get("correction") or "")), None)
+    if record is None:
+        return ["INTERNAL: correction record missing"]
+    review = _read_md(ctx, task["outputs"][0], errs)
+    proposal = _read_json(ctx, str(record.get("proposal_path") or ""), errs)
+    if review is None or proposal is None:
+        return errs
+    m = re.search(r"^VERDICT:\s*(\S+)", review, re.M)
+    verdict = m.group(1) if m else ""
+    if verdict not in CORRECTION_REVIEW_VERDICTS:
+        errs.append(f"CORRECTION_REVIEW_VERDICT: line 1 must be VERDICT: {'|'.join(CORRECTION_REVIEW_VERDICTS)}")
+    _require_sections(review, ["independence test", "recomputation check", "symmetry", "verdict rationale"],
+                      "CORRECTION_REVIEW", errs, min_chars=60)
+    _check_quotes(QUOTE_LINE.findall(review), str(proposal.get("argument") or ""),
+                  "CORRECTION_REVIEW", errs, min_quotes=2)
+    if verdict == "FORMULA_ERROR":
+        mode = str((ctx.cfg.get("policy") or {}).get("critic_isolation", "attest"))
+        sess = str(task.get("session") or "")
+        applicant = str(record.get("applicant_session") or "")
+        if mode == "strict":
+            if not sess:
+                errs.append("CRITIC_SESSION_REQUIRED: policy.critic_isolation=strict - a FORMULA_ERROR ruling "
+                            "must be submitted with --session from a session other than the applicant's")
+            elif applicant and sess == applicant:
+                errs.append("CRITIC_SESSION_SAME: this ruling comes from the session that filed the correction; "
+                            "the judge must be a fresh session/sub-agent")
+    return errs
+
+
 def v_close_round(ctx: Ctx, task: dict) -> list[str]:
     errs: list[str] = []
     rid = task["subject"]["round"]
-    # R7 audit: a stale closer resurrected after a hold release could accept
+    # A stale closer resurrected after a hold release could accept
     # the SAME round a second time - double-appending its closed row and
     # double-counting rounds_max. Closing is idempotent-by-refusal.
     if any(r.get("id") == rid and r.get("closed_at") for r in ctx.st.get("rounds", [])):
         return [f"ROUND_ALREADY_CLOSED: round {rid} already has a closed record; "
                 "this close task is stale - it must be cancelled, not submitted"]
-    # v10.1: RETRO.md was removed from this task.  Frontier movement, failed
+    # RETRO.md was removed from this task.  Frontier movement, failed
     # bets and portfolio efficacy are engine-computed from the graph at close
     # (_apply_close_round); a prose retro had no engine or bundle reader.  The
     # strategist's forward-looking judgment lives in the optional
@@ -10066,8 +10684,8 @@ def v_close_round(ctx: Ctx, task: dict) -> list[str]:
               if l.get("round") == rid and l.get("status") not in ("done", "abandoned")]
     if active:
         errs.append(f"ROUND_ACTIVE_LANES: close_round is illegal while lanes remain active: {active}")
-    # Filename-keyed (not positional): a v10-created open task still lists
-    # RETRO.md first.  RETIRE.json itself is REQUIRED and must be a list -
+    # Filename-keyed (not positional), so output order never matters.
+    # RETIRE.json itself is REQUIRED and must be a list -
     # `[]` is the explicit "nothing retires" declaration; a missing or
     # malformed file can no longer silently drop retirements.
     retire_path = next((o for o in task["outputs"] if str(o).endswith("RETIRE.json")), None)
@@ -10084,14 +10702,14 @@ def v_close_round(ctx: Ctx, task: dict) -> list[str]:
             errs.append("RETIRE_SHAPE: RETIRE.json must be a JSON array ([] when nothing retires)")
             return errs
         idx = egraph.by_id(ctx.g)
-        # R4 science audit: the strong-justification bar keys on EVERY surface
+        # The strong-justification bar keys on EVERY surface
         # the bundle tells the strategist to respect - inheritance frontier,
         # performance frontier, and per-cell record holders - not just the
         # first (a record holder could be pruned with a throwaway note).
         fr = {n["id"] for n in egraph.frontier(ctx.g, ctx.cfg, ctx.st)}
         fr |= {n["id"] for n in egraph.performance_frontier(ctx.g, ctx.cfg, ctx.st)}
         fr |= {str(rec.get("node") or "") for rec in egraph.cell_records(ctx.g, ctx.cfg)}
-        # R9 (external audit r6): one submit could list the SAME node twice
+        # One submit could list the SAME node twice
         # (e.g. pruned then archived). Every row was validated against the
         # pre-submit graph, so the monotonicity check below never saw the
         # first row's effect, and apply executed both in order - leaving a
@@ -10130,7 +10748,7 @@ def v_close_round(ctx: Ctx, task: dict) -> list[str]:
     # optional dossier addendum: the retro may register NEW bottleneck hypotheses
     # (append-only revision; the bootstrap dossier's B# vocabulary never goes stale)
     add_p = ctx.store.profile_dir() / "DOSSIER_ADDENDUM.md"
-    # R7: "append-only" is now enforced, not just asked. The task froze the
+    # "append-only" is now enforced, not just asked. The task froze the
     # prior bytes at creation; a rewrite of history (edited/deleted earlier
     # B# rows that lanes already cite by bare id) rejects here. Tasks created
     # before the binding carry no fields and keep the old lenient behavior.
@@ -10212,4 +10830,265 @@ VALIDATORS = {
     "conclude": v_conclude,
     "scientific_conclude": v_scientific_conclude,
     "close_round": v_close_round,
+    "instrument_review": v_instrument_review,
 }
+
+
+# ---------------------------------------------------------------------------
+# The inheritance tax: what a concluded node may spend settling its own mechanism.
+# ---------------------------------------------------------------------------
+def ablation_allowance(ctx: Ctx, parent_id: str) -> dict:
+    """{multiple, parent_charged, parent_runs, one_run, declared_caps, spent, allowed} per unit.
+
+    allowed = max(budget_multiple x what the parent itself was charged, the
+    parent's own per-run charge, the parent's own declared caps per run - its
+    NODE_SPEC stage caps plus eval cap). Whenever the multiple is > 0 one
+    retrain at the parent's own caps is inside the allowance at both gates
+    (the idea gate prices runs at the per-run charge, the workflow gate prices
+    the spec's caps), because an ablation with fewer runs does not exist.
+    spent = what earlier ablations on this parent already used."""
+    import eresource
+    idx = egraph.by_id(ctx.g)
+    parent = idx.get(str(parent_id)) or {}
+    multiple = econfig.ablation_budget_multiple(ctx.cfg)
+    charged = eresource.node_charged_usage(ctx.st, str(parent_id))
+    spec = eutil.read_json(eutil.rpath(ctx.store.repo, str(parent.get("spec") or "")), {}) \
+        if parent.get("spec") and getattr(ctx.store, "repo", None) is not None else {}
+    runs = max(1, econfig.workflow_replica_count(spec) if isinstance(spec, dict) and spec else 1)
+    one_run = {u: v / runs for u, v in charged.items()}
+    declared: dict[str, float] = {}
+    if isinstance(spec, dict) and spec:
+        for u, v in econfig.stage_budget_totals(spec).items():
+            declared[u] = declared.get(u, 0.0) + float(v) / runs
+        for u, v in econfig.eval_budget(spec).items():
+            declared[u] = declared.get(u, 0.0) + float(v)
+    spent: dict[str, float] = {}
+    for n in ctx.g.get("nodes", []):
+        if n.get("experiment_purpose") == "targeted_ablation" \
+                and str((n.get("parents") or [""])[0]) == str(parent_id):
+            for u, v in eresource.node_charged_usage(ctx.st, str(n.get("id") or "")).items():
+                spent[u] = spent.get(u, 0.0) + v
+    allowed = {u: (max(multiple * charged.get(u, 0.0), one_run.get(u, 0.0), declared.get(u, 0.0))
+                   if multiple > 0 else 0.0)
+               for u in sorted(set(charged) | set(declared))}
+    return {"multiple": multiple, "parent_charged": charged, "parent_runs": runs,
+            "one_run": one_run, "declared_caps": declared, "spent": spent, "allowed": allowed}
+
+
+def ablation_design_estimate(allowance: dict, costly_runs: int) -> dict[str, float]:
+    """Design-time cost estimate: costly_runs x the parent's per-run charge."""
+    return {u: v * max(1, int(costly_runs or 1)) for u, v in (allowance.get("one_run") or {}).items()}
+
+
+def ablation_planned_cost(spec: dict) -> dict[str, float]:
+    """Plan-time cost: every declared stage cap x replica runs, plus the eval cap."""
+    out = dict(econfig.stage_budget_totals(spec or {}))
+    for u, v in econfig.eval_budget(spec or {}).items():
+        out[u] = out.get(u, 0.0) + float(v)
+    return out
+
+
+def ablation_within_allowance(allowance: dict, planned: dict[str, float]) -> tuple[bool, list[str]]:
+    """(inside the pre-authorized budget?, one line per planned unit).
+
+    Every planned unit gets a line. A unit the parent neither charged nor
+    declared has nothing to be compared with, so it is never inside: the line
+    says so and the user decides."""
+    lines: list[str] = []
+    if allowance.get("multiple", 0.0) <= 0:
+        return False, ["no ablation spend is authorized (evidence_policy.ablation.budget_multiple = 0)"]
+    allowed = allowance.get("allowed") or {}
+    spent = allowance.get("spent") or {}
+    charged = allowance.get("parent_charged") or {}
+    declared = allowance.get("declared_caps") or {}
+    one_run = allowance.get("one_run") or {}
+    multiple = float(allowance.get("multiple") or 0.0)
+    if not planned:
+        return False, ["the design declares no spend cap (stage budget.limits / eval budget), so there is "
+                       "nothing to compare with the allowance - your decision"]
+    inside = True
+    for u in sorted(planned):
+        if u not in allowed:
+            inside = False
+            lines.append(f"{u}: planned {float(planned[u]):g} - the parent charged none of this unit, "
+                         "cannot be compared; your decision")
+            continue
+        total = float(planned[u]) + float(spent.get(u, 0.0))
+        ok = total <= float(allowed[u]) + 1e-9
+        inside = inside and ok
+        basis = f"{multiple:g} x the parent's {float(charged.get(u, 0.0)):g}"
+        if float(allowed[u]) > multiple * float(charged.get(u, 0.0)) + 1e-9:
+            basis += (f", lifted to one retrain at the parent's own caps {float(declared.get(u, 0.0)):g}"
+                      if float(declared.get(u, 0.0)) >= float(one_run.get(u, 0.0))
+                      else f", lifted to one run of the parent {float(one_run.get(u, 0.0)):g}")
+        lines.append(f"{u}: planned {float(planned[u]):g}"
+                     + (f" + already spent {float(spent[u]):g}" if spent.get(u) else "")
+                     + f" vs allowed {float(allowed[u]):g} ({basis}) - {'inside' if ok else 'ABOVE'}")
+    return inside, lines
+
+
+def ablation_design_within_allowance(ctx: Ctx, lane: dict) -> tuple[bool, list[str]]:
+    """Idea-gate view: the registered costly_runs against the parent's allowance."""
+    parents = [str(p) for p in (lane.get("parents") or [])]
+    if not parents or not lane.get("idea"):
+        return False, ["no parent or idea registered"]
+    meta = eutil.read_json(eutil.rpath(ctx.store.repo, f".evo/ideas/{lane['idea']}.meta.json"), {}) or {}
+    runs = int(((meta.get("ablation") or {}).get("costly_runs")) or 1)
+    allowance = ablation_allowance(ctx, parents[0])
+    return ablation_within_allowance(allowance, ablation_design_estimate(allowance, runs))
+
+
+def ablation_spec_within_allowance(ctx: Ctx, node: dict, spec: dict) -> tuple[bool, list[str]]:
+    """Workflow-gate view: the frozen spec's caps against the parent's allowance."""
+    parents = [str(p) for p in (node.get("parents") or [])]
+    if not parents:
+        return False, ["no parent registered"]
+    return ablation_within_allowance(ablation_allowance(ctx, parents[0]), ablation_planned_cost(spec))
+
+
+def ablation_run_arithmetic(ctx: Ctx, parent: dict, cells: list[str] | None = None) -> list[str]:
+    """Advisory sizing lines for a design card: on each cell the parent won,
+    the recorded noise floor, the parent's win, their ratio and the run count
+    that resolves it. Says nothing where the project recorded no floor."""
+    summary = parent.get("evaluation_summary") or {}
+    wins = [str(c) for c in (cells or summary.get("target_wins") or [])]
+    out: list[str] = []
+    for cid in wins:
+        floor = _settlement_floor(ctx, parent, cid)
+        row = (summary.get("cells") or {}).get(cid) or {}
+        delta = row.get("delta")
+        if not isinstance(delta, (int, float)) or isinstance(delta, bool) or floor <= 0:
+            continue
+        ratio = abs(float(delta)) / float(floor)
+        if ratio >= 2.0:
+            runs_text = "one changed-component run settles it"
+        else:
+            need = max(2, math.ceil((2.0 / max(ratio, 1e-9)) ** 2))
+            runs_text = (f"about {need} paired runs to separate it from run-to-run spread "
+                         "(claim it coarser or accept 'unclear' if that is more than the allowance)")
+        out.append(f"{cid}: floor {floor:g} ({econfig.noise_floor_source(ctx.cfg, cid, ctx.st)}), "
+                   f"the parent's win {float(delta):+g}, ratio {ratio:.1f} -> {runs_text}")
+    return out
+
+
+# ---------------------------------------------------------------------------
+# Post-hoc claims: a new bet on a concluded node, with the data in hand.
+# ---------------------------------------------------------------------------
+POSTHOC_DIRECTIONS = ("increase", "decrease")
+
+
+def posthoc_claim_errors(ctx: Ctx, node: dict, data: Any) -> list[str]:
+    """Is this proposal a legal new claim on this node? It never touches the
+    original bet; it must differ from it; it is priced on the project's
+    target cells with numeric lines; and the reason has to stand on its own."""
+    errs: list[str] = []
+    if not isinstance(data, dict):
+        return ["CLAIM_SHAPE: the proposal must be a JSON object"]
+    if node.get("status") != "concluded" or node.get("role") in ("baseline", "platform") \
+            or str(node.get("experiment_purpose") or "candidate") != "candidate":
+        errs.append("CLAIM_NODE: only a concluded candidate node can carry a post-hoc claim")
+    if str(data.get("node") or "") != str(node.get("id") or ""):
+        errs.append(f"CLAIM_NODE_BINDING: proposal.node must be {node.get('id')}")
+    _nontrivial(data.get("reason"), 80,
+                "reason (why THIS line is the right price now - what is known that the original bet did not "
+                "know; the original stays on record regardless)", errs)
+    meta = _idea_meta(ctx, node)
+    original_scope = meta.get("claim_scope") if isinstance(meta.get("claim_scope"), dict) else {}
+    scope = data.get("claim_scope")
+    if not isinstance(scope, dict):
+        errs.append("CLAIM_SCOPE: claim_scope {kind, target_cells, guardrail_cells} required")
+        scope = {}
+    kind = str(scope.get("kind") or "")
+    global_targets = [str(c.get("id")) for c in econfig.target_cells(ctx.cfg)]
+    # `required` is read from the ruler this node was measured against.
+    cells_by_id = settlement_cell_spec(ctx, node)
+    targets = scope.get("target_cells")
+    if kind not in ("generalist", "specialist"):
+        errs.append("CLAIM_KIND: claim_scope.kind must be generalist or specialist")
+    if not isinstance(targets, list) or not targets or len(set(targets)) != len(targets) \
+            or any(str(t) not in global_targets for t in targets):
+        errs.append(f"CLAIM_TARGETS: claim_scope.target_cells must be a unique non-empty subset of {global_targets}")
+        targets = []
+    targets = [str(t) for t in targets]
+    if kind == "generalist" and targets and set(targets) != set(global_targets):
+        errs.append("CLAIM_GENERALIST: a generalist claim names every target cell; a subset is a specialist claim")
+    if kind == "specialist" and targets and set(targets) == set(global_targets):
+        errs.append("CLAIM_SPECIALIST: a specialist claim is a strict subset; every cell is a generalist claim")
+    required = {cid for cid in global_targets if (cells_by_id.get(cid) or {}).get("required")}
+    omitted = sorted(required - set(targets)) if targets else []
+    if omitted:
+        errs.append(f"CLAIM_REQUIRED_TARGETS: required cells {omitted} cannot be scoped away (they need only "
+                    "remain non-inferior)")
+    guards = scope.get("guardrail_cells", [])
+    guard_ok = [str(c.get("id")) for c in econfig.guardrail_cells(ctx.cfg)]
+    if not isinstance(guards, list) or any(str(g) not in guard_ok for g in guards):
+        errs.append(f"CLAIM_GUARDRAILS: claim_scope.guardrail_cells must be a subset of {guard_ok}")
+    lines = data.get("lines")
+    if not isinstance(lines, list) or not lines:
+        errs.append("CLAIM_LINES: lines [{target_cell, direction, minimum_worthwhile_delta}] required, one per "
+                    "claimed target cell")
+        lines = []
+    seen: set[str] = set()
+    for i, row in enumerate(lines):
+        if not isinstance(row, dict):
+            errs.append(f"CLAIM_LINE: lines[{i}] must be an object")
+            continue
+        cid = str(row.get("target_cell") or "")
+        if cid not in targets:
+            errs.append(f"CLAIM_LINE_CELL: lines[{i}].target_cell must be one of the claimed cells {targets}")
+        seen.add(cid)
+        if str(row.get("direction") or "") not in POSTHOC_DIRECTIONS:
+            errs.append(f"CLAIM_LINE_DIRECTION: lines[{i}].direction must be increase or decrease")
+        delta = row.get("minimum_worthwhile_delta")
+        if isinstance(delta, bool) or not isinstance(delta, (int, float)) or not math.isfinite(float(delta)) \
+                or float(delta) < 0:
+            errs.append(f"CLAIM_LINE_DELTA: lines[{i}].minimum_worthwhile_delta must be a finite number >= 0")
+    missing = sorted(set(targets) - seen)
+    if missing:
+        errs.append(f"CLAIM_LINES_COVERAGE: no line for claimed cells {missing}")
+    comparator = str(data.get("comparator_id") or (meta.get("effect_case") or {}).get("comparator_id") or "")
+    if comparator and comparator != "baseline" and egraph.by_id(ctx.g).get(comparator) is None:
+        errs.append(f"CLAIM_COMPARATOR: comparator {comparator} does not exist")
+    # A copy of the original bet is not a new claim.
+    original_lines = {str(r.get("target_cell")): (str(r.get("direction")), r.get("minimum_worthwhile_delta"))
+                      for r in ((meta.get("effect_case") or {}).get("chain") or []) if isinstance(r, dict)}
+    new_lines = {str(r.get("target_cell")): (str(r.get("direction")), r.get("minimum_worthwhile_delta"))
+                 for r in lines if isinstance(r, dict)}
+    if not errs and set(targets) == set(str(t) for t in (original_scope.get("target_cells") or [])) \
+            and new_lines == original_lines:
+        errs.append("CLAIM_NO_CHANGE: the proposal restates the original claim; a post-hoc claim prices "
+                    "something the original did not")
+    return errs
+
+
+def posthoc_claim_meta(ctx: Ctx, node: dict, data: dict) -> dict:
+    """The synthetic contract a post-hoc claim is settled under: the node's
+    frozen meta with the claim scope and effect lines replaced."""
+    meta = json.loads(json.dumps(_idea_meta(ctx, node) or {}))
+    scope = dict(data.get("claim_scope") or {})
+    scope.setdefault("guardrail_cells", [])
+    scope.setdefault("rationale", str(data.get("reason") or ""))
+    meta["claim_scope"] = scope
+    effect = dict(meta.get("effect_case") or {})
+    effect["comparator_id"] = str(data.get("comparator_id") or effect.get("comparator_id") or "baseline")
+    effect["chain"] = [{"target_cell": str(r.get("target_cell")), "direction": str(r.get("direction")),
+                        "minimum_worthwhile_delta": float(r.get("minimum_worthwhile_delta") or 0.0),
+                        "kernel_refs": [], "intermediate": "post-hoc claim", "relation": "post-hoc claim"}
+                       for r in (data.get("lines") or []) if isinstance(r, dict)]
+    meta["effect_case"] = effect
+    return meta
+
+
+def assess_posthoc_claim(ctx: Ctx, node: dict, data: dict) -> dict:
+    """Settle the post-hoc claim from the node's SEALED metrics, its frozen
+    ruler (floors and per-cell constants) and its LIVE mechanism status: a
+    mechanism settled since evaluate (ablation write-back, instrument
+    correction) is what approval would inherit under, so the registered probe
+    formula is never re-run here. The result's mechanism_contract_status and
+    scientific_promotion_status are what approval would install."""
+    metrics_path = str(node.get("eval_metrics_path") or f".evo/nodes/{node.get('id')}/eval/metrics.json")
+    metrics = eutil.read_json(eutil.rpath(ctx.store.repo, metrics_path), {}) or {}
+    live = str(node.get("mechanism_status") or "")
+    mechanism = {"status": live, "source": "node.mechanism_status"} if live else None
+    return computed_assessment(ctx, node, metrics, meta_override=posthoc_claim_meta(ctx, node, data),
+                               mechanism_override=mechanism)

@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
-"""v10 regression checks for the declarative flow tables, the defect-ledger
-fixes (DESIGN_V10 §7) and the capability extensions (§8). Pure unit level:
-no engine drive, no subprocesses."""
+"""Regression checks for the declarative flow tables, the defect-ledger
+rules and the capability extensions. Pure unit level: no engine drive, no
+subprocesses."""
 from __future__ import annotations
 
 import copy
@@ -54,13 +54,13 @@ def flow_tables():
 
 
 def instrumental_route_table():
-    """v10.2: one purpose -> one route, and the table is what the engine reads.
+    """One purpose -> one route, and the table is what the engine reads.
 
-    Three facts used to be spelled out per purpose - the entry status, the only
-    legal rewind stage, and the statuses doctor accepts - which is how the
-    inverse-of-candidate idiom ("purpose != targeted_ablation") survived the
-    arrival of a third purpose.  Assert the table is total, that nothing else
-    re-states it, and that check_tables refuses a route with a hole.
+    Three facts derive from one route per purpose - the entry status, the only
+    legal rewind stage, and the statuses doctor accepts - so no
+    inverse-of-candidate idiom ("purpose != targeted_ablation") can survive
+    the arrival of another purpose.  Assert the table is total, that nothing
+    else re-states it, and that check_tables refuses a route with a hole.
     """
     import copy
     import eapply
@@ -85,7 +85,7 @@ def instrumental_route_table():
     ok(eapply.ApplyMixin._lane_entry_status(
         {"experiment_purpose": "candidate", "search_origin": "repair"}) == "diagnose",
        "a repair candidate must still enter at diagnose")
-    # A purpose-less legacy record reads as a candidate everywhere.
+    # A purpose-less lane record reads as a candidate everywhere.
     ok(econfig.lane_purpose({}) == "candidate"
        and econfig.lane_purpose({"experiment_purpose": None}) == "candidate"
        and econfig.lane_purpose({"experiment_purpose": "maintenance"}) == "maintenance",
@@ -169,9 +169,9 @@ def config_fail_closed():
 
     e = errs_with(lambda c: c["budgets"].pop("evidence_min_recent_ratio", None))
     ok(has(e, "CONFIG_BUDGET_EVIDENCE_MIN_RECENT_RATIO"),
-       "deleting the recency ratio must fail closed (F12)")
+       "deleting the recency ratio must fail closed")
     e = errs_with(lambda c: c["policy"]["scope_floor"].update({"wildcat": 2}))
-    ok(has(e, "CONFIG_SCOPE_FLOOR_WILDCAT_MIN"), "wildcat scope floor must pin to 4 (F13)")
+    ok(has(e, "CONFIG_SCOPE_FLOOR_WILDCAT_MIN"), "wildcat scope floor must pin to 4")
     e = errs_with(lambda c: c["budgets"].update({"predictions_min": 5, "predictions_max": 2}))
     ok(has(e, "CONFIG_BUDGET_PREDICTIONS"), "prediction range must cross-validate")
     e = errs_with(lambda c: c["budgets"].update({"theory_cycles_min_full": 9}))
@@ -183,7 +183,7 @@ def config_fail_closed():
     ok(has(e, "CONFIG_METRIC_0_SHAPE"), "a scalar metric entry must be a deficiency, not a crash")
     e = errs_with(lambda c: (c["policy"].update({"preset": "custom", "max_exploit_share": 7})))
     ok(has(e, "CONFIG_TEMPO_MAX_EXPLOIT_SHARE"), "custom preset must validate tempo keys")
-    # E1: extension axes validation
+    # Extension axes validation
     e = errs_with(lambda c: c["resource_contract"].update(
         {"extension_axes": [{"key": "train_tokens", "unit": "gb", "accounting": "runtime_profiler"}]}))
     ok(has(e, "CONFIG_RESOURCE_EXTENSION_0_DUP"), "core-axis collision must be rejected (E1)")
@@ -197,7 +197,7 @@ def config_fail_closed():
        "resource_axes must append configured extensions")
     ok(econfig.resource_axes(cfg) == list(eprogram.RESOURCE_AXES),
        "with no extensions the axis list is exactly the core nine")
-    # E2: human-study cells
+    # Human-study cells
     e = errs_with(lambda c: c["evaluation_contract"]["cells"].append(
         {"id": "C99", "dataset": "D1", "task": "T1", "metric": "auc", "result_key": "auc",
          "role": "guardrail", "source_kind": "human_study", "study_protocol": "x" * 90,
@@ -342,7 +342,7 @@ def main():
     seed_rules()
     gate_kind_registry()
     preset_invariant()
-    print(f"V10 FLOW/FIX/EXTENSION UNIT GREEN: {CHECKS} checks passed")
+    print(f"FLOW / EXTENSION UNIT GREEN: {CHECKS} checks passed")
 
 
 if __name__ == "__main__":

@@ -25,6 +25,8 @@ project-defined canary will exercise the real integrated path.
 {
   "workspace":     {"src": ["..."], "OPTIONAL free-form notes": "agent_runs_on / code_lives_at"},
   "compute":       {"kind": "e.g. ai-hub / slurm / local-gpu", "submit_pattern": "the command shape",
+                    "accelerators": {"count": 8, "kind": "e.g. A100-80GB", "memory_gb": 80, "shared": true,
+                                     "note": "OPTIONAL: what the machine has; whether others share it"},
                     "status_cmd": "...", "logs_cmd": "...", "max_concurrent_stage_jobs": 1,
                     "src": ["..."]},
   "data":          {"kind": "e.g. odps / s3 / local",

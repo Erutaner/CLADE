@@ -27,11 +27,12 @@ not pretend that a config skeleton is already the truth.
      can afford them). Domain name alone is not enough. Record randomness
      sources, claim relevance and repeat cost. `record_only` still records the
      one seed used; it creates no repeats.
-   - **Ablation**: recommend `targeted` only if this project could plausibly
-     face a causal fork where one changed-component run would change the next
-     DAG decision and cheap logs/eval interventions may be insufficient.
-     Otherwise recommend `off`. This is permission for later manual proposals,
-     never an automatic duty.
+   - **Ablation**: recommend `targeted` when this project could plausibly
+     face a causal fork where a few changed-component runs would change the
+     next DAG decision and cheap logs/eval interventions may be insufficient -
+     the usual case for a modular model whose gains will be inherited.
+     Otherwise recommend `off`. This is permission for later manual proposals
+     (the inheritance tax on a deferred mechanism), never an automatic duty.
 4. Write `.evo/profile/PROJECT_DISCOVERY.json`:
 ```json
 {
@@ -44,10 +45,12 @@ not pretend that a config skeleton is already the truth.
     "claim_and_cost_reasoning": ">=40 chars: process + claim + field norm + cost"
   },
   "ablation_assessment": {
-    "recommended_mode": "off|targeted",
-    "reasoning": ">=40 chars: likely decision value versus training cost"
+    "recommended_budget_multiple": 2.0,
+    "reasoning": ">=40 chars: how much of a winning node's own cost settling its mechanism is worth here (0 = never ablate)"
   },
   "unknowns": [{"id": "U1", "question": "...", "why_it_matters": "...", "provisional_default": "..."}],
+  "resource_kinds": [{"unit": "gpu_hours", "evidence": ">=20 chars: where the code spends it, e.g. train.py trains on accelerators (torch.cuda, DDP launcher)"},
+                     {"unit": "api_tokens", "evidence": ">=20 chars: e.g. scorer.py calls an LLM API - the user may or may not intend to pay this"}],
   "resource_contract_draft": {"limits": {"gpu_hours": 100}, "basis": "user stated ..."},
   "engine_fit": {
     "assumptions": [

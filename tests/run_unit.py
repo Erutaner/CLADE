@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Focused unit checks for the v9.2 independent RUN state machine."""
+"""Focused unit checks for the independent RUN state machine."""
 from __future__ import annotations
 
 import os
@@ -168,7 +168,7 @@ def main() -> None:
     independent_axis_checks()
     recovery_checks()
     invariant_checks()
-    print(f"V9.2 RUN UNIT GREEN: {CHECKS} checks passed")
+    print(f"RUN UNIT GREEN: {CHECKS} checks passed")
 
 
 if __name__ == "__main__":

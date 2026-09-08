@@ -1,4 +1,4 @@
-"""Task materialization (v10): cards, bundles, per-status lane/node task
+"""Task materialization: cards, bundles, per-status lane/node task
 builders and the prose block builders they share. All agent-facing task
 construction lives here; scheduling order lives in esched; policy in eflow.
 """
@@ -26,6 +26,23 @@ stages_of = econfig.stages_of
 
 
 
+
+ABLATION_POLICY_PREFIX = "ABLATION POLICY: budget multiple "
+
+
+def ablation_policy_note(cfg: dict) -> str:
+    """The card line that states the ablation allowance. It is a config fact
+    (amendable), so the same function rebuilds it when the fact changes."""
+    multiple = econfig.ablation_budget_multiple(cfg)
+    return f"{ABLATION_POLICY_PREFIX}{multiple:g}. " + (
+        "After a program-level win whose mechanism was never instrumented the engine opens the "
+        "targeted ablation itself (one for every such win); a design inside the allowance (the multiple x "
+        "what the parent cost) auto-resolves under the normal autonomy policy, a larger one waits "
+        "for the user. An unsettled mechanism is never a planning premise."
+        if multiple > 0 else
+        "no ablation spend: mechanisms stay deferred; build on programs, never on their stories.")
+
+
 class TaskMixin:
     def _create_task(self, type_: str, subject: dict, outputs: list[str], *,
                      extra_fields: dict[str, str] | None = None,
@@ -35,14 +52,14 @@ class TaskMixin:
                      lesson_tags: list[str] | None = None,
                      observation_ids: list[str] | None = None,
                      artifact_receipts: dict | None = None) -> dict:
-        # R8 audit: the SAME duty may already exist as a task parked by a hold
+        # The SAME duty may already exist as a task parked by a hold
         # release (queued_after_hold) that the reopen pump has not reached yet
         # (an open stage_watch keeps the pump off while the scheduler walks
         # right past it into this creation path). Minting a fresh identity
         # reset attempts/last_errors - unbounding the bounded retry and losing
         # the validator's recorded corrections. Reopen the parked task
         # instead, with its history, and rebuild its card from current truth.
-        # R10-009: a task for the SAME duty that is still paused UNDER an
+        # A task for the SAME duty that is still paused UNDER an
         # active hold is that duty's frozen identity - minting a fresh twin
         # gave the duty a new task id outside every hold's frozen consumer
         # set, so the twin could be submitted right through the recovery
@@ -91,10 +108,10 @@ class TaskMixin:
         bundle_rel = ebundle.build_bundle(self.store, self.st, self.cfg, self.g, task,
                                           inputs=inputs or [], extra_blocks=extra_blocks,
                                           lesson_parents=lesson_parents, lesson_tags=lesson_tags)
-        # R11-010/015 (+G-4): the receipt is DECLARED by the rendering call
+        # The receipt is DECLARED by the rendering call
         # site - the same code that produced the block lines - never inferred
-        # from block titles.  The old title-prefix trigger recorded a global
-        # tail-12 that ignored pinned rows and missed every differently-headed
+        # from block titles.  A title-prefix trigger would record a global
+        # tail-12 that ignores pinned rows and misses every differently-headed
         # observation surface, so the machine record contradicted the card.
         cc = task.setdefault("consumed_context", {})
         if observation_ids is not None:
@@ -128,7 +145,7 @@ class TaskMixin:
         }
 
     def _prefill_output(self, rel: str, payload: dict) -> None:
-        """Engine-authored head start for an agent output file (v10.1).
+        """Engine-authored head start for an agent output file.
 
         Fields the validator asserts byte-equal to engine-held sources (winner
         program copies, digests, computed verdicts, prepared RUN identity) are
@@ -176,6 +193,7 @@ class TaskMixin:
                                        "frontier and the measured-but-unsettled remainder"),
             (".evo/views/GRAPH.md", "every node with lineage, verdict, scores and settlement - "
                                     "including the ones no frontier lists"),
+            (".evo/views/FIELD_MAP.md", "per-cell facts: our best, published cap, gap, who claimed the cell and what happened"),
             # A repair lane is rejected unless its bottleneck_ids are real
             # dossier B# ids, so the vocabulary has to be in the bundle.
             (".evo/profile/PROBLEM_DOSSIER.md", "the frozen B# bottleneck vocabulary a repair "
@@ -183,14 +201,16 @@ class TaskMixin:
         if (self.store.profile_dir() / "DOSSIER_ADDENDUM.md").exists():
             inputs.append((".evo/profile/DOSSIER_ADDENDUM.md",
                            "later B# bottlenecks appended by closed rounds"))
+        if (self.store.profile_dir() / "FIELD_NOTES.md").exists():
+            inputs.append((".evo/profile/FIELD_NOTES.md", "the agent's own per-cell judgment (live levers, dead forms, untried)"))
         tombstones = ebundle.tombstones_block(self.store)
-        # R7 multi-round audit: a positive node's pre-registered scaling
+        # A positive node's pre-registered scaling
         # follow-up is a DOOR the strategist must be able to see rounds later
         # - succession moves the parent off the visible frontier, and nothing
         # else in the designated context carried the registration. Without
         # this inventory the door was undiscoverable by a fresh session.
         doors: list[str] = []
-        # R8 audit: "spent" must mean a LIVE follow-up, exactly as
+        # "spent" must mean a LIVE follow-up, exactly as
         # v_open_round judges it - an abandoned follow-up lane/node does not
         # consume the registration there, so hiding the door here made this
         # inventory (the door's only cold-session carrier) contradict the
@@ -218,7 +238,7 @@ class TaskMixin:
             doors.append(f"- {nid} scaling follow-up AVAILABLE (registered points: "
                          f"{plan.get('points')}; open with `scaling_followup_of: \"{nid}\"`, "
                          "intent exploit, that node as single parent)")
-        # R9 (external audit r6): a targeted ablation's engine-enforced exact
+        # A targeted ablation's engine-enforced exact
         # next-DAG decision landed only on the node/dashboard - the strategist
         # (a fresh session whose bundle IS its memory) never received the very
         # action a costly causal run settled. Project unconsumed settlements as
@@ -243,9 +263,21 @@ class TaskMixin:
             doors.append(f"- {node.get('id')} TARGETED-ABLATION SETTLEMENT on parent {parent}: "
                          f"effect={result.get('effect')} (supports {result.get('supports')}); the "
                          f"pre-registered exact next action is: {str(result.get('decision'))[:240]}")
-        # R11 matrix sweep (M5): the user's round_continue APPROVE note is a
-        # directional instruction for exactly this round - it used to land
-        # only in the gate row and the event stream, with no consumer.
+        for node in self.g.get("nodes", []):
+            pending = node.get("ablation_pending") if isinstance(node.get("ablation_pending"), dict) else None
+            if not pending or node.get("mechanism_status") != "deferred" \
+                    or egraph.open_ablation_lane(node, self.st):
+                continue
+            doors.append(f"- {node.get('id')} PENDING ABLATION (inheritance tax not yet paid): the engine "
+                         f"could not open it ({str(pending.get('reason') or '')[:160]}; attempts so far: "
+                         f"{int(pending.get('attempts') or 1)}). The engine tries again when this round goes "
+                         f"running (holds permitting); to be sure, declare a targeted_ablation lane on "
+                         f"{node.get('id')} in this portfolio (it binds to this parent), or open it mid-round "
+                         f"with evo ablate --parent {node.get('id')} --question \"...\"; "
+                         "until it settles, its mechanism is not a planning premise.")
+        # The user's round_continue APPROVE note is a
+        # directional instruction for exactly this round; this card is its
+        # consumer.
         continue_note = self._last_gate_note("round_continue", statuses=("approved",))
         note_block = ([("User direction from the round-continue decision",
                         [f"- {continue_note}"])] if str(continue_note or "").strip() else [])
@@ -308,8 +340,7 @@ class TaskMixin:
                         f"candidate aggregated by {replication.get('aggregation')}"
                         if replication.get("mode") == "preplanned"
                         else ", one recorded seed per train/finetune node; do not create repeats"))
-        notes.append(f"ABLATION POLICY: {ablation.get('mode')}; targeted ablation is never automatic, "
-                     "requires one decision-changing causal question and one manually approved changed-component run.")
+        notes.append(ablation_policy_note(self.cfg))
         fds = econfig.focus_directions(self.cfg)
         if fds:
             fd_lines = "; ".join(f"{f['id']}: {str(f.get('text') or '')[:80]}" for f in fds)
@@ -319,7 +350,7 @@ class TaskMixin:
             closed = [r for r in self.st.get("rounds", []) if r.get("closed_at")]
             if negl and len(closed) >= negl:
                 recent_lane_ids = {lid for r in closed[-negl:] for lid in (r.get("lanes") or [])}
-                # R7 audit: mirror the validator - scout/instrumental lanes
+                # Mirror the validator - scout/instrumental lanes
                 # discharge no starved direction, so they must not silence
                 # the FOCUS STARVATION card line either.
                 served = {l.get("focus") for l in self.st.get("lanes", [])
@@ -345,8 +376,32 @@ class TaskMixin:
             f"- stagnant now: {evalid._stagnant_window(self.ctx(), int(pol.get('stagnation_rounds', 2)))}",
             f"- workflow stage slots: {self._slots()}",
             f"- training-seed policy: {econfig.training_replication_policy(self.cfg).get('mode')}",
-            f"- targeted-ablation policy: {econfig.ablation_mode(self.cfg)} (manual approval always)",
+            f"- targeted-ablation allowance: {econfig.ablation_budget_multiple(self.cfg):g} x the parent's own cost",
         ]
+
+    def _noise_floor_advice(self) -> list[str]:
+        """What the project knows about run-to-run noise on each target cell,
+        and what that means for a mechanism claim. Advisory: where no floor is
+        recorded the engine sizes nothing and says so."""
+        lines: list[str] = []
+        for cell in econfig.target_cells(self.cfg):
+            cid = str(cell.get("id") or "")
+            width = econfig.noise_floor(self.cfg, cid, self.st)
+            if width <= 0:
+                continue
+            source = econfig.noise_floor_source(self.cfg, cid, self.st)
+            band = econfig.decision_floor(self.cfg, cid, self.st)
+            bar = (f" A win on this cell must clear {band:g} ({econfig.noise_floor_multiple(self.cfg):g} x the "
+                   "floor, the user's bar)." if band != width else "")
+            lines.append(f"- {cid}: floor {width:g} ({source}).{bar} One or two runs separate an effect of about "
+                         f"{2 * width:g} or more from run-to-run spread; a mechanism claim finer than that on "
+                         "this cell is expensive to settle - claim it coarser, or leave the mechanism to the "
+                         "ablation the engine opens after a win.")
+        if not lines:
+            lines.append("- no noise floor is recorded for any target cell, so the engine sizes nothing here; "
+                         "state your own basis where a claim depends on it (a reported interval, a "
+                         "deterministic pipeline, an effect far above any plausible spread).")
+        return lines
 
     def _round_summary_block(self, rid: str) -> list[str]:
         out = []
@@ -368,11 +423,11 @@ class TaskMixin:
 
     def _round_needs_evidence_refresh(self, rid: str) -> bool:
         """Refresh only when the field pool or a repair target is under-covered."""
-        # R9: count only ACCEPTED evidence - a cancelled task's leftover rows
+        # Count only ACCEPTED evidence - a cancelled task's leftover rows
         # must not make the pool look covered and suppress the refresh.
         rows = evalid.accepted_ledger_rows(self.st, "evidence", self.store.evidence())
         bud = self.cfg.get("budgets", {})
-        # R5 blind-operator audit: an instrumental-only round (e.g. a single
+        # An instrumental-only round (e.g. a single
         # targeted ablation) is a diagnostic, not idea search - the cards say
         # it "does not enter the candidate novelty pipeline", so the
         # literature pool floors must not block it.
@@ -385,7 +440,7 @@ class TaskMixin:
         # A project may deliberately request a fixed per-round refresh.  The
         # frontier preset leaves this at zero and therefore uses the
         # coverage-driven policy below; a positive value is an explicit
-        # contract, not a legacy fallback.
+        # contract, not a fallback.
         if int(bud.get("evidence_min_new_per_round", 0)) > 0:
             return True
         if len(rows) < int(bud.get("evidence_min_total", 0)):
@@ -554,7 +609,7 @@ class TaskMixin:
         if lane.get("intent") == "platform":
             return []
         if lane.get("experiment_purpose") in econfig.EXPLORATORY_PURPOSES:
-            # (final audit C29) a scout owes none of the frontier-expansion
+            #  a scout owes none of the frontier-expansion
             # plausibility below - asserting it in the bundle taught agents an
             # obligation the tier deliberately waives.
             return [("Lane admission policy", [
@@ -707,7 +762,7 @@ class TaskMixin:
             # stable identity instead: pre-program theory, and every
             # instrumental design stage (an instrumental lane never runs a
             # tournament, so _activate_survivor never stamps a digest on it).
-            # This used to name ablation_design literally, which left the
+            # Naming ablation_design literally here would leave the
             # maintenance and probe rewinds - the very path the user gate is
             # supposed to offer - silently unable to carry the user's note.
             digest_matches = bool(digest) and bound == digest
@@ -731,12 +786,12 @@ class TaskMixin:
         "MECH": (".evo/evidence/MECH_CARDS.jsonl", "M", 16),
         "SOTA": (".evo/evidence/SOTA.jsonl", "S", 12),
     }
-    # R9 (external audit r6): slices are a CONSUMER view - they must not hand a
+    # Slices are a CONSUMER view - they must not hand a
     # later lane rows that no ledger validator ever accepted.
     _LEDGER_WATERMARKS = {"EVIDENCE": "evidence", "MECH": "mech", "SOTA": "sota"}
 
     def _ledger_slice_rows(self, lane: dict, wants: list[tuple[str, str]]) -> list[tuple[str, str]]:
-        """v11.1 T4: narrow-purpose stages get an engine-written slice of the
+        """Narrow-purpose stages get an engine-written slice of the
         big append-only ledgers instead of the full pool. Selection: ids this
         lane's own artifacts cite, then focus-keyword matches, then newest
         entries up to the cap. The full pool always stays listed as a REFERENCE
@@ -819,7 +874,7 @@ class TaskMixin:
         return rows
 
     def _repeat_measure_block(self, node: dict) -> list[tuple[str, list[str]]]:
-        """v11.1 P4: duty block on the evaluation card once a repeat is bought.
+        """Duty block on the evaluation card once a repeat is bought.
         Stays on the card after settlement too (a recovery may re-open the
         evaluation, and the validator keeps demanding the 2-run aggregate -
         the card and the door must tell one story); only a user waive
@@ -836,7 +891,7 @@ class TaskMixin:
                 "the base run's value = the CURRENT sealed eval measurement (re-read the eval run's raw "
                 "metrics after any recovery) - the repeat happened; reporting it is not optional."])]
         if rm.get("engine_run") or node.get("repeat_eval_run"):
-            # R9-002: the repeat already ran as first-class engine RUNs; the
+            # The repeat already ran as first-class engine RUNs; the
             # analyst only AGGREGATES the two sealed measurements.
             base_run = self.store.get_run(self.st, str(node.get("eval_run") or "")) or {}
             rep_run = self.store.get_run(self.st, str(node.get("repeat_eval_run") or "")) or {}
@@ -883,12 +938,11 @@ class TaskMixin:
             "silently keeping the single run."])]
 
     def _winner_stage_inputs(self, lane: dict, why: str) -> list[tuple[str, str]]:
-        """v11.1 T3: winner-only stages (pose/theorize/challenge/mature) read the
+        """Winner-only stages (pose/theorize/challenge/mature) read the
         winner's own record (WINNER.json: sketch + its tournament audit) instead
         of re-reading the whole program batch. The batch and tournament stay
         listed as reference paths - never hidden - and validators keep reading
-        the sealed originals. Lanes whose winner predates v11.1 have no
-        WINNER.json and keep the full rows (cold start = old behavior)."""
+        the sealed originals. A lane without a WINNER.json keeps the full rows."""
         wpath = f".evo/rounds/{lane.get('round')}/lanes/{lane.get('id')}/WINNER.json"
         if eutil.rpath(self.store.repo, wpath).exists():
             psd = str(lane.get("program_set_digest") or "")[:12]
@@ -960,30 +1014,51 @@ class TaskMixin:
         return f"{ldir}/THEORY_c{c}.md", f"{ldir}/CHALLENGE_c{c}.md"
 
     def _observations_block(self, pin_node: str | None = None) -> tuple[list[str], list[str]]:
-        """v9: the phenomenon ledger, rendered for bundles. Newest last, capped.
+        """The phenomenon ledger, rendered for bundles. Newest last, capped.
 
-        R7 audit: the 12-row window silently dropped older rows with no
-        disclosure - late strategy went recency-blind, and a confirmatory
-        lane could not see the very OB rows of the scout it re-runs. The
-        window now discloses its cut, and ``pin_node`` always includes that
-        node's own active rows (the confirmatory source scout)."""
+        The window discloses its cut (a silent drop would make late strategy
+        recency-blind), and ``pin_node`` always includes that node's own
+        active rows, so a confirmatory lane sees the very OB rows of the scout
+        it re-runs."""
         rows = self.store.observations(self.st, active_only=True)
         if not rows:
             return (["- (empty - no run phenomena mined yet; the first evaluations will feed it)"], [])
-        shown = rows[-12:]
+        # Two supply lines share the ledger: anomalies the agent mined from
+        # its own runs, and the engine's readings (a probe's answer, a gain
+        # whose kernel was refuted). Each gets its own window, or the one
+        # reading every concluded node banks would crowd the mined
+        # phenomena - the rarer, richer rows - out of the card.
+        mined = [r for r in rows if str(r.get("source") or "") != "engine"]
+        readings = [r for r in rows if str(r.get("source") or "") == "engine"]
+        shown = mined[-12:]
         if pin_node:
             shown_ids = {str(r.get("id")) for r in shown}
-            pinned = [r for r in rows if str(r.get("node") or "") == str(pin_node)
+            pinned = [r for r in mined if str(r.get("node") or "") == str(pin_node)
                       and str(r.get("id")) not in shown_ids]
             shown = pinned + shown
         out = []
         for r in shown:
             out.append(f"- {r.get('id')}: {r.get('statement')} | where: {r.get('where')} | "
                        f"{r.get('measurement')} (node {r.get('node')})")
-        if len(rows) > len(shown):
-            out.append(f"- (+{len(rows) - len(shown)} older active observations omitted; full ledger "
+        if not shown:
+            out.append("- (no agent-mined phenomena yet)")
+        if len(mined) > len(shown):
+            out.append(f"- (+{len(mined) - len(shown)} older active observations omitted; full ledger "
                        "at `.evo/evidence/OBSERVATIONS.jsonl`)")
-        return out, [str(r.get("id")) for r in shown if str(r.get("id") or "")]
+        shown_readings = readings[-8:]
+        if pin_node:
+            shown_ids = {str(r.get("id")) for r in shown_readings}
+            shown_readings = [r for r in readings if str(r.get("node") or "") == str(pin_node)
+                              and str(r.get("id")) not in shown_ids] + shown_readings
+        if shown_readings:
+            out.append("- engine readings (probe answers; gains whose kernel was refuted), newest last:")
+            for r in shown_readings:
+                out.append(f"  - {r.get('id')} [{r.get('kind') or 'reading'}]: {r.get('statement')} "
+                           f"(node {r.get('node')})")
+            if len(readings) > len(shown_readings):
+                out.append(f"  - (+{len(readings) - len(shown_readings)} older readings omitted; the FRONTIER "
+                           "mechanism column and the field map carry every node's)")
+        return out, [str(r.get("id")) for r in shown + shown_readings if str(r.get("id") or "")]
 
     def _usage_block(self) -> list[str]:
         """Warn when independent rounds converge to the same program core."""
@@ -1022,6 +1097,41 @@ class TaskMixin:
                 warn.append(f"- OVERUSED prior-art card {mid}: used in {c} audits; widen the neighbor set")
         return warn or ["- (no overuse detected)"]
 
+    def _ablation_budget_lines(self, parent: str, parent_node: dict) -> list[str]:
+        """The engine's own allowance and sizing arithmetic for one targeted
+        ablation on `parent`, printed to the designer AND the reviewer so the
+        cost audit checks the design against the engine's numbers, never
+        against the design's self-report."""
+        allowance = evalid.ablation_allowance(self.ctx(), parent) if parent_node else {}
+        lines = [
+            f"- allowance: {allowance.get('multiple', 0):g} x what {parent} cost = "
+            + (", ".join(f"{u} <= {v:g}" for u, v in sorted((allowance.get('allowed') or {}).items()))
+               or "nothing charged to the parent yet")
+            + "; one retrain is always inside it",
+            "- the parent's own cost per run: "
+            + (", ".join(f"{u} {v:g}" for u, v in sorted((allowance.get('one_run') or {}).items()))
+               or "unknown"),
+            "- a design inside the allowance auto-resolves under the normal autonomy policy; a larger "
+            "one waits for the user at the gate (it is not refused here)",
+        ]
+        probe = parent_node.get("probe_result") if isinstance(parent_node.get("probe_result"), dict) else None
+        if probe:
+            word = {"confirmed": "uses the part", "refuted": "does NOT use the part",
+                    "unclear": "gives no clear reading"}.get(str(probe.get("status") or ""), str(probe.get("status")))
+            lines.append(f"- the parent's probe said it {word} (information, not a verdict"
+                         + (f"; observation {probe.get('observation')}" if probe.get("observation") else "")
+                         + "): a lead for which factor to change and what X2 should say, never a reason to skip "
+                           "the run - a probe can be badly designed")
+        arithmetic = evalid.ablation_run_arithmetic(self.ctx(), parent_node) if parent_node else []
+        lines += (["- noise arithmetic on the cells the parent won (advisory):"]
+                  + [f"  - {line}" for line in arithmetic]
+                  if arithmetic else
+                  ["- no noise floor is recorded for the cells the parent won: default to one "
+                   "run and state in runs_basis why one run settles it (a deterministic pipeline, "
+                   "an effect far above any plausible spread, or an interval the evaluation "
+                   "reports itself)"])
+        return lines
+
     def _next_lane_task(self, lane: dict) -> dict | None:
         if erecover.is_held(self.st, self.g, lane=lane.get("id"), round_=lane.get("round")):
             return None
@@ -1045,9 +1155,11 @@ class TaskMixin:
                 (self._node_result_path(parent_node), "the parent interpretation that created the causal fork"),
                 (self._eval_metrics_path(parent_node), "the actual parent measurements; this is the existing reference, never rerun it"),
                 (self._eval_report_path(parent_node), "parent slices/anomalies and comparability evidence"),
-                (".evo/config.json", "evaluation cells and the user-approved one-run ablation policy"),
+                (".evo/config.json", "evaluation cells and the user-approved ablation allowance"),
             ]
-            feedback = (self._instrumental_revision_blocks(lane)
+            budget_lines = self._ablation_budget_lines(parent, parent_node)
+            feedback = ([("Ablation allowance and sizing", budget_lines)]
+                        + self._instrumental_revision_blocks(lane)
                         + self._retry_direction_blocks(lane, "ablation_design"))
             # Only reachable when the review was written under the CURRENT id
             # (a first-pass redraft before any supersession); superseded ids and
@@ -1146,6 +1258,7 @@ class TaskMixin:
         if stg == "ablation_review":
             iid = lane["idea"]
             parent = model_parents[0] if len(model_parents) == 1 else "(invalid parent contract)"
+            parent_node = self.node(parent) or {}
             return self._present_task(self._create_task(
                 "review_ablation", {"round": lane["round"], "lane": lane["id"], "idea": iid},
                 [f".evo/ideas/{iid}.ablation-review.md"],
@@ -1153,10 +1266,13 @@ class TaskMixin:
                 inputs=self._lane_common_inputs(lane) + [
                     (f".evo/ideas/{iid}.md", "the proposed causal diagnostic"),
                     (f".evo/ideas/{iid}.meta.json", "its frozen X1/X2, intervention and decision map"),
-                    (self._node_result_path(self.node(parent) or {"id": parent}), "the parent result claimed as trigger"),
-                    (self._eval_metrics_path(self.node(parent) or {"id": parent}), "the parent measurements; check that the question is real"),
+                    (self._node_result_path(parent_node or {"id": parent}), "the parent result claimed as trigger"),
+                    (self._eval_metrics_path(parent_node or {"id": parent}), "the parent measurements; check that the question is real"),
                     (".evo/config.json", "resource, seed and ablation limits"),
                 ],
+                # The same engine arithmetic the designer saw: the cost audit
+                # checks runs_basis and the spend against these numbers.
+                extra_blocks=[("Ablation allowance and sizing", self._ablation_budget_lines(parent, parent_node))],
                 lesson_parents=model_parents, lesson_tags=["ablation", "causal"] + tags))
         if stg == "diagnose":
             obs_lines, obs_ids = self._observations_block()
@@ -1193,12 +1309,13 @@ class TaskMixin:
                 (".evo/evidence/EVIDENCE.jsonl", "screened paper pool; append only need-driven gaps"),
                 (".evo/evidence/MECH_CARDS.jsonl", "reusable paper core-work facts; continue M### numbering"),
                 (".evo/evidence/COLLISION_AUDITS.jsonl",
-                 "candidate-bound comparison edges; continue CA### numbering and never rewrite old attempts")]
+                 "candidate-bound comparison edges; continue CA### numbering and never rewrite old attempts"),
+                (".evo/views/FIELD_MAP.md", "per-cell facts: our best, published cap, gap, who claimed the cell and what happened")]
             if lane.get("sketches_path") and not any(p == lane["sketches_path"] for p, _ in reading_inputs):
                 reading_inputs.append((lane["sketches_path"],
                                        "the frozen program set; bind every collision edge to its exact digest"))
             if lane.get("sketches_path") and lane.get("program_set_digest"):
-                # R3 operability audit: these are ENGINE canonical-JSON hashes
+                # These are ENGINE canonical-JSON hashes
                 # (sorted keys, tight separators, subset fields) - an agent
                 # cannot recompute them from file bytes, and state.json is off
                 # limits. Print them or the digest duties are unsatisfiable.
@@ -1257,7 +1374,7 @@ class TaskMixin:
                 src = lane.get(field)
                 if not src:
                     continue
-                # v11.1 (R1 fix): a cold agent could not even discover the lane
+                # A cold agent could not even discover the lane
                 # was a carbon-copy lane, let alone find the kernel to copy -
                 # surface the identity AND the parent's frozen kernel sources.
                 sn = egraph.by_id(self.g).get(str(src)) or {}
@@ -1273,7 +1390,7 @@ class TaskMixin:
                                                   if field == "scaling_followup_of" else
                                                   " under FULL pre-registration (all duties apply); "
                                                   "cite its OB### observations"))
-                # (final audit C12) BOTH copy species submit exactly one
+                #  BOTH copy species submit exactly one
                 # program - the card headline must agree with the validator.
                 sketch_count = "1"
             promotion_blocks = self._promotion_blocks(lane)
@@ -1326,7 +1443,8 @@ class TaskMixin:
                 (lane["sketches_path"], "the frozen complete-program set under review"),
                 (".evo/evidence/EVIDENCE.jsonl", "evidence pool for nearest-prior checks"),
                 (".evo/evidence/MECH_CARDS.jsonl", "reusable paper core-work facts"),
-                (".evo/evidence/COLLISION_AUDITS.jsonl", "digest-bound program/paper collision audits")]
+                (".evo/evidence/COLLISION_AUDITS.jsonl", "digest-bound program/paper collision audits"),
+                (".evo/views/FIELD_MAP.md", "per-cell facts: our best, published cap, gap, who claimed the cell and what happened")]
             tournament_inputs += self._effect_comparator_inputs(lane)
             if econfig.sota_enabled(self.cfg) and lane.get("intent") != "platform":
                 tournament_inputs.append(
@@ -1474,7 +1592,8 @@ class TaskMixin:
             ins = self._lane_common_inputs(lane) + self._winner_stage_inputs(
                 lane, "your winning sketch + why it won; its audit binds you") + [
                 *self._ledger_slice_rows(lane, [("MECH", "mechanism cards to cite as [M###]")]),
-                (".evo/config.json", "metric spec for predictions")]
+                (".evo/config.json", "metric spec for predictions"),
+                (".evo/views/FIELD_MAP.md", "per-cell facts: our best, published cap, gap, who claimed the cell and what happened")]
             theory_doc = ""
             if self._needs_theory(lane):
                 theory_doc = str(lane.get("theory_path") or "")
@@ -1498,12 +1617,12 @@ class TaskMixin:
             winner = self.ctx().winner_sketch(lane) or {}
             research_kernel = str((winner.get("novelty") or {}).get("kind") or "") in eprogram.RESEARCH_NOVELTY
             if winner:
-                # Engine-authored exact copies (v10.1): the mature contract may
+                # Engine-authored exact copies: the mature contract may
                 # expand but not redesign the winner, so every field validated
                 # by byte-equality against the winner/lane state is pre-filled.
                 prefill: dict = {
                     "sketch_id": lane.get("winner_sketch"),
-                    # v11.1 P5 (R1 fix): was hard-coded "candidate", which
+                    # Was hard-coded "candidate", which
                     # guaranteed the purpose-binding rejection for exploratory.
                     "experiment_purpose": str(lane.get("experiment_purpose") or "candidate"),
                     "change_scope": winner.get("change_scope"),
@@ -1527,9 +1646,8 @@ class TaskMixin:
                 prefill["level"] = eprogram.compute_level(prefill)
                 self._prefill_output(f".evo/ideas/{iid}.meta.json", prefill)
             if lane.get("experiment_purpose") in econfig.EXPLORATORY_PURPOSES:
-                # v11.1 P5 (R1 fix): the duty text used to be purpose-blind, so
-                # an exploratory lane was affirmatively TOLD to invent SOTA
-                # targets its validators would then ignore.
+                # The duty text is purpose-aware: an exploratory lane must not
+                # be TOLD to invent SOTA targets its validators would then ignore.
                 sota_duty = ("EXPLORATORY LANE: no sota_targets, no registered predictions - your results "
                              "are observations only (no frontier, no records, promotion not_applicable). "
                              "Spend the foresight budget on honest mechanism description instead; the "
@@ -1554,6 +1672,8 @@ class TaskMixin:
                 inputs=ins,
                 extra_blocks=([("Sibling nodes (differentiate from these)",
                                 ebundle.sibling_summary(self.g, model_parents, econfig.primary_metric(self.cfg)) or ["- none"]),
+                               ("Noise floors on the target cells (advisory: what a rule can resolve)",
+                                self._noise_floor_advice()),
                                ("Shared artifacts available for reuse",
                                 eartifact.artifacts_block(self.reg)),
                                ("Phenomenon ledger (OB### - legal assumption sources)",
@@ -1578,7 +1698,8 @@ class TaskMixin:
                 (f".evo/ideas/{iid}.meta.json", "its frozen program, kernel, typed effect/resource case, predictions and assumptions"),
                 (".evo/evidence/EVIDENCE.jsonl", "evidence pool for prior-art attack"),
                 *self._ledger_slice_rows(lane, [("MECH", "mechanism cards it cites")]),
-                (".evo/evidence/COLLISION_AUDITS.jsonl", "candidate-bound prior-program comparisons")]
+                (".evo/evidence/COLLISION_AUDITS.jsonl", "candidate-bound prior-program comparisons"),
+                (".evo/views/FIELD_MAP.md", "per-cell facts: our best, published cap, gap, who claimed the cell and what happened")]
             red_team_inputs += self._effect_comparator_inputs(lane)
             if econfig.sota_enabled(self.cfg) and lane.get("intent") != "platform":
                 red_team_inputs += self._ledger_slice_rows(
@@ -1622,7 +1743,8 @@ class TaskMixin:
                                             "winner_program_digest": lane.get("winner_program_digest")},
                                            f"Lane {lane['id']} ({lane['intent']}) {label} {iid}: {pointer}")
             if (gate.get("subject") or {}).get("contract_digest") != self._idea_contract_digest(lane):
-                raise SystemExit(f"[evo] idea gate {gate.get('id')} does not bind the active sealed contract")
+                raise SystemExit(f"[evo] idea gate {gate.get('id')} does not bind the active sealed contract; "
+                                 "run 'evo doctor'")
             if gate["status"] == "approved":
                 lane["status"] = "approved"
                 return self._next_lane_task(lane)
@@ -1637,7 +1759,7 @@ class TaskMixin:
             ldirp = self._lane_dir(lane)
             meta = eutil.read_json(
                 eutil.rpath(self.store.repo, f".evo/ideas/{lane['idea']}.meta.json"), {}) or {}
-            # Engine-authored exact copies from the approved idea (v10.1); the
+            # Engine-authored exact copies from the approved idea; the
             # agent adds workflow/eval/smoke planning to the same file.
             prefill = {
                 "role": econfig.INTENT_TO_ROLE[lane["intent"]],
@@ -1645,7 +1767,7 @@ class TaskMixin:
                 "parents": list(meta.get("parents") or []) + list(meta.get("platforms_consumed") or []),
                 "level": meta.get("level"),
             }
-            # v11.1 (R2 fix): exploratory carries a full audited program too -
+            # Exploratory carries a full audited program too -
             # keying custody on == "candidate" severed the scout's chain
             # (digest/kernel/effect bindings silently skipped). Program-carrying
             # purposes share one custody path; only instrumental purposes lack
@@ -1744,7 +1866,7 @@ class TaskMixin:
         return str(node.get("result_doc") or f".evo/nodes/{node.get('id')}/NODE_RESULT.md")
 
     def _node_inputs(self, node: dict, *, research_context: bool = True) -> list[tuple[str, str]]:
-        """research_context=False (v11) is for LAUNCHER-class tasks: their card
+        """research_context=False is for LAUNCHER-class tasks: their card
         duties consume the spec, run identity and platform facts - the idea doc
         and registered predictions were dead weight re-read on every launch."""
         ins = [(node["spec"], "this node's spec (commands, workdir, stages, plan)")]
@@ -1849,18 +1971,18 @@ class TaskMixin:
             replica_index = int(node.get("replica_index") or 0)
             replica_total = econfig.workflow_replica_count(spec)
             replica_seed = econfig.workflow_seed(spec, replica_index)
-            # R9-002: an approved repeat_measure re-enters the workflow as a
+            # An approved repeat_measure re-enters the workflow as a
             # first-class engine lane with the fresh seed. The repeat lane has
             # no replica index (it is not a preplanned lane); its landings
-            # resolve through the SAME rule as every attempt (R10-012).
+            # Resolve through the SAME rule as every attempt.
             repeat_seed = self._repeat_run_pending(node)
             repeat_lane = repeat_seed is not None
             if repeat_lane:
                 replica_seed = repeat_seed
                 replica_index = None
-            # R5 blind-operator audit: the empty-stages fast path used to sit
-            # ABOVE the gate, so an evaluation-only instrumental node (stages
-            # []) skipped the manual workflow gate the cards promise for ALL
+            # The empty-stages fast path must not sit
+            # ABOVE the gate, or an evaluation-only instrumental node (stages
+            # []) would skip the manual workflow gate the cards promise for ALL
             # instrumental compute. Gate first; the fast path runs after
             # approval (an approved gate falls through this block).
             if status != "stage_ready" and self._needs_workflow_gate(node):
@@ -1874,7 +1996,7 @@ class TaskMixin:
                                                + (f"({len(stages)} stage(s)). " if stages else
                                                   "(evaluation-only: 0 stages; this gate covers its evaluation run). ")
                                                + f"Spec: {node['spec']}. "
-                                               # R10-023: the reject arm's real terminal state was
+                                               # The reject arm's real terminal state was
                                                # never disclosed at the decision surface
                                                + "APPROVE starts the spend; REJECT permanently "
                                                  "abandons this node AND its lane (verdict=failed, "
@@ -1882,7 +2004,8 @@ class TaskMixin:
                                                  "'not now, later' arm on this gate.")
                 if (gate.get("subject") or {}).get("contract_digest") != \
                         str((node.get("spec_seal") or {}).get("digest") or ""):
-                    raise SystemExit(f"[evo] workflow gate {gate.get('id')} does not bind node {nid}'s sealed spec")
+                    raise SystemExit(f"[evo] workflow gate {gate.get('id')} does not bind node {nid}'s sealed "
+                                     "spec; run 'evo doctor'")
                 if gate["status"] == "open":
                     if self._maybe_auto_resolve(gate):
                         return self._next_node_task(node, ignore_hold=ignore_hold)
@@ -1897,7 +2020,7 @@ class TaskMixin:
                 self.store.event("engine", "workflow_skipped", node=nid,
                                  reason="no workflow stages (evaluation-only or pre-existing anchor)" if not stages else "all stages done")
                 return self._next_node_task(node, ignore_hold=ignore_hold)
-            # v11.7: before the FIRST full-scale stage spend, one tiny real
+            # Before the FIRST full-scale stage spend, one tiny real
             # pass over the entire workflow must have proven the chain for
             # exactly the code about to run (the receipt binds the
             # implementation seal; a fix pass re-seals and re-owes it). The
@@ -1951,10 +2074,10 @@ class TaskMixin:
                 declared_ledger_file=resolved_ledger,
                 repeat=repeat_lane)
             if self._landing_lease_holder(*stage_claims) is not None:
-                # R9 landing lease + fix: defer exactly like a busy slot. The
+                # Landing lease: defer exactly like a busy slot. The
                 # holder RUN is non-terminal, so the scheduler's watch/wait
                 # surface stays reachable and every other lane keeps moving;
-                # crashing here (the old behavior) blocked ALL scheduling,
+                # crashing here would block ALL scheduling,
                 # including the very watch card that settles the holder.
                 return None
             run = self._prepare_run(
@@ -2007,7 +2130,7 @@ class TaskMixin:
                                                       if econfig.stage_requires_ledger(stage) else "optional")},
                 inputs=self._node_inputs(node, research_context=False),
                 extra_blocks=([(
-                    "APPROVED repeat buy-back lane (engine-run; R9-002)", [
+                    "APPROVED repeat buy-back lane (engine-run)", [
                         f"- This stage re-runs the workflow with the FRESH seed {replica_seed!r} bought "
                         "back at the approved repeat_measure gate. It is a first-class engine RUN: "
                         "attempt token, slot, landing lease and resource charge all apply.",
@@ -2065,7 +2188,7 @@ class TaskMixin:
             # Every evaluator is a registered producer RUN. Quick evaluators
             # submit mode=completed; long evaluators submit mode=background.
             # In both cases raw bytes are ingested and sealed before analysis.
-            # S4 (liveness audit): an evaluation-scope fix pass re-seals the
+            # An evaluation-scope fix pass re-seals the
             # implementation WITHOUT re-walking the stages, so the node can
             # reach eval minting with a stale rehearsal receipt - the eval
             # validator refuses (REHEARSAL_STALE) and without this mint the
@@ -2106,7 +2229,7 @@ class TaskMixin:
                 eval_launch_path.parent.mkdir(parents=True, exist_ok=True)
                 eutil.write_json_atomic(eval_launch_path, {
                     "run": run["id"], "attempt_token": str(run.get("attempt_token") or "")})
-                # R6 blind-operator audit: the launch card enumerated every raw
+                # The launch card enumerated every raw
                 # duty EXCEPT the probe envelope, whose only example lived in a
                 # card the scheduler refuses to issue until the envelope
                 # already exists (circular disclosure). Print it here.
@@ -2146,7 +2269,7 @@ class TaskMixin:
                 return rm_pending
             repeat_seed = self._repeat_run_pending(node)
             if repeat_seed is not None:
-                # R9-002: the approved repeat's workflow lanes are done (this
+                # The approved repeat's workflow lanes are done (this
                 # status is workflow_done) - now buy the repeat EVALUATION as
                 # a first-class RUN. Charged again in full: the buy-back is a
                 # second spend, and the resource doors still guard it.
@@ -2160,7 +2283,7 @@ class TaskMixin:
                 if repeat_decision is not None:
                     return repeat_decision
                 eval_launch = str((self._spec(node).get("eval") or {}).get("run") or "")
-                # R10-012: same declared landing as the base evaluation (one
+                # Same declared landing as the base evaluation (one
                 # resolution rule for every attempt); the base leftover bytes
                 # are archived at prepare, its sealed copies are immutable
                 repeat_metrics_rel = f".evo/nodes/{nid}/eval/raw_metrics.json"
@@ -2189,7 +2312,7 @@ class TaskMixin:
                                                  "evaluation; omit `_mechanism_probe`)")},
                     inputs=self._node_inputs(node, research_context=False),
                     extra_blocks=[(
-                        "APPROVED repeat buy-back EVALUATION (engine-run; R9-002)", [
+                        "APPROVED repeat buy-back EVALUATION (engine-run)", [
                             f"- Evaluate the repeat-seed ({repeat_seed!r}) trained workflow exactly like "
                             "the base evaluation, as this prepared engine RUN.",
                             f"- The raw metrics land at {repeat_metrics_rel!r} - the evaluation's own "
@@ -2226,7 +2349,8 @@ class TaskMixin:
             if not node.get("eval_run") or not node.get("eval_resource_accounted") or \
                     not node.get("resource_receipt_ready"):
                 raise SystemExit(f"[evo] node {nid} reached analysis without a completed, accounted eval RUN "
-                                 "and sealed engine resource receipt")
+                                 "and sealed engine resource receipt; run 'evo doctor' (late evidence: "
+                                 "'evo run-reconcile --run <RUN>')")
             task = self._create_task(
                 "evaluate", {"node": nid, "round": node.get("round"), "lane": node.get("lane")},
                 [self._eval_metrics_path(node), self._eval_report_path(node)],
@@ -2243,7 +2367,7 @@ class TaskMixin:
                 + self._repeat_measure_block(node))
             return self._present_task(self._reserve_task(task, eval_request))
         if status == "evaluated":
-            # Engine-authored settlement copies (v10.1): the conclusion's
+            # Engine-authored settlement copies: the conclusion's
             # verdict/effect/mechanism/prediction verdicts are engine-computed
             # facts the validator asserts equal - the analyst interprets them
             # in prose but never chooses them, so the engine writes them.
@@ -2280,10 +2404,14 @@ class TaskMixin:
                 if preds:
                     prefill["predictions"] = preds
                 probe = idea_meta.get("mechanism_probe") or {}
-                if probe.get("signal") and not str(idea_meta.get("attribution_waiver") or "").strip():
-                    prefill["mechanism"] = {
-                        "status": str((summary.get("mechanism_contract") or {}).get("status") or "unclear"),
-                        "evidence": self._eval_metrics_path(node)}
+                mechanism_status = str((summary.get("mechanism_contract") or {}).get("status") or "")
+                if probe.get("signal"):
+                    prefill["mechanism"] = {"status": mechanism_status or "unclear",
+                                            "evidence": self._eval_metrics_path(node)}
+                elif mechanism_status == "deferred":
+                    # no instrument was registered: the ledger says so in the
+                    # outcome itself, so nobody later reads a verdict into it
+                    prefill["mechanism"] = {"status": "deferred"}
             if prefill:
                 self._prefill_output(self._outcome_path(node), prefill)
             iid_inputs = []

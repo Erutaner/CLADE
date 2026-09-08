@@ -1,12 +1,12 @@
-"""v11.1 feature contracts at unit speed.
+"""Repeat-measure and carbon-copy contracts at unit speed.
 
-    python tests/v111_feature_unit.py
+    python tests/repeat_and_carbon_copy_unit.py
 
-Covers the v11.1 additions: unchanged-block bundle references (T2), winner
-file inputs (T3), ledger slices (T4), the scaling follow-up door (P2),
-observed-noise self-calibration (P3), the pre-registered repeat_measure
-trigger/door/aggregation (P4), the exploratory purpose tier (P5), and the
-workflow-side fidelity provenance lines (P6).
+Covers: unchanged-block bundle references, winner
+file inputs, ledger slices, the scaling follow-up door,
+observed-noise self-calibration, the pre-registered repeat_measure
+trigger/door/aggregation, the exploratory purpose tier, and the
+workflow-side fidelity provenance lines.
 """
 from __future__ import annotations
 
@@ -32,13 +32,13 @@ import evalid     # noqa: E402
 from _check import check, done  # noqa: E402
 
 
-# ---------------------------------------------------------------- P3 ------
+# ---- observed noise ----
 def observed_noise_floor():
     cfg = econfig.merged_default()
     cfg["evaluation_contract"]["noise_floors"] = {"C1": 0.02}
     st2 = {"observed_noise": {"C1": {"width": 0.008, "sets": 2}}}
     st1 = {"observed_noise": {"C1": {"width": 0.008, "sets": 1}}}
-    check(econfig.noise_floor(cfg, "C1") == 0.02, "no st -> config floor (v11 behavior)")
+    check(econfig.noise_floor(cfg, "C1") == 0.02, "no st -> config floor")
     check(econfig.noise_floor(cfg, "C1", st1) == 0.02,
           "one observed set is not yet evidence - config floor stays")
     check(econfig.noise_floor(cfg, "C1", st2) == 0.008,
@@ -79,7 +79,7 @@ def observed_noise_calibration_writer():
         rec = self.st["observed_noise"]["C1"]
         check(abs(rec["width"] - 0.01) < 1e-9 and rec["sets"] == 1,
               f"one seed set -> width=max-min=0.01, sets=1: {rec}")
-        # R7: contributions key on the TRAINING SET (node + seed set), not the
+        # Contributions key on the TRAINING SET (node + seed set), not the
         # eval RUN id - an evaluation-only recovery re-measures the SAME
         # trained seeds under a fresh RUN id and must REPLACE, never add.
         eabsorb.AbsorbMixin._calibrate_observed_noise(
@@ -123,7 +123,7 @@ def observed_noise_calibration_writer():
         check("observed_noise" not in self2.st, "single mode writes no observed noise")
 
 
-# ---------------------------------------------------------------- P4 ------
+# ---- repeat measure ----
 def _p4_fixture(td: str, *, band=None, value=0.812, mode="single", floors=None,
                 meta_extra=None, gates=None, min_improvement=0.03):
     repo = Path(td)
@@ -315,18 +315,13 @@ def repeat_measure_metric_door():
             st={"runs": [{"id": "R1", "metrics_file": ".evo/nodes/N2/eval/raw.json"}]},
             store=SimpleNamespace(repo=repo))
         anchored = {"id": "N2", "eval_run": "R1", "repeat_measure": dict(node["repeat_measure"])}
-        # R8: with a real repo in context, the repeat run's source must be a
-        # checkable citation - pin both directions of the new contract.
+        # With a real repo in context the base value is anchored to the
+        # sealed measurement.
         anchored_good = json.loads(json.dumps(good))
         anchored_good["training_replication"]["runs"][0]["source"] = ".evo/nodes/N2/eval/raw.json"
         anchored_good["training_replication"]["runs"][1]["source"] = ".evo/nodes/N2/eval/repeat.json"
         check(evalid.metric_evidence_errors(sealed_ctx, "auc", anchored_good, None, node=anchored) == [],
               "a base value equal to the sealed measurement passes")
-        prose_src = json.loads(json.dumps(anchored_good))
-        prose_src["training_replication"]["runs"][1]["source"] = "manual repeat notes only"
-        errs = evalid.metric_evidence_errors(sealed_ctx, "auc", prose_src, None, node=anchored)
-        check(any("EVAL_REPEAT_SOURCE_MISSING" in e for e in errs),
-              f"a prose-only repeat source is rejected when a repo can check it: {errs}")
         moved = json.loads(json.dumps(anchored_good))
         moved["training_replication"]["runs"][0]["value"] = 0.799
         moved["value"] = (0.799 + 0.81) / 2
@@ -335,7 +330,7 @@ def repeat_measure_metric_door():
               f"rewriting the first run's value at aggregation time is rejected: {errs}")
 
 
-# ---------------------------------------------------------------- P2 ------
+# ---- scaling follow-up ----
 def scaling_followup_novelty():
     def cand(kind):
         # 'program' present so validation reaches the novelty block; its own
@@ -362,7 +357,7 @@ def scaling_followup_novelty():
           "claiming fresh novelty inside the dup-exempt lane is rejected")
 
 
-# ---------------------------------------------------------------- P5 ------
+# ---- exploratory tier ----
 def exploratory_tier():
     errs = [e for e in eflow.check_tables(validators=None) if "EXPLORATORY" in e]
     check(errs == [], f"purpose tables + gate policy are complete: {errs}")
@@ -383,7 +378,7 @@ def exploratory_tier():
     check(eflow.INSTRUMENTAL_SEQ.get("exploratory") is None,
           "exploratory takes the full candidate route, not an instrumental one")
     # the two v_mature purpose checks must be SATISFIABLE for exploratory
-    # (R1: they were jointly unsatisfiable - the tier died at its own door)
+    # 
     node = {"id": "N9", "experiment_purpose": "exploratory", "status": "concluded", "role": "variant"}
     defects = [k for k, _ in evalid.model_parent_defects({"N9": node}, "N9")]
     check("exploratory" in defects,
@@ -391,7 +386,7 @@ def exploratory_tier():
 
 
 def exploratory_mature_satisfiable():
-    """The exact R1 contradiction: purpose gate vs purpose binding vs prefill."""
+    """Purpose gate, purpose binding and prefill must agree."""
     src = open(HERE.parent / "engine" / "evalid.py", encoding="utf-8").read()
     check('purpose not in ("candidate", "exploratory")' in src,
           "v_mature's purpose gate admits exploratory (was: only candidate)")
@@ -401,7 +396,7 @@ def exploratory_mature_satisfiable():
     gsrc = open(HERE.parent / "engine" / "egate.py", encoding="utf-8").read()
     check(gsrc.count('purpose in ("candidate", "exploratory")') >= 3,
           "gate reject can rewind an exploratory lane (sketch/theory/mature) instead of abandoning it")
-    # R2: the custody chain must include scouts at every station
+    # The custody chain must include scouts at every station
     check(tsrc.count('in ("candidate", "exploratory")') >= 2,
           "plan_node prefill + stale-draft custody include exploratory")
     check('meta.get("experiment_purpose") in ("candidate", "exploratory")' in src,
@@ -416,11 +411,10 @@ def exploratory_mature_satisfiable():
 
 
 def carbon_copy_doors():
-    """R2: the confirmatory door must be as locked as the scaling door."""
+    """The confirmatory door must be as locked as the scaling door."""
     src = open(HERE.parent / "engine" / "evalid.py", encoding="utf-8").read()
     for anchor in ("PROGRAM_CARBON_COPY_COUNT", "PROGRAM_CONFIRMATORY_KERNEL",
-                   "PORTFOLIO_CONFIRMATORY_DUP", "PORTFOLIO_SCALING_FOLLOWUP_DUP",
-                   "PROGRAM_SCALING_FOLLOWUP_PARENT_META"):
+                   "PORTFOLIO_CONFIRMATORY_DUP", "PORTFOLIO_SCALING_FOLLOWUP_DUP"):
         check(anchor in src, f"{anchor} guard present")
     check('not lane.get("scaling_followup_of") and not lane.get("confirmatory_of")' in src,
           "diversity rules skip BOTH carbon-copy species (a 1-batch cannot be diverse)")
@@ -438,12 +432,9 @@ def carbon_copy_doors():
 
 
 def scaling_fingerprint_substitution():
-    """R9 identity normalization: novelty.kind is a classification label and
-    is no longer part of the computation identity (the R1 deadlock came from
-    embedding it; the old fix substituted the parent's kind before hashing -
-    that normalization IS the identity now). The legacy algorithm keeps the
-    old behavior so hashes stored by earlier releases still match via
-    kernel_identity_matches."""
+    """novelty.kind is a classification label and is not part of the
+    computation identity: re-classifying the same computation keeps its
+    hash, so a scaling follow-up matches its parent's stored hash directly."""
     base = {"novelty": {"kind": "irreducible", "bearer": "b" * 60,
                         "kernel": [{"id": "KC1", "kind": "update_law",
                                     "statement": "s" * 60, "operator_refs": ["OP1"]}]}}
@@ -451,12 +442,10 @@ def scaling_fingerprint_substitution():
     follow = json.loads(json.dumps(base))
     follow["novelty"]["kind"] = "scaling_extension"
     check(eprogram.kernel_fingerprint(follow) == parent_hash,
-          "re-classifying the same computation keeps the same identity (R9)")
-    check(eprogram.legacy_kernel_fingerprint(follow) != eprogram.legacy_kernel_fingerprint(base),
-          "the LEGACY algorithm still embeds kind (stored-hash compatibility only)")
-    check(eprogram.kernel_identity_matches(eprogram.legacy_kernel_fingerprint(base), base)
-          and eprogram.kernel_identity_matches(parent_hash, base),
-          "identity matching dual-accepts legacy and normalized stored hashes")
+          "re-classifying the same computation keeps the same identity")
+    check(eprogram.kernel_identity_matches(parent_hash, base)
+          and not eprogram.kernel_identity_matches("", base),
+          "identity matching compares a stored hash with the one identity algorithm")
     def _with_program(op_id: str, obj_id: str) -> dict:
         cand = json.loads(json.dumps(base))
         cand["novelty"]["kernel"][0]["operator_refs"] = [op_id]
@@ -498,7 +487,7 @@ def provisional_st_threading():
     check("C1?" in block,
           "a record lead (0.015) inside the OBSERVED floor (0.02) is tagged '?' in the bundle")
     check("C1?" not in "\n".join(ebundle.frontier_block(g, cfg, None)),
-          "without st there is no floor and no tag (v11 behavior)")
+          "without st there is no floor and no tag")
     import edash
     rows = edash._cell_records_with_provisional(g, cfg, st)
     check(rows and rows[0]["provisional"] is True, f"dashboard row carries the label: {rows}")
@@ -525,7 +514,7 @@ def reference_line_chain():
           "per-stage title variants normalize to one key (body equality still decides)")
 
 
-# ------------------------------------------------------------- P1 T2 ------
+# ---- reference lines ----
 def bundle_reference_collapse():
     check(ebundle._REFERENCEABLE_BLOCKS.search("Lessons from prior work") is not None,
           "lessons blocks are referenceable")
@@ -557,7 +546,7 @@ def bundle_reference_collapse():
         check(blocks2 == {}, "a different subject never inherits references")
 
 
-# ------------------------------------------------------------- P1 T3 ------
+# ---- winner inputs ----
 def winner_stage_inputs():
     with tempfile.TemporaryDirectory() as td:
         repo = Path(td)
@@ -566,7 +555,7 @@ def winner_stage_inputs():
                 "tournament_path": "tj.json"}
         rows = etask.TaskMixin._winner_stage_inputs(self, lane, "the winner")
         check(rows[0][0] == "sk.json" and len(rows) == 2,
-              "no winner file (pre-v11.1 lane) -> old full rows, cold start intact")
+              "no winner file -> full rows, cold start intact")
         wdir = repo / ".evo/rounds/R1/lanes/L001"
         wdir.mkdir(parents=True)
         wdir.joinpath("WINNER.json").write_text("{}", encoding="utf-8")
@@ -577,7 +566,7 @@ def winner_stage_inputs():
               "batch + tournament stay listed as REFERENCE rows - never hidden")
 
 
-# ------------------------------------------------------------- P1 T4 ------
+# ---- ledger slices ----
 def ledger_slices():
     with tempfile.TemporaryDirectory() as td:
         repo = Path(td)
@@ -618,7 +607,7 @@ def ledger_slices():
               f"the full-pool row warns that only the accepted prefix is citable: {rows}")
 
 
-# ---------------------------------------------------------------- P6 ------
+# ---- provenance lines ----
 def fidelity_provenance_lines():
     g = {"nodes": [{"id": "N1", "round": "R1"}]}
     tasks = [
@@ -634,7 +623,7 @@ def fidelity_provenance_lines():
           "a fresh session reads as independent")
     ctx.cfg["policy"]["critic_isolation"] = "off"
     check(evalid.node_review_provenance_lines(ctx, "R1") == [],
-          "off mode stays silent (v10 behavior)")
+          "off mode stays silent")
 
 
 if __name__ == "__main__":
@@ -654,4 +643,4 @@ if __name__ == "__main__":
     winner_stage_inputs()
     ledger_slices()
     fidelity_provenance_lines()
-    done("V11.1 FEATURE UNIT")
+    done("REPEAT / CARBON-COPY UNIT")

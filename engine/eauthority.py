@@ -1,4 +1,4 @@
-"""Active-authority machinery (v10): seal requiredness, availability,
+"""Active-authority machinery: seal requiredness, availability,
 the cross-file active-contract assertion, and implementation seals/selectors.
 Shared verbatim by scheduler, submit postconditions, CLI preflight and doctor.
 """
@@ -15,8 +15,7 @@ import evcs
 
 stages_of = econfig.stages_of
 
-# The single authoritative seal-field registry (v9.2 duplicated these in
-# edoctor by hand and the copies drifted).
+# The single authoritative seal-field registry; doctor reads it from here.
 LANE_SEAL_FIELDS = ("diagnosis_seal", "core_palette_seal", "program_seal", "tournament_seal",
                     "problem_seal", "theory_draft_seal", "theory_seal",
                     "idea_seal", "review_seal")
@@ -211,7 +210,7 @@ class AuthorityMixin:
         hot scheduler path verifies active heads; ``evo doctor`` audits the
         append-only history so runtime cost does not grow quadratically.
 
-        v11 scope forms: ``only_lane``/``only_node`` audit one subject (the
+        Scope forms: ``only_lane``/``only_node`` audit one subject (the
         submit pattern); ``scope_lanes``/``scope_nodes`` audit the SET of
         objects the imminent scheduling decision consumes (the scoped-next
         pattern) - runs are audited when their node is in scope. ``digest_seed``
@@ -342,9 +341,11 @@ class AuthorityMixin:
                     raise SystemExit(
                         f"[evo] SEALED_IMPLEMENTATION_WORKDIR_MISSING: node {node.get('id')} workdir "
                         f"{node.get('workdir')!r} no longer exists although the node's executable "
-                        "authority is active. If the worktree was removed deliberately, retire or "
-                        "abandon the node (or run the pending implementation revision); restore the "
-                        f"directory otherwise. ({exc})") from exc
+                        "authority is active. Restore the directory; if the worktree was removed "
+                        "deliberately, open an implementation revision ('evo recover-plan --target "
+                        f"node:{node.get('id')} --boundary implementation --repair-scope workflow "
+                        "--reason ...') or retire the node through that case ('evo recover-abort "
+                        f"--recovery REC### --abandon-node --reason ...'). ({exc})") from exc
                 except (evcs.GitCheckError, OSError, RuntimeError) as exc:
                     raise SystemExit(
                         f"[evo] SEALED_IMPLEMENTATION_GIT_CHECK_FAILED: node {node.get('id')} "
@@ -357,21 +358,27 @@ class AuthorityMixin:
                     raise SystemExit(
                         f"[evo] SEALED_IMPLEMENTATION_COMMIT: node {node.get('id')} workarea HEAD "
                         f"{current!r} differs from reviewed commit {node.get('implementation_commit')!r}; "
-                        "submit an explicit implementation revision before launching or absorbing evidence")
+                        "check the reviewed commit back out, or open an explicit implementation revision "
+                        f"('evo recover-plan --target node:{node.get('id')} --boundary implementation "
+                        "--repair-scope workflow|evaluation --reason ...') before launching or "
+                        "absorbing evidence")
                 if not tracked_clean:
                     raise SystemExit(
                         f"[evo] SEALED_IMPLEMENTATION_DIRTY: node {node.get('id')} has tracked or staged "
-                        "bytes outside its reviewed commit; submit an explicit implementation revision")
+                        "bytes outside its reviewed commit; restore the reviewed tree (git checkout / "
+                        "stash), or open an explicit implementation revision ('evo recover-plan --target "
+                        f"node:{node.get('id')} --boundary implementation --repair-scope "
+                        "workflow|evaluation --reason ...')")
                 git_facts_ok = True
             if node_bytes_active and node.get("id") != allow_implementation_revision_node and \
                     int(node.get("implementation_revision") or 0) > 0 and \
                     not node.get("implementation_revision_pending"):
-                # v11 middle route for the closure audit (per the v10.2b
-                # adversarial finding): when HEAD equals the reviewed commit and
+                # The middle route for the closure audit: when HEAD equals the
+                # reviewed commit and
                 # the tracked tree is clean, tracked rows are byte-identical to
                 # the sealed manifest BY GIT'S OWN FACTS - unless an index bit
                 # (assume-unchanged / skip-worktree) makes git blind, which is
-                # exactly the spoof the audit demonstrated. So the per-row hash
+                # exactly the spoof this guards against. So the per-row hash
                 # is skipped ONLY when the facts hold AND `git ls-files -v`
                 # shows no suspicious bit; gitignored rows (absent from the
                 # tracked set) always keep their hash, and copy mode / doctor /
@@ -391,7 +398,11 @@ class AuthorityMixin:
                     workdir_map=workdir_map)
                 if manifest_errs:
                     raise SystemExit("[evo] SEALED_IMPLEMENTATION_CLOSURE: "
-                                     "the reviewed execution closure changed:\n  - "
+                                     "the reviewed execution closure changed; restore the files below "
+                                     "to their manifest bytes, or open an implementation revision "
+                                     f"('evo recover-plan --target node:{node.get('id')} --boundary "
+                                     "implementation --repair-scope workflow|evaluation --reason ...'):"
+                                     "\n  - "
                                      + "\n  - ".join(manifest_errs[:20]))
         for run in self.st.get("runs", []):
             if scoped and run.get("node") != only_node:
@@ -406,11 +417,13 @@ class AuthorityMixin:
                                erun.is_active_evidence(run)))
         active_digests, all_digests = self._seal_availability()
         errs = list(contract_errs)
+        amended = ctx.amended_digests()
         errs.extend(err for label, seal, active in checks
                 for err in eseal.verify(self.store.repo, seal, label=label,
                                         require_working=active,
                                         check_snapshot=check_snapshots,
-                                        digest_cache=digest_cache))
+                                        digest_cache=digest_cache,
+                                        amended=amended))
         errs.extend(err for label, seal, active in checks
                     for err in eseal.upstream_errors(
                         seal, active_digests if active else all_digests, label=label))

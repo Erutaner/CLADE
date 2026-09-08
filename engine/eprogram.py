@@ -112,10 +112,52 @@ def operator_ids(candidate: dict | None) -> list[str]:
     return [str(row.get("id")) for row in rows if isinstance(row, dict) and row.get("id")]
 
 
-def _kernel_fingerprint_impl(candidate: dict | None, *, execution_fields: bool) -> str:
-    """Shared identity builder. ``execution_fields=True`` is the current
-    algorithm (v2); ``False`` reproduces the v11.4 normalization (v1) so
-    hashes stored by that release keep matching through
+def operator_signature(row: dict) -> str:
+    """Content signature of one operator - kind, phase, normalized semantics:
+    what it computes, not what it is numbered. Two programs that carry the
+    same operator verbatim agree on this string whatever their OP# ids."""
+    return json.dumps([str(row.get("kind") or ""), str(row.get("phase") or ""), _norm(row.get("semantics"))],
+                      ensure_ascii=False, separators=(",", ":"))
+
+
+def program_operator_signatures(candidate: dict | None) -> dict[str, str]:
+    """{operator id: content signature} over the candidate's whole program."""
+    rows = ((candidate or {}).get("program") or {}).get("operators") or []
+    return {str(row.get("id")): operator_signature(row)
+            for row in rows if isinstance(row, dict) and row.get("id")}
+
+
+def kernel_operator_signatures(candidate: dict | None, kernel_ids_only: list[str] | None = None) -> set[str]:
+    """Content signatures of the operators the candidate's kernel components
+    reference (all components, or only the named KC ids)."""
+    sigs = program_operator_signatures(candidate)
+    wanted = {str(k) for k in (kernel_ids_only or [])}
+    out: set[str] = set()
+    for comp in kernel_components(candidate):
+        if wanted and str(comp.get("id") or "") not in wanted:
+            continue
+        for ref in (comp.get("operator_refs") or []):
+            sig = sigs.get(str(ref))
+            if sig:
+                out.add(sig)
+    return out
+
+
+def kernel_fingerprint(candidate: dict | None) -> str:
+    """Computation identity of the immutable core.
+
+    Identity = bearer + per-KC (mechanism kind, normalized statement,
+    STRUCTURAL operator signatures). Deliberately OUT:
+    - ``novelty.kind``: a classification against prior art, not part of what
+      the program computes - re-classifying the same computation must not
+      mint a fresh identity.
+    - candidate-local O#/OP# numbering: every reference resolves to content
+      signatures, so a consistent renumbering keeps the same identity.
+    Deliberately IN: each core operator's ``iteration`` (loop kind,
+    normalized order/termination, max_steps, state objects) and
+    ``depends_on`` (as the prerequisites' shallow content signatures) -
+    changing how often or in what order the core executes changes the
+    computation. Compare against a stored hash through
     ``kernel_identity_matches``."""
     cand = candidate or {}
     novelty = cand.get("novelty") or {}
@@ -153,15 +195,14 @@ def _kernel_fingerprint_impl(candidate: dict | None, *, execution_fields: bool) 
                      _norm(row.get("semantics")),
                      sorted(obj_sig.get(str(x), f"?{x}") for x in (row.get("reads") or [])),
                      sorted(obj_sig.get(str(x), f"?{x}") for x in (row.get("writes") or []))]
-            if execution_fields:
-                # R10 audit: depends_on and iteration are formal EXECUTION
-                # fields (the schedule and the loop bound change what the
-                # program computes) - identity must carry them. depends_on
-                # resolves to the prerequisites' shallow content signatures
-                # (numbering-invariant, recursion-free).
-                parts.append(_iteration_sig(row.get("iteration")))
-                parts.append(sorted(shallow_sig.get(str(x), f"?{x}")
-                                    for x in (row.get("depends_on") or [])))
+            # Depends_on and iteration are formal EXECUTION fields (the
+            # schedule and the loop bound change what the program computes)
+            # - identity must carry them. depends_on resolves to the
+            # prerequisites' shallow content signatures (numbering-invariant,
+            # recursion-free).
+            parts.append(_iteration_sig(row.get("iteration")))
+            parts.append(sorted(shallow_sig.get(str(x), f"?{x}")
+                                for x in (row.get("depends_on") or [])))
             op_sig[str(row["id"])] = json.dumps(parts, ensure_ascii=False,
                                                 separators=(",", ":"))
     payload = {
@@ -177,64 +218,12 @@ def _kernel_fingerprint_impl(candidate: dict | None, *, execution_fields: bool) 
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
 
 
-def kernel_fingerprint(candidate: dict | None) -> str:
-    """Computation identity of the immutable core (R9 normalization + R10
-    execution fields).
-
-    Identity = bearer + per-KC (mechanism kind, normalized statement,
-    STRUCTURAL operator signatures). Deliberately OUT:
-    - ``novelty.kind``: a classification against prior art, not part of what
-      the program computes - re-classifying the same computation must not
-      mint a fresh identity.
-    - candidate-local O#/OP# numbering: every reference resolves to content
-      signatures, so a consistent renumbering keeps the same identity.
-    Deliberately IN (R10): each core operator's ``iteration`` (loop kind,
-    normalized order/termination, max_steps, state objects) and
-    ``depends_on`` (as the prerequisites' shallow content signatures) -
-    changing how often or in what order the core executes changes the
-    computation. Hashes stored by earlier releases used older algorithms;
-    comparisons must go through ``kernel_identity_matches`` (generation
-    accept, no state migration needed)."""
-    return _kernel_fingerprint_impl(candidate, execution_fields=True)
-
-
-def legacy_kernel_fingerprint(candidate: dict | None) -> str:
-    """The pre-R9 identity algorithm, kept ONLY so hashes stored by earlier
-    releases keep matching (novelty.kind and raw local OP# labels were part
-    of the old identity). Never store this for new work."""
-    cand = candidate or {}
-    novelty = cand.get("novelty") or {}
-    payload = {
-        "kind": novelty.get("kind"),
-        "kernel": sorted(
-            (str(row.get("kind") or ""), _norm(row.get("statement")),
-             tuple(sorted(str(x) for x in (row.get("operator_refs") or []))))
-            for row in kernel_components(cand)
-        ),
-        "bearer": _norm(novelty.get("bearer")),
-    }
-    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
-    return hashlib.sha256(raw.encode("utf-8")).hexdigest()
-
-
-def kernel_fingerprints(candidate: dict | None) -> tuple[str, str, str]:
-    """(current, v11.4-normalized, legacy) - every spelling a stored hash may
-    use, one per identity-algorithm generation. New work stores only the
-    current spelling; comparisons accept all generations."""
-    return (kernel_fingerprint(candidate),
-            _kernel_fingerprint_impl(candidate, execution_fields=False),
-            legacy_kernel_fingerprint(candidate))
-
-
 def kernel_identity_matches(stored_hash: str | None, candidate: dict | None) -> bool:
-    """Does a STORED kernel hash denote this candidate's computation?
-
-    Generation-accept across identity-algorithm revisions: rows stored by any
-    earlier release keep matching their verbatim computation, new rows match
-    up to consistent renumbering / re-classification. No stored state is
-    rewritten."""
+    """Does a STORED kernel hash denote this candidate's computation? True up
+    to consistent renumbering / re-classification, which the identity itself
+    already ignores."""
     h = str(stored_hash or "")
-    return bool(h) and h in kernel_fingerprints(candidate)
+    return bool(h) and h == kernel_fingerprint(candidate)
 
 
 def candidate_digest(candidate: dict | None) -> str:
@@ -367,13 +356,13 @@ def _program_graph_errors(program: dict, *, where: str, baseline: bool = False,
         errs.append(f"PROGRAM_ENTRY: {where} needs >=1 input/supervision entry object")
     if not outputs:
         errs.append(f"PROGRAM_EXIT: {where} needs >=1 prediction/interface/artifact output object")
-    # R8-follow-up (external audit r8): "executable" is a property of the
-    # OPERATOR, not of its read set alone. The old fixed point added writes as
-    # soon as reads were reachable, so an operator whose declared depends_on
-    # could never run (its prerequisite reads an object nothing produces)
-    # still "fired" on paper and the program froze with an output no legal
-    # schedule can produce. Fire an operator only when its reads are
-    # available AND every declared prerequisite has itself fired.
+    # "executable" is a property of the OPERATOR, not of its read set alone.
+    # A fixed point that added writes as soon as reads were reachable would
+    # let an operator whose declared depends_on can never run (its
+    # prerequisite reads an object nothing produces) "fire" on paper, and the
+    # program would freeze with an output no legal schedule can produce. Fire
+    # an operator only when its reads are available AND every declared
+    # prerequisite has itself fired.
     reachable = set(sources)
     fired: set[str] = set()
     changed = True
@@ -392,7 +381,7 @@ def _program_graph_errors(program: dict, *, where: str, baseline: bool = False,
         errs.append(f"PROGRAM_REACHABILITY: {where} has no input-to-output executable data path "
                     "(an operator counts as executable only when its reads are producible AND "
                     "every operator it depends_on can itself execute)")
-    # R8 (external audit r5) + r8 follow-up: depends_on and data availability
+    # depends_on and data availability
     # are ONE execution-order constraint set - and it must be checked over the
     # WHOLE program, not per phase. The per-phase projections each dropped the
     # other phase's edges, so a mixed cycle (data order one way, declared
@@ -431,7 +420,7 @@ def _program_graph_errors(program: dict, *, where: str, baseline: bool = False,
                     "INTO one operator and describe it in that operator's iteration field "
                     "(this check reads the schedule, not iteration), or fix the "
                     "schedule/data flow")
-    # R10 audit (computation-semantics closure): three local approximations -
+    # Three local approximations -
     # "some output is reachable", "an operator's reads are satisfiable" and
     # "a declared infer row writes an output" - did not compose. The missing
     # object is the LOAD-BEARING set: fired operators that sit on an
@@ -467,7 +456,7 @@ def _program_graph_errors(program: dict, *, where: str, baseline: bool = False,
         infer_rows = [row for row in operator_rows.values() if row.get("phase") in ("infer", "both")]
         if not any(row.get("kind") in ("objective", "estimator", "update", "transition", "data") for row in train_rows):
             errs.append(f"PROGRAM_TRAIN_PATH: {where} needs an explicit train objective/estimator/update/transition/data operator")
-        # R10 audit: the old form accepted any DECLARED infer row that writes
+        # The old form accepted any DECLARED infer row that writes
         # an output, and any output kind - so a reachable training artifact
         # hid an inference path that can never execute (its reads include an
         # object nothing produces), and the deployed prediction was frozen,
@@ -483,7 +472,7 @@ def _program_graph_errors(program: dict, *, where: str, baseline: bool = False,
             errs.append(f"PROGRAM_DEPLOY_UNREACHABLE: {where}: no declared prediction/interface "
                         "object is producible by the executable schedule - a reachable training "
                         "artifact cannot stand in for the deployed output")
-        # R10 audit: supervision objects are ground-truth targets, visible at
+        # Supervision objects are ground-truth targets, visible at
         # train/scoring time only - the deployed inference path consuming one
         # would freeze a program that cannot run where its prediction is
         # claimed. Interaction-time signals the deployment genuinely receives
@@ -503,10 +492,10 @@ def _program_graph_errors(program: dict, *, where: str, baseline: bool = False,
 
     for field in ("training_process", "inference_process", "information_flow", "resource_model"):
         _need_text(program.get(field), 40, f"{where}.{field}", errs)
-    # R9 audit: the fired set used to die at this function boundary, so the
-    # kernel checks downstream could only verify that a referenced OP EXISTS -
-    # a load-bearing core citing an operator the declared graph itself proves
-    # can never execute passed every layer. Return it (R10: with the
+    # The fired set must cross this function boundary: the kernel checks
+    # downstream verify not just that a referenced OP EXISTS but that the
+    # declared graph lets it execute - a load-bearing core citing an operator
+    # that can never run must not pass. Return it (with the
     # load-bearing subset); the kernel check consumes both.
     return errs, object_ids, operator_ids_, fired, load_bearing
 
@@ -606,7 +595,7 @@ def candidate_errors(candidate: dict, *, where: str, min_level: int,
         if extra_novelty:
             errs.append(f"PROGRAM_NOVELTY_FIELDS: {where}.novelty has unknown fields {extra_novelty}")
     kind = str(novelty.get("kind") or "")
-    # v11.1 P2: a declared scaling follow-up lane re-runs its parent's frozen
+    # A declared scaling follow-up lane re-runs its parent's frozen
     # kernel at new scale points - the scale dimension is the contribution, so
     # "scaling_extension" is a legal kind there (and only there).
     if kind == "scaling_extension" and not scaling_followup:
@@ -657,7 +646,7 @@ def candidate_errors(candidate: dict, *, where: str, min_level: int,
         unknown = [x for x in refs if x not in opids]
         if unknown:
             errs.append(f"PROGRAM_KERNEL_OPERATOR_UNKNOWN: {where}.{kid} references unknown operators {unknown}")
-        # R9 audit: a load-bearing reference must point at an operator the
+        # A load-bearing reference must point at an operator the
         # declared graph can actually EXECUTE (reads producible and every
         # depends_on itself executable). The graph pass already proves that
         # set; citing a never-executable operator attributed real results to
@@ -668,7 +657,7 @@ def candidate_errors(candidate: dict, *, where: str, min_level: int,
                         f"declared graph can never execute: {dead} - a load-bearing core must run "
                         "on the executable path (fix reads/depends_on, or cite the operators that "
                         "actually carry the mechanism)")
-        # R10 audit: executable is necessary but not sufficient - a core citing
+        # Executable is necessary but not sufficient - a core citing
         # only operators whose effects never reach any registered
         # prediction/interface/artifact output attributed real results to a
         # side branch that provably took no part in producing them.
@@ -738,7 +727,7 @@ def candidate_errors(candidate: dict, *, where: str, min_level: int,
             if row.get("direction") not in EFFECT_DIRECTIONS:
                 errs.append(f"PROGRAM_EFFECT_DIRECTION: {where}.{zid}.direction must be one of {EFFECT_DIRECTIONS}")
             minimum = row.get("minimum_worthwhile_delta")
-            # R7: finite too - JSON accepts 1e309 (inf) and NaN, and a frozen
+            # Finite too - JSON accepts 1e309 (inf) and NaN, and a frozen
             # non-finite threshold makes the claim permanently unsettleable
             # (inf -> every result 'failed', NaN -> every comparison False).
             if isinstance(minimum, bool) or not isinstance(minimum, (int, float)) \
@@ -782,7 +771,7 @@ def candidate_errors(candidate: dict, *, where: str, min_level: int,
         if ckind == "efficiency":
             improvement = claim.get("improvement_cells")
             parity = claim.get("parity_cells")
-            # R5 blind-operator audit: requiring BOTH sides non-empty made a
+            # Requiring BOTH sides non-empty made a
             # one-target project mathematically unable to state the classic
             # efficiency result (quality held at parity, resources strictly
             # improved). improvement_cells may be [] - the resource-side win

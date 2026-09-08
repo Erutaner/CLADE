@@ -16,7 +16,11 @@ if the code is revised later, the proof is owed again.
 
 The spec's top-level `rehearsal.command` owns HOW (it may submit tiny jobs to
 the real scheduler, wait, and read logs internally); the engine executes it
-and owns exit codes, logs and the receipt.
+and owns exit codes, logs and the receipt. Rehearse the way you will run:
+the same kind of launch configuration as the real stage - multi-device if the
+real run is multi-device, the same parallelism and precision - with fewer
+steps. A multi-device bug does not show on one device, and the pace you
+measure here is what your `cost_estimate` should rest on.
 
 ## Do
 1. Run:

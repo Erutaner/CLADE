@@ -104,7 +104,7 @@ MAX_CANARY_COMMANDS = 6
 
 
 def plan_commands(plan: Any) -> list[dict]:
-    """Normalize a plan to its command list (v11.7: single 'canary' object OR
+    """Normalize a plan to its command list (a single 'canary' object OR
     a 'canaries' list - heterogeneous platforms may need one real command per
     resource family; each is still the real path, never a mock fragment)."""
     if not isinstance(plan, dict):
@@ -322,7 +322,7 @@ def _run_locked(store, task_id: str) -> dict:
 
     current_plan_digest = plan_digest(plan)
     approved_receipt_probe = None
-    # R7 audit (idempotency): a PASSED record for this exact plan+contract is
+    # A PASSED record for this exact plan+contract is
     # already the answer - the task stays open only because the agent has not
     # written/submitted the report yet. Re-executing the physical command from
     # a fresh session overwrote the single record slot, so a later flake could
@@ -337,7 +337,7 @@ def _run_locked(store, task_id: str) -> dict:
             store.event("engine", "infra_canary_reused", task=task_id,
                         attempt=attached.get("attempt"), receipt=attached.get("receipt"))
             return approved_receipt_probe
-    # R7 audit (orphan adoption): a crash between the receipt publish and the
+    # A crash between the receipt publish and the
     # state attach leaves intent rows whose receipts are complete on disk.
     # Re-running the physical command re-spent real platform work (and after
     # repeated crashes the failure counter never advanced, so the max-attempt
@@ -400,12 +400,12 @@ def _run_locked(store, task_id: str) -> dict:
         surfaces=surfaces, approved_contract=approved_contract)
     eutil.write_json_atomic(request_path, request)
     issued_request_digest = _file_digest(request_path)
-    # R9 (external audit r6): persist the attempt INTENT before any external
+    # Persist the attempt INTENT before any external
     # side effect. The command may submit remote jobs / touch restricted data;
-    # a crash between execution and the final state attach used to leave the
-    # attempt counter at its old value, so the next session re-ran the whole
-    # physical canary as the "same" logical attempt with a fresh nonce and an
-    # orphan receipt nobody adopted. The intent row makes the orphan
+    # a crash between execution and the final state attach would leave the
+    # attempt counter at its old value, and the next session would re-run the
+    # whole physical canary as the "same" logical attempt with a fresh nonce
+    # and an orphan receipt nobody adopted. The intent row makes the orphan
     # discoverable and the attempt paid for before the side effect exists.
     intent_state = store.load_state()
     intent_task = store.get_task(intent_state, task_id)
@@ -601,7 +601,7 @@ def _attach_record(store, task_id: str, *, plan_path, approved_contract: str,
                    approved_facts: str, record: dict, receipt: dict,
                    exit_code=None, adopted: bool = False) -> dict:
     """Attach a finished canary receipt to the still-open task (shared by the
-    fresh-execution path and the R7 orphan-adoption path). All attempt-shaped
+    fresh-execution path and the orphan-adoption path). All attempt-shaped
     scalars come from the receipt itself so an adopted orphan restores exactly
     what its interrupted session would have written - including the failure
     counter the max-attempt gate keys on."""
@@ -616,7 +616,7 @@ def _attach_record(store, task_id: str, *, plan_path, approved_contract: str,
     fresh_task = store.get_task(fresh, task_id)
     fresh_cfg = store.load_config()
     current_plan = eutil.read_json(plan_path, None)
-    # v11.7: a canary may legitimately re-run mid-rounds - the re-proof an
+    # A canary may legitimately re-run mid-rounds - the re-proof an
     # adopted INFRA_FACTS revision owes. Any other rounds-phase attach is
     # still a state change (the drill task would not be open anyway).
     phase_legal = (fresh.get("phase") == "bootstrap"
@@ -767,7 +767,7 @@ def record_errors_for_snapshot(store, record: Any, *, cfg: dict, st: dict,
             if receipt.get("command") != snapshot_canary.get("command") \
                     or receipt.get("cwd") != str(snapshot_canary.get("cwd") or "."):
                 errs.append("CANARY_COMMAND_BINDING: receipt command/cwd disagree with the executed plan snapshot")
-    # v11.7 multi-command receipts: authenticate every command's evidence trio
+    # Multi-command receipts: authenticate every command's evidence trio
     # and rebuild the merged observation exactly as the run did
     multi_observations: list = []
     if multi_rows is not None:

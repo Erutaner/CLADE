@@ -1,6 +1,6 @@
-"""Resource accounting (v10): charged/reserved/effective-limit computation,
+"""Resource accounting: charged/reserved/effective-limit computation,
 reservation transfer and usage charging. The ONLY implementation - views,
-doctor and the CLI call these instead of hand-rolling copies (v9.2 had 4).
+doctor and the CLI call these instead of hand-rolling copies.
 """
 
 from __future__ import annotations
@@ -64,13 +64,7 @@ class ResourceMixin:
         cap = ((self._spec(node).get("probe") or {}).get("budget") or {})
         if not isinstance(cap, dict) or not cap:
             return {}
-        spent: dict[str, float] = {}
-        for entry in self.st.get("resource_ledger", []):
-            if str(entry.get("node") or "") != str(node.get("id") or ""):
-                continue
-            for unit, value in (entry.get("usage") or {}).items():
-                if isinstance(value, (int, float)) and not isinstance(value, bool):
-                    spent[str(unit)] = spent.get(str(unit), 0.0) + float(value)
+        spent = node_charged_usage(self.st, str(node.get("id") or ""))
         extra = node.get("probe_cap_extra") or {}
         over: dict[str, tuple[float, float]] = {}
         for unit, limit in cap.items():
@@ -84,17 +78,17 @@ class ResourceMixin:
 
     def _resource_gate(self, node: dict, operation: str, request: dict[str, float],
                        stage: str | None = None, *, repeat: bool = False) -> dict | None:
-        # R10-015: a gate born from the repeat buy-back lane carries that
+        # A gate born from the repeat buy-back lane carries that
         # identity in its subject, so waive-repeat can retire it together
         # with the purchase it guards (approve would otherwise widen the
         # project contract for a spend that no longer exists; reject would
         # discard the restored node).
         over = self._probe_budget_exceeded(node, request)
         if over:
-            # R3 liveness audit: this used to raise SystemExit, which
-            # crash-looped every `evo next` after one failed probe run (the
+            # Raising here would
+            # crash-loop every `evo next` after one failed probe run (the
             # conservative failure charge alone exhausts a cap==plan budget)
-            # and pre-empted the repeat_spend gate built for exactly this
+            # and pre-empt the repeat_spend gate built for exactly this
             # decision. Project-limit overruns one branch below gate instead
             # of crashing - probe-cap overruns now do the same: approve buys
             # exactly the overage for THIS probe, reject abandons it.
@@ -124,7 +118,7 @@ class ResourceMixin:
             if gate.get("kind") == "resource_approval" and gate.get("status") == "open" and \
                     gs.get("node") == node["id"] and gs.get("operation") == operation and \
                     gs.get("stage") == stage and not gs.get("probe_cap_over"):
-                # R7: the deficit is RECOMPUTED on every pass. The frozen
+                # The deficit is RECOMPUTED on every pass. The frozen
                 # snapshot kept demanding an increase after other RUNs had
                 # released their reservations - forcing the user to either
                 # widen a contract that no longer needed widening or discard
@@ -157,7 +151,7 @@ class ResourceMixin:
     def refresh_resource_gate(self, gate: dict) -> bool:
         """Re-settle an OPEN resource_approval gate against live capacity.
 
-        R9 (external audit r6): the recompute above lives inside
+        the recompute above lives inside
         ``_resource_gate``, which is only reached from node scheduling - and an
         open gate preempts scheduling entirely, so the "recomputed on every
         pass" promise was unreachable while the gate was open. The presenter
@@ -218,10 +212,10 @@ class ResourceMixin:
             field = "usage" if run.get("kind") == "stage" else "_usage"
             reported = data.get(field) if isinstance(data, dict) else None
             if isinstance(reported, dict):
-                # R8 (external audit r5): a partial/invalid usage dict used to
-                # be trusted for whatever subset happened to parse - a missing
-                # or NaN unit was silently charged 0 and its reservation
-                # released, i.e. an INVALID report bought a cheaper bill than
+                # A partial/invalid usage dict must not
+                # be trusted for whatever subset happens to parse - a missing
+                # or NaN unit would be silently charged 0 and its reservation
+                # released, i.e. an INVALID report would buy a cheaper bill than
                 # no report at all. Per-unit rule: a valid finite number is the
                 # actual; anything else falls back to that unit's reserved cap.
                 merged: dict[str, float] = {}
@@ -234,7 +228,7 @@ class ResourceMixin:
                     else:
                         merged[u] = float(reservation[u])
                         complete = False
-                # R9 (external audit r6): the loop above walks the RESERVATION,
+                # The loop above walks the RESERVATION,
                 # so an honestly reported unit the stage never pre-declared -
                 # legal, since a stage need only declare one tracked unit -
                 # was accepted by the evidence validator and then erased from
@@ -252,3 +246,16 @@ class ResourceMixin:
                 basis = "reported_actual" if complete else "partial_report_reserved_fallback"
         self._charge_resource(node=str(run.get("node") or ""), kind=str(run.get("kind") or "run"),
                               usage=usage, basis=basis, run=run)
+
+
+def node_charged_usage(st: dict | None, node_id: str) -> dict[str, float]:
+    """What one node has actually been charged so far, per unit, from the
+    resource ledger (every stage/eval attempt, failure charges included)."""
+    spent: dict[str, float] = {}
+    for entry in (st or {}).get("resource_ledger", []):
+        if str(entry.get("node") or "") != str(node_id or ""):
+            continue
+        for unit, value in (entry.get("usage") or {}).items():
+            if isinstance(value, (int, float)) and not isinstance(value, bool):
+                spent[str(unit)] = spent.get(str(unit), 0.0) + float(value)
+    return spent

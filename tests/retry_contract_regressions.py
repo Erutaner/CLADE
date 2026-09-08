@@ -129,7 +129,7 @@ def recovery_context_checks() -> None:
         partial = engine._sketch_failure_summary(
             {"cycles": {"sketch": 3}, "attempts": [{"verdict": "all_killed"}]})
         check("unclassified: 2" in partial,
-              "legacy state with missing records must stay generic rather than invent a cause")
+              "a state with missing records must stay generic rather than invent a cause")
 
 
 def comparator_contract_checks() -> None:
@@ -183,7 +183,6 @@ def comparator_contract_checks() -> None:
     sketch = (PKG / "engine" / "cards" / "sketch.md").read_text(encoding="utf-8")
     tournament = (PKG / "engine" / "cards" / "tournament.md").read_text(encoding="utf-8")
     red_team = (PKG / "engine" / "cards" / "red_team.md").read_text(encoding="utf-8")
-    architecture = (PKG / "docs" / "ARCHITECTURE.md").read_text(encoding="utf-8")
     check("A root lane therefore uses `baseline`" in sketch,
           "the architect card must state the root causal comparator contract")
     check("A valid comparator may still accompany a" in tournament
@@ -192,8 +191,8 @@ def comparator_contract_checks() -> None:
           "the tournament card must separate comparator validity from promotion")
     check("does not by itself invalidate the frozen comparator" in red_team,
           "red-team must preserve the same comparator/promotion separation")
-    check("Promotion is a separate pre-execution question" in architecture,
-          "architecture must document the two contracts")
+    check("The frozen causal/resource comparator and the promotion frontier are different" in tournament,
+          "the tournament card must document the two contracts")
 
     # Exercise the real red-team scheduler branch, not just its card text: the
     # critic must receive the frozen selection audit plus both internal and
@@ -999,18 +998,18 @@ def instrumental_retry_routing_checks() -> None:
           f"a candidate lane must not accept probe_design (got {borrowed['status']!r}, {borrowed_exc!r})")
     # Lanes written before the purpose axis existed carry no purpose at all and
     # the engine reads them as candidates; the positive guard must too.
-    legacy_lane = lane_record(None, "gate")
-    legacy_gate = {"id": "G1", "kind": "idea_approval", "status": "open",
+    purposeless_lane = lane_record(None, "gate")
+    purposeless_gate = {"id": "G1", "kind": "idea_approval", "status": "open",
                    "subject": {"lane": "L001", "contract_digest": "CD"}}
-    eng, _ = engine_with(legacy_lane, legacy_gate)
-    eng._decide_gate(legacy_gate, approve=False, note="no", actor="user", retry_stage="mature")
-    check(econfig.lane_purpose(legacy_lane) == "candidate" and legacy_lane["status"] == "mature",
-          f"a purpose-less legacy lane must keep the candidate rewind (got {legacy_lane['status']!r})")
+    eng, _ = engine_with(purposeless_lane, purposeless_gate)
+    eng._decide_gate(purposeless_gate, approve=False, note="no", actor="user", retry_stage="mature")
+    check(econfig.lane_purpose(purposeless_lane) == "candidate" and purposeless_lane["status"] == "mature",
+          f"a purpose-less lane must keep the candidate rewind (got {purposeless_lane['status']!r})")
 
     # --retry-stage is an idea-gate verb. On an escalation gate the reject branch
-    # never reads it, so the flag used to be accepted with exit 0 while the lane
-    # was abandoned anyway - and on an instrumental lane that also burned the
-    # round's only slot, with the gate card promising the opposite.
+    # never reads it, so accepting the flag with exit 0 while the lane is
+    # abandoned anyway would lie - and on an instrumental lane it would also
+    # burn the round's only slot, with the gate card promising the opposite.
     for purpose, seq in eflow.INSTRUMENTAL_SEQ.items():
         esc_lane = lane_record(purpose, seq[0])
         esc_gate = {"id": "G8", "kind": "escalation", "status": "open",

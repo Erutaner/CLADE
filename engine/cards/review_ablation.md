@@ -27,11 +27,23 @@ Then these exact sections:
   implementation quality are common hidden changes.
 - `## Cheaper evidence audit` - inspect the parent artifacts. If existing logs
   or an eval-only intervention answer the question, reject the training run.
+  Check the design's answers to the two admission questions: does the
+  component have an inference-time switch, and what does one evaluation cost?
 - `## Decision value` - verify the two outcomes lead to genuinely different,
   concrete DAG choices. Curiosity without a changed action is not enough.
-- `## Cost audit` - verify exactly one changed-component run and one seed. If
-  stochasticity makes one run unable to support the decision, reject the
-  design; do not request repeated seeds inside it.
+- `## Cost audit` - verify the run count against its own stated basis: does
+  the reason given in `runs_basis` really make this many changed-component
+  runs decisive (a deterministic pipeline, an effect far above any plausible
+  spread, a reported interval, or the engine's arithmetic where a floor is
+  recorded)? The bundle's "Ablation allowance and sizing" block carries the
+  engine's own allowance and floor/win/ratio numbers - check the count and
+  the spend against them, not against the design's self-report. Too few runs
+  for the claimed resolution is REVISE; a claim no
+  affordable count can resolve is REJECT_NOT_WORTH_COST; a design above the
+  allowance the bundle prints is not yours to refuse - the user decides it at
+  the gate - but say so. Never wave a sweep or a seed cross-product through as
+  an ablation. Check `settles_parent_mechanism`: true only when the changed
+  factor is the parent's kernel.
 - `## Verdict rationale` - weigh the above.
 - `## Strongest surviving risk` - mandatory for ACCEPT; explain why it does not
   invalidate proceeding.
@@ -48,8 +60,10 @@ Verdict meanings:
 - `REJECT_INFEASIBLE`: the one-factor intervention cannot be executed under the
   frozen resource/evaluation contract.
 
-Any `REJECT_*` ends this lane before compute. `ACCEPT` still requires explicit
-user approval of both the causal design and the final executable workflow.
+Any `REJECT_*` ends this lane before compute (the parent's mechanism stays
+deferred, with the declined attempt on record). `ACCEPT` goes to the design
+gate and later the workflow gate: inside the pre-authorized allowance they
+follow the autonomy policy, above it the user decides.
 
 ## Output contract
 {{OUTPUTS}}

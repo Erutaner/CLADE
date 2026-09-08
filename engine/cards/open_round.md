@@ -42,6 +42,11 @@ the node holding the cell records is often exactly there. **Active inheritance
 frontier**: what may legally be exploited - in research mode that additionally
 requires the frozen M/E/T claim to have settled. **Measured but not
 inheritable**: real numbers with an unsettled or judged-against claim.
+The field map (`.evo/views/FIELD_MAP.md`) lists, per cell, our best and its
+holder, the published cap, the gap, who claimed the cell and what happened
+(delta, verdict, mechanism), plus your own notes when
+`.evo/profile/FIELD_NOTES.md` exists - bet where the gap and the untried
+levers are.
 
 Exploit parents come from the active inheritance frontier only. But a measured
 node that is not inheritable is not waste: it is a legal reform or hybrid
@@ -63,11 +68,18 @@ core-synthesis or theory-derived search. Baseline is later used only as code
 provenance and external comparator. Hybrids must construct a new coupling, not
 merely combine features.
 
-Targeted ablation remains a dedicated one-parent repair diagnostic with
-min_level=0. It OCCUPIES one of the lanes_per_round slots (unlike
-probe/maintenance, which ride on top), but the exploit-share and research-mix
-arithmetic never counts it as a search bet - the slot is spent on a
-diagnostic, not on an idea.
+Targeted ablation is a dedicated one-parent causal diagnostic with
+min_level=0 - the inheritance tax. After a program-level win with a `deferred`
+mechanism the engine opens it itself (research mode), and re-tries a pending one the moment
+this round goes running (unless the round is held); declare one here only when the
+bundle lists a PENDING ABLATION you want opened for certain (a declared lane
+binds to that parent) or the next bet depends on that kernel being the
+cause - never at every birth. Like probe and maintenance it rides ON TOP of the
+search-bet count (no per-round cap: every program-level win owes one; probes and
+maintenance keep their caps) and
+never counts toward exploit-share or research-mix arithmetic. An unsettled
+mechanism must not be cited as an established cause in a brief; settle it or
+build on the program only.
 
 ## Outputs
 
@@ -91,6 +103,7 @@ Write `PORTFOLIO.json`:
   "parents": ["N###"],
   "bottleneck_ids": ["repair only: B1"],
   "focus": "optional D#",
+  "mechanism_premises": ["optional: N### whose MECHANISM this lane treats as an established cause; each must read confirmed on the frontier - a deferred/unclear/refuted story is refused (settle it with evo ablate first). Building on a node's PROGRAM needs no premise."],
   "scaling_followup_of": "optional N### - see below",
   "confirmatory_of": "optional N### (a concluded exploratory scout) - see below",
   "brief_md": ".evo/rounds/{{ROUND_ID}}/lanes/<name>/BRIEF.md"
@@ -156,12 +169,16 @@ own words. Reviewer notes on tombstones are your reference only and never go
 into a brief; if a note points somewhere worth going, open an explicit lane
 with that goal.
 
-Injectable lanes (`diagnostic_probe`/`maintenance`) ride ON TOP of the
-lanes_per_round slot count: exploit intent, repair origin, min_level 0, one
-concluded parent, capped per round by budgets.probes_max_per_round /
-maintenance_max_per_round. They satisfy no research share and always face a
-manual user gate. (They can also be opened mid-round: `evo probe` /
-`evo maintain`.)
+Instrumental lanes (`targeted_ablation`/`diagnostic_probe`/`maintenance`)
+ride ON TOP of the lanes_per_round slot count: exploit intent, repair origin,
+min_level 0, one concluded parent; probes and maintenance are capped per
+round by budgets.probes_max_per_round / maintenance_max_per_round, ablations
+are not (their off switch is evidence_policy.ablation.budget_multiple = 0).
+They satisfy no research share. Probe and
+maintenance gates are manual in every autonomy mode; an ablation inside its
+allowance follows the ordinary autonomy policy, a larger one waits for the
+user. They can also be opened mid-round, the moment the need appears:
+`evo ablate` / `evo probe` / `evo maintain`.
 
 ## Output contract
 {{OUTPUTS}}

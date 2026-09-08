@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Long-horizon stress drive for Model Evolution v9.2 (deep debug).
+"""Long-horizon stress drive (deep debug).
 
 20 rounds, full_auto, git mode - the skeleton (science text) is mocked, but the
 substance is REAL:
@@ -197,7 +197,7 @@ def std_stage(lname, sname, *, key=None, consumes=None, waiver=None, kind="weigh
         "name": sname,
         "purpose": long(35, f"execute bounded {sname} and create a stable downstream handoff"),
         "launch": launch or f'"{PY}" train.py {sname}',
-        # R9 landing lease: declared landings are per-RUN exclusive across live
+        # Landing lease: declared landings are per-RUN exclusive across live
         # attempts, so the spec path must be unique per lane (parallel slots).
         "metrics_file": f"train_metrics_{lname}_{sname}.json",
         "control": control,
@@ -241,7 +241,7 @@ def check_invariants(d, out):
 
 
 def frontier_independent(d):
-    """Independent recomputation of the inheritance frontier (DESIGN_V10 §11.1),
+    """Independent recomputation of the inheritance frontier,
     written from the spec rather than by calling any engine frontier code.
 
     Legality is filtered first and non-domination second; the origin baseline is
@@ -482,10 +482,8 @@ def eval_real(d, out, nid):
         normalized["_resource_measurements"] = M.planned_resource_measurements(d, nid)
         raw_rel = f".evo/nodes/{nid}/eval/raw_metrics.json"
         wj(d.repo, raw_rel, normalized)
-        # v9.2's shipped stress drive omitted the prepared RUN identity here and
-        # therefore failed its own engine's EVAL_LAUNCH_RUN/ATTEMPT_TOKEN checks
-        # (reproduced on the untouched v9.2 tree, check 68). Carry the identity
-        # exactly like mock_drive.w_launch_eval does.
+        # Carry the prepared RUN identity exactly like mock_drive.w_launch_eval
+        # does; without it the launch fails EVAL_LAUNCH_RUN/ATTEMPT_TOKEN.
         task = next(t for t in d.state()["tasks"] if t["id"] == out["task"])
         prepared = next(r for r in d.state()["runs"] if r["id"] == task["subject"]["run"])
         wj(d.repo, out["outputs"][0], {"mode": "completed", "metrics_file": raw_rel,
@@ -493,7 +491,7 @@ def eval_real(d, out, nid):
                                         "attempt_token": prepared["attempt_token"]})
         return m
     wj(d.repo, out["outputs"][0], normalized)
-    # v9 duties: anomaly hunt + registered mechanism probe echo
+    # Duties: anomaly hunt + registered mechanism probe echo
     meta = {}
     if node.get("idea_doc"):
         mp = d.repo / node["idea_doc"].replace(".md", ".meta.json")
@@ -517,7 +515,7 @@ def eval_real(d, out, nid):
         *M.dyn_sections(d, nid),
         ("Anomalies", long(50, "NONE - curves, rare level slices and output samples were checked")),
     ]
-    if meta.get("mechanism_probe") and not str(meta.get("attribution_waiver") or "").strip():
+    if meta.get("mechanism_probe"):
         observed_text = ", ".join(f"{field}={value:g}" for field, value in probe_values_for_report)
         secs.append(("Mechanism check",
                      long(70, "the structured mechanism artifact was read and compared against the registered expectation")
@@ -794,7 +792,7 @@ def handle_deep_read(d, out, lid, beh):
         return
     prior = len(all_lane_cards(d, lid))
     if required_need >= 4 and prior == 0:
-        # v9: the deep reading program binds any L4 lane, wildcats included
+        # The deep reading program binds any L4 lane, wildcats included
         M.w_mech_cards(d, lid, 3, ["E001", "E002", "E005"])
         sub_rej(d, out, "MECH_COUNT")
     missing = max(0, need - len(all_lane_cards(d, lid)))
@@ -1030,7 +1028,6 @@ def handle_mature(d, out, lid, beh):
         meta.pop("theory_doc", None)
     meta.update({
         "sketch_id": lane_rec["winner_sketch"],
-        "search_origin": lane_rec["search_origin"],
         "program_digest": eprogram.candidate_digest(winner),
         "kernel_hash": eprogram.kernel_fingerprint(winner),
         "level": level,
@@ -1074,7 +1071,6 @@ def handle_mature(d, out, lid, beh):
                 "value_of_information": long(80, "the signal separates the load-bearing kernel from a coincidental end-metric gain under the same training run"),
                 "cheaper_modes_rejected": [],
             }
-            meta.pop("attribution_waiver", None)
     min_assum = 3 if winner.get("theory_role") == "derivational" else 2
     meta["assumptions"] = [
         {"id": f"A{i}",
@@ -1214,8 +1210,7 @@ def handle_implement(d, out, nid, beh):
     was_fix = bool(node.get("fix_needed"))
     if was_fix:
         if beh["name"] == "e4":
-            # v9.2/v10 actual semantics (empirically identical on the untouched
-            # v9.2 tree): a workflow-scope implementation revision BEGINS at fix
+            # A workflow-scope implementation revision BEGINS at fix
             # presentation - the cursor resets and prior stage artifacts are
             # invalidated immediately, because a workflow defect makes their
             # evidence suspect. The preserved failure CONTEXT is the routed
@@ -1442,6 +1437,11 @@ def dispatch(d, out):
         handle_conclude(d, out, nid, beh, node["role"])
     elif typ == "close_round":
         handle_close(d, out, s["round"])
+    elif typ == "design_ablation":
+        # research mode taxes every program-level win with an engine-opened
+        # ablation; this drive's user declines it (recorded on the parent) -
+        # the doors drive pays that lifecycle end to end
+        assert M.decline_engine_ablations(d) >= 1, "a design_ablation appeared for a lane the engine did not open"
     else:
         raise AssertionError(f"unhandled task type {typ}")
 
@@ -1457,7 +1457,7 @@ def handle_gate(d, out):
         d.decide(out["gate"], True, note="success, infrastructure and cumulative resources confirmed")
         return
     if out["gate_kind"] == "repeat_spend":
-        # v9.2 core contract: a repeated external spend after a failed attempt
+        # Core contract: a repeated external spend after a failed attempt
         # is user-owned in EVERY autonomy mode. The scenario intends the retry.
         d.decide(out["gate"], True,
                  note="reviewed the failed attempt; the whole-workflow replay is intended")
@@ -1513,11 +1513,18 @@ def final_audit(d):
     ok(roles == {"baseline": 1, "variant": 19, "hybrid": 4, "root": 6, "platform": 3},
        f"role census: {roles}")
     lanes = d.state()["lanes"]
-    origins = {origin: sum(1 for lane_rec in lanes if lane_rec.get("search_origin") == origin)
+    # the engine-opened inheritance-tax ablations ride on top of the search
+    # bets (repair origin by construction) and are tallied separately
+    bets = [lane_rec for lane_rec in lanes
+            if lane_rec.get("experiment_purpose") not in econfig.INJECTABLE_PURPOSES]
+    taxes = [lane_rec for lane_rec in lanes if lane_rec.get("experiment_purpose") == "targeted_ablation"]
+    origins = {origin: sum(1 for lane_rec in bets if lane_rec.get("search_origin") == origin)
                for origin in econfig.SEARCH_ORIGINS}
     ok(origins == {"repair": 5, "constructive": 17, "core_synthesis": 1,
                    "theory_derived": 9},
        f"all search origins exercised with a constructive majority and a real core synthesis lane: {origins}")
+    ok(len(taxes) >= 1 and all(lane_rec.get("status") == "abandoned" for lane_rec in taxes),
+       f"every program-level win was taxed with an engine-opened ablation this run declined: {len(taxes)}")
     core_lane = next(lane_rec for lane_rec in lanes if lane_rec.get("search_origin") == "core_synthesis")
     ok(not evalid.core_palette_contract_errors(d.eng().ctx(), core_lane),
        "core-synthesis palette, audit-only M/E provenance, joint seal and program upstream remain one exact contract")
@@ -1530,7 +1537,9 @@ def final_audit(d):
     ok(any(lane_rec.get("search_origin") == "theory_derived"
            and lane_rec.get("formal_kind") == "full" for lane_rec in lanes),
        "portfolio-level full theory rigor survives into a theory-derived lane")
-    idea_lanes = [lane_rec for lane_rec in lanes if lane_rec.get("intent") != "platform"]
+    # search bets only: the engine-opened inheritance-tax ablations are
+    # instrumental (min_level 0, repair origin by construction) and tallied above
+    idea_lanes = [lane_rec for lane_rec in bets if lane_rec.get("intent") != "platform"]
     ok(all(int(lane_rec.get("min_level") or 0) >= 3 for lane_rec in idea_lanes),
        "every research idea lane carries an L3+ scope contract")
     ok(sum(lane_rec.get("search_origin") != "repair" for lane_rec in idea_lanes) / len(idea_lanes) >= 0.8,
@@ -1690,7 +1699,7 @@ def final_audit(d):
        "dashboard edges exactly match unique resolving parents and platform roles")
 
     # Both frontiers have independent engine meanings.  Audit the top-level
-    # lists, legacy alias and per-node membership against fresh recomputation.
+    # lists, the alias and per-node membership against fresh recomputation.
     cfg = d.store().load_config()
     frontiers = data.get("frontiers") or {}
     inheritance = list(frontiers.get("inheritance") or [])

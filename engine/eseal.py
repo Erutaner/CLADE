@@ -20,8 +20,8 @@ import eutil
 
 
 def _publish_snapshot(source: Path, snapshot: Path, expected_digest: str, repo: Path) -> None:
-    """R9 (external audit r6): copy2 straight to the final content-addressed
-    path could crash mid-copy; the exists() fast path then trusted the partial
+    """A copy2 straight to the final content-addressed
+    path could crash mid-copy; the exists() fast path would then trust the partial
     file FOREVER (every later verify: SEALED_SNAPSHOT_CORRUPT, no repair verb,
     working bytes irrelevant). Publish via temp + verified digest + atomic
     replace, and when the final path already exists, verify it - rebuilding
@@ -92,6 +92,21 @@ def artifact_digest(repo: Path, relpath: str) -> str:
     return hashlib.sha256(payload).hexdigest()
 
 
+def snapshot(repo: Path, relpath: str) -> tuple[str, str]:
+    """Keep the current bytes of ``relpath`` in the content-addressed store
+    without sealing them: returns (digest, snapshot path). Used by the
+    amendment notebook so a corrected file never loses its previous text."""
+    digest = artifact_digest(repo, relpath)
+    if not digest:
+        raise SystemExit(f"[evo] cannot snapshot missing or unreadable file {relpath!r}")
+    path = eutil.rpath(repo, relpath)
+    seal_dir = eutil.rpath(repo, ".evo/seals")
+    seal_dir.mkdir(parents=True, exist_ok=True)
+    snap = seal_dir / f"{digest}{path.suffix.lower() or '.bin'}"
+    _publish_snapshot(path, snap, digest, repo)
+    return digest, eutil.rel(repo, snap)
+
+
 def combine_digests(*parts: str) -> str:
     clean = [str(part) for part in parts if str(part or "")]
     raw = json.dumps(clean, ensure_ascii=False, separators=(",", ":"))
@@ -133,7 +148,11 @@ def create(repo: Path, artifacts: Iterable[tuple[str, str]], *,
 def verify(repo: Path, seal: dict | None, *, label: str = "contract",
            require_working: bool = True,
            check_snapshot: bool = True,
-           digest_cache: dict[str, str] | None = None) -> list[str]:
+           digest_cache: dict[str, str] | None = None,
+           amended: dict[str, str] | None = None) -> list[str]:
+    """``amended`` maps a working path to the digest of its latest recorded
+    amendment (the experiment notebook): those bytes are accepted in place of
+    the sealed original, whose snapshot stays the historical record."""
     if not isinstance(seal, dict) or not str(seal.get("digest") or ""):
         return [f"SEAL_MISSING: {label} has no content seal"]
     errs: list[str] = []
@@ -153,9 +172,9 @@ def verify(repo: Path, seal: dict | None, *, label: str = "contract",
         # snapshot - so the working-path digest is computed only when required.
         # Flipping status therefore cannot disable verification.
         #
-        # Snapshot depth (v11): no engine DECISION ever reads snapshot bytes -
-        # they are the restore source. Hot scoped sweeps may skip re-hashing
-        # them (check_snapshot=False) because a corrupted snapshot cannot lend
+        # Snapshot depth: no engine DECISION ever reads snapshot bytes - they
+        # are the restore source. Hot scoped sweeps may skip re-hashing them
+        # (check_snapshot=False) because a corrupted snapshot cannot lend
         # approval: any restore lands on the working path, whose digest is
         # checked here every time. The periodic full sweep, doctor, revive and
         # the post-submit sweep (crash-between-write-and-validate window) keep
@@ -167,8 +186,10 @@ def verify(repo: Path, seal: dict | None, *, label: str = "contract",
             if actual is None:
                 actual = artifact_digest(repo, relpath)
                 cache[relpath] = actual
-            if not expected or actual != expected:
-                errs.append(f"SEALED_ARTIFACT_MUTATED: {label}/{role or i} {relpath!r} no longer matches {expected[:12]}")
+            amended_ok = bool(actual) and bool(amended) and amended.get(relpath) == actual
+            if (not expected or actual != expected) and not amended_ok:
+                errs.append(f"SEALED_ARTIFACT_MUTATED: {label}/{role or i} {relpath!r} no longer matches "
+                            f"{expected[:12]} (a deliberate correction is recorded with 'evo amend')")
         if check_snapshot or not require_working:
             snapshot_digest = cache.get(snapshot)
             if snapshot_digest is None:
@@ -195,7 +216,7 @@ def binding_errors(repo: Path, seal: dict | None,
                    expected: Iterable[tuple[str, str]], *,
                    label: str = "contract", exact: bool = True,
                    digest_cache: dict[str, str] | None = None,
-                   legacy_extra_roles: Iterable[str] = ()) -> list[str]:
+                   amended: dict[str, str] | None = None) -> list[str]:
     """Bind an active state pointer to the exact roles in its seal.
 
     ``verify`` proves that the paths *recorded by the seal* still carry the
@@ -225,12 +246,7 @@ def binding_errors(repo: Path, seal: dict | None,
     wanted_roles = [role for role, _path in wanted]
     if len(set(wanted_roles)) != len(wanted_roles):
         errs.append(f"SEAL_BINDING_EXPECTATION: {label} has duplicate expected roles")
-    # v10.1 removed prose-report roles from two seals; a v10-created project
-    # legally carries them.  Named legacy extras are tolerated in the role-set
-    # comparison (their rows stay content-verified by eseal.verify) so an
-    # in-place upgrade does not hard-lock every command on old active seals.
-    actual_effective = set(actual) - set(legacy_extra_roles)
-    role_mismatch = (actual_effective != set(wanted_roles) if exact
+    role_mismatch = (set(actual) != set(wanted_roles) if exact
                      else not set(wanted_roles).issubset(set(actual)))
     if role_mismatch:
         errs.append(
@@ -254,7 +270,8 @@ def binding_errors(repo: Path, seal: dict | None,
         if current is None:
             current = artifact_digest(repo, relpath)
             cache[relpath] = current
-        if not digest or current != digest:
+        amended_ok = bool(current) and bool(amended) and amended.get(relpath) == current
+        if (not digest or current != digest) and not amended_ok:
             errs.append(
                 f"SEAL_BINDING_DIGEST: {label}/{role} active content {current[:12]!r} does not "
                 f"equal sealed digest {digest[:12]!r}")

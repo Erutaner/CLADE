@@ -1,11 +1,10 @@
 """Small, dependency-free regression checks for provenance primitives.
 
-    python tests/v92_provenance_unit.py
+    python tests/provenance_unit.py
 
-This suite used 30 bare ``assert`` statements: it contributed ZERO to the
-counted total, and under ``python -O`` it silently became a no-op while still
-printing "passed" (mutation-proven in the v10.2a test audit). Every assertion
-now goes through the shared counted check() protocol.
+Every assertion goes through the shared counted check() protocol - bare
+``assert`` statements would contribute nothing to the counted total and
+silently become no-ops under ``python -O``.
 """
 from __future__ import annotations
 
@@ -103,13 +102,13 @@ def test_artifact_generations_and_reason_aware_revival(repo: Path) -> None:
     check(artifact["status"] == "available" and artifact["stale_reason"] is None, 'artifact["status"] == "available" and artifact["stale_reason"] is None must hold')
     check(not eartifact.check_registry(reg, {"N001"}), 'not eartifact.check_registry(reg, {"N001"}) must hold')
 
-    # A pre-v9.2 row remains readable and doctor-compatible.
-    legacy = {"artifacts": [{
-        "id": "AR999", "node": "N001", "stage": "train", "stage_key": "legacy|train",
-        "name": "legacy", "kind": "weights", "uri": "oss://fixture/legacy",
+    # A minimal row without generation fields remains readable and doctor-compatible.
+    minimal = {"artifacts": [{
+        "id": "AR999", "node": "N001", "stage": "train", "stage_key": "minimal|train",
+        "name": "minimal", "kind": "weights", "uri": "oss://fixture/minimal",
         "status": "available",
     }]}
-    check(not eartifact.check_registry(legacy, {"N001"}), 'not eartifact.check_registry(legacy, {"N001"}) must hold')
+    check(not eartifact.check_registry(minimal, {"N001"}), "a minimal registry row passes the registry check")
 
 
 def test_active_knowledge_and_consumed_ids(repo: Path) -> None:
@@ -145,7 +144,7 @@ def test_active_knowledge_and_consumed_ids(repo: Path) -> None:
     check([row["id"] for row in picked] == ["LS003", "LS002"], '[row["id"] for row in picked] == ["LS003", "LS002"] must hold')
     check(not ebundle.knowledge_is_active(st, "LS001"), 'not ebundle.knowledge_is_active(st, "LS001") must hold')
     check(ebundle.knowledge_is_active(st, "LS002"), 'ebundle.knowledge_is_active(st, "LS002") must hold')
-    check(ebundle.knowledge_is_active(st, "LS999"), "legacy knowledge defaults to active")
+    check(ebundle.knowledge_is_active(st, "LS999"), "knowledge without a disposition row defaults to active")
 
     task = {"id": "T0001", "type": "implement", "subject": {}, "attempts": 0}
     written: dict[str, str] = {}
@@ -172,7 +171,7 @@ def test_active_knowledge_and_consumed_ids(repo: Path) -> None:
 def main() -> None:
     test_artifact_generations_and_reason_aware_revival(HERE)
     test_active_knowledge_and_consumed_ids(HERE)
-    done("V9.2 PROVENANCE UNIT")
+    done("PROVENANCE UNIT")
 
 
 if __name__ == "__main__":

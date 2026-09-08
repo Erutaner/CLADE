@@ -1,10 +1,10 @@
-"""Small, explicit state machine for external RUN attempts (v10).
+"""Small, explicit state machine for external RUN attempts.
 
 A RUN carries three independent facts:
 
 ``status``
-    What happened on the external execution surface.  This keeps the historical
-    v9 field name, but no longer says anything about evidence validity.
+    What happened on the external execution surface.  It says nothing about
+    evidence validity.
 ``evidence_status``
     Whether the bytes needed to interpret that execution have been reconciled.
 ``adoption_status``
@@ -159,7 +159,7 @@ def next_attempt_no(runs: Iterable[Mapping[str, Any]], *, slot_key: str,
 def initialize_run(run: MutableMapping[str, Any], *,
                    existing_runs: Iterable[Mapping[str, Any]] = (),
                    token: str | None = None, now: str | None = None) -> MutableMapping[str, Any]:
-    """Add v10 identity/axis defaults to a newly allocated RUN dictionary."""
+    """Add identity/axis defaults to a newly allocated RUN dictionary."""
     timestamp = now or _utc_now()
     slot = logical_slot_key_for(run)
     contract = str(run.get("contract_digest") or "")
@@ -350,12 +350,12 @@ def holds_external_slot(run: Mapping[str, Any]) -> bool:
 def holds_reservation(run: Mapping[str, Any]) -> bool:
     """Retain the cap until execution cost can be accounted without guessing.
 
-    R9 (external audit r6): the lifetime is decided by SETTLEMENT, not by a
+    the lifetime is decided by SETTLEMENT, not by a
     status guess. A terminal failed/cancelled RUN whose accounting was deferred
-    (typically by a hold) used to fall out of both arms: its reservation
-    vanished, a sibling launched into capacity that was still owed, and the
-    later deferred settlement charged the full reserved cap - pushing the
-    project past its user-confirmed hard limit with no gate. `confirmed
+    (typically by a hold) must not fall out of both arms: its reservation
+    would vanish, a sibling would launch into capacity that is still owed, and
+    the later deferred settlement would charge the full reserved cap - pushing
+    the project past its user-confirmed hard limit with no gate. `confirmed
     not launched` still releases atomically, because that path charges
     ``usage={}`` and sets ``resource_accounted`` in the same transition."""
     if run.get("resource_accounted"):
@@ -410,7 +410,7 @@ def invariant_errors(run: Mapping[str, Any]) -> list[str]:
             errors.append(f"RUN_STAGE: {rid} stage RUN has no stage name")
         for field, value in (("stage_index", stage_index), ("replica_index", replica_index)):
             if field == "replica_index" and value is None and run.get("repeat_measure_attempt"):
-                # R9-002: the bought-back repeat lane is not a preplanned
+                # The bought-back repeat lane is not a preplanned
                 # replica - it has a fresh seed but no replica ordinal
                 continue
             if isinstance(value, bool) or not isinstance(value, int) or value < 0:

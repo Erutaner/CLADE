@@ -1,4 +1,4 @@
-"""Config schema, defaults, and validation for .evo/config.json (v10)."""
+"""Config schema, defaults, and validation for .evo/config.json."""
 from __future__ import annotations
 
 import hashlib
@@ -30,9 +30,9 @@ LANE_STATUSES = [
     "probe_design", "maintenance_design", "maintenance_review",
 ]
 NODE_ROLES = ["baseline", "root", "variant", "hybrid", "platform"]
-# NOTE: v9.2 carried a "fidelity_pass" value here that no code could ever
-# set (a passed fidelity keeps smoke_pass and clears fidelity_pending); v10
-# removes the dead value so the flow table cannot claim to handle fiction.
+# A passed fidelity keeps smoke_pass and clears fidelity_pending; there is
+# deliberately no separate status for it, so the flow table never claims to
+# handle a state no code can produce.
 NODE_STATUSES = [
     "proposed", "approved", "building", "smoke_pass", "bridge_pass",
     "executing", "stage_ready", "workflow_done", "evaluating", "evaluated",
@@ -60,9 +60,9 @@ GROUP_AGGREGATIONS = ["all", "majority", "weighted_vote"]
 SCALING_MODES = ["off", "reuse_only", "budgeted", "full"]
 PROBE_MODES = ["same_run", "existing_artifact", "eval_intervention"]
 # candidate: full novelty pipeline. targeted_ablation: causal diagnostic.
-# diagnostic_probe (v10.2): a user/agent-initiated bounded measurement that
+# Diagnostic_probe: a user/agent-initiated bounded measurement that
 # answers ONE question; no novelty claim, never a parent, never on a frontier.
-# maintenance (v10.2): an engineering repair of shared execution code with a
+# Maintenance: an engineering repair of shared execution code with a
 # parity contract; no novelty claim, frontier-transparent (proxies its parent).
 # The last three share one firewall: they satisfy no research portfolio share
 # and never earn scientific promotion - purposes gate WHAT WORK MAY CLAIM,
@@ -74,7 +74,7 @@ EXPERIMENT_PURPOSES = ["candidate", "targeted_ablation", "diagnostic_probe", "ma
 # behind a manual idea gate, level 0, one exploit parent.
 INSTRUMENTAL_PURPOSES = ("targeted_ablation", "diagnostic_probe", "maintenance")
 
-# v11.1 P5: exploratory is a FOURTH species - a real search bet (full
+# Exploratory is a FOURTH species - a real search bet (full
 # sketch -> tournament -> node route, ordinary portfolio slot, novelty duties
 # intact) that declares UP FRONT it is reconnaissance: no registered
 # predictions/theory/SOTA duties at mature, and in exchange its results are
@@ -86,15 +86,17 @@ INSTRUMENTAL_PURPOSES = ("targeted_ablation", "diagnostic_probe", "maintenance")
 # manual gate). This is the honest fix for "pre-registration assumes
 # foresight": scout first without corrupting the ledger, then confirm.
 EXPLORATORY_PURPOSES = ("exploratory",)
-# The instrumental purposes that ride ON TOP of the round's search-bet count
-# and may enter mid-round (`evo probe`/`evo maintain`). targeted_ablation is
-# instrumental but occupies an ordinary portfolio slot and is portfolio-only.
-# This pair used to be spelled as a literal tuple at four validator sites with
-# nothing proving totality - the exact shape that silently broke when the
-# third purpose arrived. eflow.check_tables now proves: every instrumental
-# purpose is either injectable or targeted_ablation, and every injectable
-# purpose has a budget cap key that exists in the defaults.
-INJECTABLE_PURPOSES = ("diagnostic_probe", "maintenance")
+# Every instrumental purpose rides ON TOP of the round's search-bet count and
+# may enter mid-round through its own door (`evo ablate` / `evo probe` /
+# `evo maintain`): instrumental work serves an existing result and never
+# competes with idea lanes for a portfolio slot. Probes and maintenance have a
+# per-round cap key that must exist in the defaults. A targeted ablation has
+# none: every program-level win owes one (the inheritance tax), and its spend
+# is bounded by the allowance (evidence_policy.ablation.budget_multiple x the
+# parent's own cost), the project's resource contract and the compute slots;
+# budget_multiple 0 is its off switch. eflow.check_tables proves the tables
+# stay consistent.
+INJECTABLE_PURPOSES = ("targeted_ablation", "diagnostic_probe", "maintenance")
 INJECTABLE_CAP_KEYS = {"diagnostic_probe": "probes_max_per_round",
                        "maintenance": "maintenance_max_per_round"}
 
@@ -117,7 +119,6 @@ INFRA_SURFACES = ["artifact_io", "weights", "launch", "eval_adapter",
                   "service", "data_access", "environment", "other"]
 TRAINING_REPLICATION_MODES = ["record_only", "preplanned"]
 TRAINING_REPLICATION_AGGREGATIONS = ["none", "mean", "median"]
-ABLATION_MODES = ["off", "targeted"]
 STAGE_CONTROL_MODES = ["fixed", "preregistered_adaptive"]
 # Stage multiplicity describes the method itself.  Training-seed repetition is
 # a workflow execution dimension and must never be encoded as one unusually
@@ -151,30 +152,37 @@ AUTONOMY_MODES = ["gated", "auto", "full_auto"]
 # targeted-ablation spend, resource-limit increases and ask-mode escalations
 # remain user-owned; the name does not broaden the engine's authority.
 GATE_KINDS = ["infra_confirm", "infra_canary_blocked", "resource_approval", "provision_blocked", "idea_approval",
-              # v11.7: the engine-fit verdict (task-class admission + shape
+              # A post-hoc claim re-prices a concluded node with its data in hand;
+              # the user sees both bets side by side and decides.
+              "posthoc_claim",
+              # The engine-fit verdict (task-class admission + shape
               # assumptions) is user-owned - approve proceeds with the
               # assessment on record, reject stops bootstrap with the gap named.
               "engine_fit_blocked",
-              # v11.7: a mid-run INFRA_FACTS revision is a user decision; the
+              # A mid-run INFRA_FACTS revision is a user decision; the
               # approved revision re-arms the canary proof before new spend.
               "infra_revision",
               "workflow_approval", "repeat_spend", "round_continue", "escalation",
-              # v11.1 P4: pre-registered on-the-line repeat. Opens only when a
+              # Pre-registered on-the-line repeat. Opens only when a
               # registered repeat_rule fires (single measured delta inside the
               # band around a decision line); spends a training run, so it is
               # user-owned in every autonomy mode.
               "repeat_measure",
-              # E2: settlement of a human-study cell is user-owned in every
+              # Settlement of a human-study cell is user-owned in every
               # autonomy mode - the sealed study import must be SEEN.
               "human_study_confirm",
-              # v11: the honest early-exit verb. The agent may PROPOSE stopping
-              # a lane/node it judges dead ("this direction cannot work") with
+              # The honest early-exit verb. The agent may PROPOSE stopping a
+              # lane/node it judges dead ("this direction cannot work") with
               # its reasons; the USER decides. Approve = deliberate stop with
               # the reason on record (not a failure statistic); reject = keep
-              # going. Before this the cheapest legal exit from a doomed
-              # direction was riding it to attempts-exhaustion - the largest
-              # recoverable spend in the survival audit.
-              "abandon_request"]
+              # going. Riding a doomed direction to attempts-exhaustion is the
+              # largest recoverable spend an evolution can make.
+              "abandon_request",
+              # A settled mechanism verdict re-judged because its FORMULA was
+              # wrong (not its threshold): an independent judge ruled
+              # FORMULA_ERROR, the user decides whether the same sealed
+              # observations are re-settled under the corrected rule.
+              "instrument_correction"]
 
 # Evaluation uncertainty is intentionally narrower than generic statistics.
 # Both supported interval forms are computed from one fixed evaluation artifact
@@ -184,12 +192,12 @@ GATE_KINDS = ["infra_confirm", "infra_canary_blocked", "resource_approval", "pro
 UNCERTAINTY_METHODS = ["analytic", "fixed_predictions_bootstrap"]
 UNCERTAINTY_UNITS = ["sample", "query", "episode", "case"]
 
-# Project preparation (v11.7, replaces the v8 late bring-up): whether the
+# Project preparation: whether the
 # supplied project needs CONSTRUCTIVE work before any contract can honestly be
 # frozen is decided at project_scan (PROJECT_DISCOVERY.readiness) - a
 # provision pass may wire data, build a minimal evaluation, and fix bugs until
 # a first real number exists, and its observed facts feed configure/INFRA.
-# Per-node full-chain rehearsal (v11.7): before a node's first full-scale RUN,
+# Per-node full-chain rehearsal: before a node's first full-scale RUN,
 # one tiny real pass over the ENTIRE workflow (all stages + eval) on the real
 # platform, with consumer-read proof of every produced artifact.
 #   full_chain: rehearsal is a duty for every non-baseline node with stages
@@ -199,7 +207,7 @@ REHEARSAL_MODES = ["full_chain", "none"]
 LESSON_SCOPES = ["global", "lineage", "conditional"]
 ARTIFACT_KINDS = ["weights", "dataset", "tokenizer", "index", "embedding", "report",
                   "prompt", "adapter", "config", "collection", "state",
-                  # v10 (2025+ survey): procedural dataset generators with a
+                  # Procedural dataset generators with a
                   # deterministic sampling contract; stage-discovered programs
                   # (LLM-evolved code) promoted to implementations only through
                   # a follow-up node's normal implement path; interactive
@@ -247,7 +255,7 @@ for _preset_name, _preset in PRESETS.items():
             f"{sorted(set(_preset) ^ set(PRESET_KEYS))}")
 
 DEFAULT_CONFIG: dict[str, Any] = {
-    "evo_version": "10",
+    "evo_version": "1",
     "project": {
         "name": "",
         "goal": "",
@@ -287,14 +295,23 @@ DEFAULT_CONFIG: dict[str, Any] = {
         # Every inferred/defaulted choice must be visible here; silence is not
         # consent.  {id, decision, basis, revisit_when}.
         "assumptions": [],
-        # v11: {cell_id: width} - the field's own measurement noise for that
+        # {cell_id: width} - the field's own measurement noise for that
         # cell, recorded from literature during evidence/configure (published
-        # seed variance, leaderboard neighbor gaps). 0/absent = v10 behavior.
+        # seed variance, leaderboard neighbor gaps). 0/absent = no floor.
         # A bare-scalar result is compared as [v-width, v+width] so hiding the
         # error bar stops being the winning move; a REPORTED interval is used
         # as reported. Records whose winning margin is below the floor are
         # labeled provisional in the views (label, never a gate).
         "noise_floors": {},
+        # Where each floor / margin came from: user | literature | provisional.
+        "noise_floor_sources": {},
+        "margin_sources": {},
+        # How many floors a real win must clear: the user's own bar, asked at
+        # configure together with the floors. 1 = one floor width (the field's
+        # run-to-run spread); a field whose floors are wide or whose leaders
+        # sit close together may ask for 2 or 3. Notebook material (amendable);
+        # a node keeps the multiple it was measured with (eval_floor_multiple_frozen).
+        "noise_floor_multiple": 1.0,
     },
     "evidence_policy": {
         # Probes are cheap measurements, never an implied training arm. Training
@@ -315,11 +332,12 @@ DEFAULT_CONFIG: dict[str, Any] = {
             "revisit_when": "",
         },
         "ablation": {
-            # targeted permits a separately approved child whose single changed
-            # component distinguishes two decision-relevant explanations. It is
-            # not an automatic L3 duty and never multiplies across training seeds.
-            "mode": "",
-            "max_costly_runs_per_node": 0,
+            # The inheritance tax. After a program-level win whose mechanism was
+            # never instrumented, the engine opens one targeted ablation on that
+            # node; it may spend up to budget_multiple x what the node itself
+            # cost (at least one retrain whenever the multiple is > 0). 0 means
+            # no ablation spend: the mechanism stays deferred for good.
+            "budget_multiple": 0.0,
             "basis": "",
         },
         "scaling_mode": "off",
@@ -333,15 +351,34 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "limits": {},
         "basis": "",
         "on_exhaustion": "ask",
+        # The most ONE node may plan to spend, per unit: the user's own bar on
+        # a single experiment, or - when the user cannot name one - the agent's
+        # estimate from the machines at hand and the field's usual costs,
+        # recorded as such. A declared cap or a smoke-measured projection above
+        # it turns the workflow gate manual even under full_auto. Notebook
+        # material (evo amend), outside the signed contract.
+        "node_ceiling": {},
+        "node_ceiling_source": "",
+        "node_ceiling_basis": "",
+        # How many accelerators our jobs may hold at once on a shared machine
+        # (asked at the infra interview; None = the scheduler decides / not
+        # limited). The agent picks whichever free devices it likes under
+        # this number at each launch. Notebook material.
+        "max_devices": None,
+        # How long a launch may keep reporting "resources busy" before the
+        # engine asks the user (minutes). Busy is not failure: no attempt is
+        # spent while waiting.
+        "busy_wait_minutes": 180,
     },
     "budgets": {
         "rounds_max": 0,               # 0 => ask the user after each round (round_continue gate)
         "lanes_per_round_min": 1,
         "lanes_per_round_max": 4,
-        # Instrumental-work caps (v10.2): probes/maintenance never satisfy
-        # research shares, so without a cap a run could quietly become an
-        # engineering run under a research flag. Both are per round, on top
-        # of (not inside) lanes_per_round_max.
+        # Instrumental-work caps: probes/maintenance never satisfy research
+        # shares, so without a cap a run could quietly become an engineering
+        # run under a research flag. Both are per round, on top of (not
+        # inside) lanes_per_round_max. Ablations are uncapped: one per
+        # program-level win, bounded by the allowance.
         "probes_max_per_round": 1,
         "maintenance_max_per_round": 1,
         # These are complete scientific programs, not one-paragraph module
@@ -382,16 +419,16 @@ DEFAULT_CONFIG: dict[str, Any] = {
         "autonomy": "gated",
         "cost_gate_class": "heavy",    # trainings at/above this class need a user gate (auto mode); gated mode gates medium+
         "on_stuck": "ask",             # ask | abandon
-        # v11: `evo next` audits the objects the imminent decision consumes;
+        # `evo next` audits the objects the imminent decision consumes;
         # the full-web tripwire runs every K invocations or T minutes
-        # (whichever first) and always in doctor. "full" restores the v10
-        # every-call behavior.
+        # (whichever first) and always in doctor. "full" sweeps on
+        # every call.
         "next_sweep": "scoped",        # scoped | full
         "full_sweep_every": 8,
         "full_sweep_max_minutes": 30,
-        # v11: provenance discipline for self-judged release verdicts
+        # Provenance discipline for self-judged release verdicts
         # (tournament advance / red_team ACCEPT / challenge PROCEED /
-        # fidelity FAITHFUL). off = v10 behavior; attest = record + surface
+        # fidelity FAITHFUL). off = no isolation check; attest = record + surface
         # at the gate; strict = a release verdict must carry a session id
         # different from the authored work's.
         "critic_isolation": "attest",  # off | attest | strict
@@ -423,19 +460,8 @@ DEFAULT_CONFIG: dict[str, Any] = {
     "infra": {
         "facts_file": ".evo/profile/INFRA_FACTS.json",
         "max_concurrent_stage_jobs": 1,  # scheduler-visible workflow jobs; infra scan records the real quota
-        "drills": True,                  # mandatory integrated canary (legacy key name; may not be disabled)
+        "drills": True,                  # mandatory integrated canary; may not be disabled
     },
-    # v12: validity tolerance band for declared stage/eval budget caps.
-    # usage > cap * band invalidates the evidence; 1.0 = strict historical
-    # semantics. Deliberately a TOP-LEVEL key OUTSIDE the bootstrap contract
-    # digest: it is a documented mutable governance control (like
-    # policy.autonomy) whose changes affect FUTURE evidence ingestion only.
-    # Recorded numbers never move with it - accounting, receipts, capacity
-    # reservations and E-gate resource comparisons always use actual usage.
-    # Caps themselves remain the contract: derive each budget.limits value
-    # from a worst-case estimate (x1.3 is the field-tested rule); the band is
-    # an escape valve for mis-derived caps, never a planning allowance.
-    "stage_budget_tolerance": 1.0,
 }
 
 _COST_ORDER = {c: i for i, c in enumerate(COST_CLASSES)}
@@ -448,7 +474,7 @@ def cost_at_least(cls: str, floor: str) -> bool:
 def merged_default() -> dict[str, Any]:
     import copy
     cfg = copy.deepcopy(DEFAULT_CONFIG)
-    # R7 external audit: a NAMED preset owns its seven tempo keys at load time
+    # A NAMED preset owns its seven tempo keys at load time
     # (apply_preset fills them on every load_config). Materializing them into
     # the written file made the promised one-word preset flip illegal: the
     # stale numbers of the old preset became six CONFIG_PRESET_CONFLICT
@@ -572,7 +598,7 @@ def _validate_evaluation_contract(cfg: dict[str, Any], metric_keys: set[str]) ->
         if not _finite_number(task.get("weight")) or float(task.get("weight") or 0) <= 0:
             errs.append(f"CONFIG_EVAL_TASK_{i}_WEIGHT: weight must be > 0 (used only by a group's weighted_vote)")
 
-    # E2 (2025+ survey): a cell may declare source=human_study with a frozen
+    # A cell may declare source=human_study with a frozen
     # protocol; the engine hosts preregistration/sealing/settlement of the
     # imported study, never its execution, and such cells are user-owned at
     # settlement time.
@@ -597,7 +623,7 @@ def _validate_evaluation_contract(cfg: dict[str, Any], metric_keys: set[str]) ->
         if source_kind and source_kind not in ("automated", "human_study"):
             errs.append(f"CONFIG_EVAL_CELL_{i}_SOURCE_KIND: source_kind must be automated|human_study")
         if source_kind == "human_study":
-            # E2 (2025+ survey): the engine hosts the preregistration, sealed
+            # The engine hosts the preregistration, sealed
             # import and settlement of a human study; it never executes one.
             if len(str(cell.get("study_protocol") or "").strip()) < 80:
                 errs.append(f"CONFIG_EVAL_CELL_{i}_STUDY_PROTOCOL: a human_study cell must freeze a "
@@ -745,10 +771,6 @@ def _validate_evidence_policy(cfg: dict[str, Any]) -> list[str]:
     for f in ("max_extra_eval_arms_per_node", "max_scaling_costly_arms"):
         if not isinstance(ep.get(f), int) or ep.get(f, -1) < 0:
             errs.append(f"CONFIG_EVIDENCE_{f.upper()}: must be a non-negative integer")
-    legacy = sorted(set(ep) & {"max_extra_costly_arms_pre_signal", "in_node_costly_ablations"})
-    if legacy:
-        errs.append(f"CONFIG_EVIDENCE_LEGACY_COST_BUCKET: remove obsolete fields {legacy}; training replication "
-                    "and targeted ablation now have separate user-confirmed policies")
     if not isinstance(ep.get("require_value_of_information"), bool) or not ep.get("require_value_of_information"):
         errs.append("CONFIG_EVIDENCE_VOI: require_value_of_information must be true")
 
@@ -788,20 +810,15 @@ def _validate_evidence_policy(cfg: dict[str, Any]) -> list[str]:
     if not isinstance(ablation, dict):
         errs.append("CONFIG_ABLATION_POLICY: evidence_policy.ablation object required")
         ablation = {}
-    ablation_mode = ablation.get("mode")
-    if ablation_mode not in ABLATION_MODES:
-        errs.append(f"CONFIG_ABLATION_MODE: mode must be one of {ABLATION_MODES}")
-    max_runs = ablation.get("max_costly_runs_per_node")
-    if not isinstance(max_runs, int) or isinstance(max_runs, bool) or max_runs < 0:
-        errs.append("CONFIG_ABLATION_RUNS: max_costly_runs_per_node must be a non-negative integer")
-    if ablation_mode == "off" and max_runs != 0:
-        errs.append("CONFIG_ABLATION_OFF: ablation mode off requires max_costly_runs_per_node=0")
-    if ablation_mode == "targeted" and max_runs != 1:
-        errs.append("CONFIG_ABLATION_TARGETED: targeted mode permits exactly one changed-component run per "
-                    "ablation node; broader studies need a new user-approved design")
+    multiple = ablation.get("budget_multiple")
+    if isinstance(multiple, bool) or not isinstance(multiple, (int, float)) \
+            or not math.isfinite(float(multiple)) or float(multiple) < 0:
+        errs.append("CONFIG_ABLATION_BUDGET: evidence_policy.ablation.budget_multiple must be a finite "
+                    "number >= 0 - how much a concluded node may spend settling its own mechanism, as a "
+                    "multiple of what that node cost (0 = no ablation spend, the mechanism stays deferred)")
     if len(str(ablation.get("basis") or "").strip()) < 40:
-        errs.append("CONFIG_ABLATION_BASIS: record why targeted ablation is allowed or disabled for this "
-                    "project and budget (>= 40 chars)")
+        errs.append("CONFIG_ABLATION_BASIS: record why this multiple fits the project's science and budget "
+                    "(>= 40 chars)")
 
     mode = ep.get("scaling_mode")
     if mode not in SCALING_MODES:
@@ -819,26 +836,8 @@ def validate_config(cfg: dict[str, Any]) -> list[str]:
     errs: list[str] = []
     if not isinstance(cfg, dict):
         return ["CONFIG_NOT_OBJECT: config.json must be a JSON object"]
-    policy_keys = set(cfg.get("policy")) if isinstance(cfg.get("policy"), dict) else set()
-    budget_keys = set(cfg.get("budgets")) if isinstance(cfg.get("budgets"), dict) else set()
-    legacy_policy = sorted(policy_keys & {"novelty_floor", "research_min_l3_share"})
-    legacy_budgets = sorted(budget_keys & {"program_assumption_inversions_min", "bold_sketch_required",
-                                           "sketch_moves_distinct_min", "sketch_customs_max"})
-    if legacy_policy:
-        errs.append(f"CONFIG_LEGACY_POLICY: removed policy fields {legacy_policy}; use scope_floor and the independent M gate")
-    if legacy_budgets:
-        errs.append(f"CONFIG_LEGACY_BUDGETS: removed narrative/assumption quotas {legacy_budgets}")
-    if cfg.get("evo_version") != "10":
-        errs.append("CONFIG_VERSION: evo_version must be '10'")
-    tol = cfg.get("stage_budget_tolerance")
-    if tol is not None and (isinstance(tol, bool) or not isinstance(tol, (int, float))
-                            or not math.isfinite(float(tol)) or float(tol) < 1.0):
-        # The accessor clamps malformed values to 1.0 so validation can never
-        # deadlock a live project, but a typo must still surface loudly here
-        # instead of silently running strict.
-        errs.append("CONFIG_BUDGET_TOLERANCE: stage_budget_tolerance must be a finite number >= 1.0 "
-                    "(validity band multiplier for declared budget caps; 1.0 = strict; "
-                    "changes affect future evidence ingestion only)")
+    if cfg.get("evo_version") != "1":
+        errs.append("CONFIG_VERSION: evo_version must be '1' (this engine's config schema)")
 
     # Malformed top-level blocks must yield deficiencies, never AttributeErrors:
     # a validator that crashes on bad input silently exempts that input.
@@ -977,6 +976,11 @@ def validate_config(cfg: dict[str, Any]) -> list[str]:
             errs.append(f"CONFIG_POLICY_{key.upper()}: policy.{key} must be an integer >= 1")
     if pol.get("critic_isolation", "attest") not in ("off", "attest", "strict"):
         errs.append("CONFIG_CRITIC_ISOLATION: policy.critic_isolation must be off|attest|strict")
+    nfm = (_block("evaluation_contract", {}) or {}).get("noise_floor_multiple", 1.0)
+    if isinstance(nfm, bool) or not isinstance(nfm, (int, float)) or not math.isfinite(float(nfm)) \
+            or float(nfm) <= 0:
+        errs.append("CONFIG_NOISE_FLOOR_MULTIPLE: evaluation_contract.noise_floor_multiple must be a finite "
+                    "number > 0 - how many noise-floor widths a real win must clear (1 = one width)")
     nf = (_block("evaluation_contract", {}) or {}).get("noise_floors") or {}
     if not isinstance(nf, dict):
         errs.append("CONFIG_NOISE_FLOORS: evaluation_contract.noise_floors must be an object "
@@ -990,9 +994,20 @@ def validate_config(cfg: dict[str, Any]) -> list[str]:
                             "finite number >= 0")
             elif cell_ids and str(cell_id) not in cell_ids:
                 errs.append(f"CONFIG_NOISE_FLOOR_{str(cell_id).upper()}: names no evaluation cell")
-            elif float(width) > 0:
-                # The margin below the field's own noise is the exact trap the
-                # measurement audit named: the cell's outcome is then decided
+            else:
+                # Two independent facts about one floor: where it came from,
+                # and whether the cell's margin sits inside it. Report both.
+                source = str(((_block("evaluation_contract", {}) or {}).get("noise_floor_sources") or {})
+                             .get(str(cell_id)) or "")
+                if source not in FACT_SOURCES:
+                    errs.append(f"CONFIG_NOISE_FLOOR_SOURCE_{str(cell_id).upper()}: record where this floor "
+                                "came from in evaluation_contract.noise_floor_sources: "
+                                "user | literature | provisional")
+            if not isinstance(width, bool) and isinstance(width, (int, float)) \
+                    and math.isfinite(float(width)) and float(width) > 0 \
+                    and (not cell_ids or str(cell_id) in cell_ids):
+                # A margin below the field's own noise is the exact trap: the
+                # cell's outcome is then decided
                 # by seed luck, and the record ratchets on noise maxima.
                 for cell in evaluation_cells(cfg):
                     if str(cell.get("id")) == str(cell_id):
@@ -1031,9 +1046,9 @@ def validate_config(cfg: dict[str, Any]) -> list[str]:
             errs.append(f"CONFIG_POLICY_{key.upper()}: policy.{key} must be a number in [0,1]")
         if shape == "int" and (isinstance(value, bool) or not isinstance(value, int) or value < 0):
             errs.append(f"CONFIG_POLICY_{key.upper()}: policy.{key} must be an integer >= 0")
-    # Two independently sane focus knobs can contradict each other. R9 audit
-    # + v11.4 reconciliation: this satisfiability statement and the runtime
-    # admission share ONE explicit rule - the cap binds over qualifying
+    # Two independently sane focus knobs can contradict each other. This
+    # satisfiability statement and the runtime admission share ONE explicit
+    # rule - the cap binds over qualifying
     # candidate lanes, except that the single lane a starved direction
     # forces rides outside the numerator (so starvation forcing is always
     # satisfiable, in every round size). What remains genuinely
@@ -1068,6 +1083,36 @@ def validate_config(cfg: dict[str, Any]) -> list[str]:
         errs.append("CONFIG_SCOPE_FLOOR_WILDCAT_MIN: wildcat lanes are parentless full-program roots "
                     "(a lane with no model parent has nothing to make a smaller change to); "
                     "scope_floor.wildcat must be 4")
+    rc_ceiling = (_block("resource_contract", {}) or {}).get("node_ceiling")
+    if rc_ceiling is None:
+        rc_ceiling = {}
+    if not isinstance(rc_ceiling, dict):
+        errs.append("CONFIG_NODE_CEILING: resource_contract.node_ceiling must be an object {unit: value} - the most "
+                    "one node may plan to spend per unit")
+    else:
+        for unit, value in rc_ceiling.items():
+            if not re.fullmatch(r"[a-z][a-z0-9_]{1,47}", str(unit or "")):
+                errs.append(f"CONFIG_NODE_CEILING_UNIT: node ceiling unit {unit!r} must be a lowercase slug")
+            if isinstance(value, bool) or not isinstance(value, (int, float)) \
+                    or not math.isfinite(float(value)) or float(value) <= 0:
+                errs.append(f"CONFIG_NODE_CEILING_VALUE: resource_contract.node_ceiling.{unit} must be finite and > 0")
+        rc_source = str((_block("resource_contract", {}) or {}).get("node_ceiling_source") or "")
+        if rc_ceiling and rc_source not in ("user", "estimated", "provisional"):
+            errs.append("CONFIG_NODE_CEILING_SOURCE: record where the node ceiling came from in "
+                        "resource_contract.node_ceiling_source: user | estimated | provisional")
+        rc_basis = str((_block("resource_contract", {}) or {}).get("node_ceiling_basis") or "").strip()
+        if rc_ceiling and rc_source == "estimated" and len(rc_basis) < 20:
+            errs.append("CONFIG_NODE_CEILING_BASIS: an estimated node ceiling records its basis (>= 20 chars: the "
+                        "machines at hand and the field's usual cost for this scale) in "
+                        "resource_contract.node_ceiling_basis")
+    md = (_block("resource_contract", {}) or {}).get("max_devices")
+    if md is not None and (isinstance(md, bool) or not isinstance(md, int) or md < 1):
+        errs.append("CONFIG_MAX_DEVICES: resource_contract.max_devices must be an integer >= 1 (how many "
+                    "accelerators our jobs may hold at once) or null when the scheduler decides")
+    bw = (_block("resource_contract", {}) or {}).get("busy_wait_minutes", 180)
+    if isinstance(bw, bool) or not isinstance(bw, int) or bw < 1:
+        errs.append("CONFIG_BUSY_WAIT: resource_contract.busy_wait_minutes must be an integer >= 1 - how long a "
+                    "launch may report 'resources busy' before the engine asks the user")
     bud = _block("budgets", {})
     for f in ("rounds_max", "lanes_per_round_min", "lanes_per_round_max", "sketches_per_lane",
               "probes_max_per_round", "maintenance_max_per_round",
@@ -1133,7 +1178,7 @@ def validate_config(cfg: dict[str, Any]) -> list[str]:
     if isinstance(bud.get("lanes_per_round_min"), int) and isinstance(bud.get("lanes_per_round_max"), int):
         if bud["lanes_per_round_min"] > bud["lanes_per_round_max"]:
             errs.append("CONFIG_BUDGET_LANES: lanes_per_round_min must be <= lanes_per_round_max")
-        # R9 audit: a 0 lane ceiling passed validation, opened empty rounds,
+        # A 0 lane ceiling passed validation, opened empty rounds,
         # and then the cadence rules (wildcat/stagnation - always positive
         # under every named preset and mandatory in research mode) demanded a
         # reform lane the same portfolio was forbidden to contain: a
@@ -1192,7 +1237,7 @@ def resource_axes(cfg: dict[str, Any]) -> list[str]:
 
 def budget(cfg: dict[str, Any], key: str) -> int:
     """One budget accessor: the fallback is DEFAULT_CONFIG's value, never a
-    per-call-site literal (v9.2's scattered literals had drifted apart)."""
+    per-call-site literal."""
     default = DEFAULT_CONFIG["budgets"].get(key)
     if default is None:
         raise KeyError(f"unknown budget key {key!r}")
@@ -1285,15 +1330,14 @@ def result_interval(raw: Any) -> tuple[float | None, float | None, float | None]
 
 
 def noise_floor(cfg: dict[str, Any], cell_id: str, st: dict[str, Any] | None = None) -> float:
-    """Literature/field-calibrated noise width for one evaluation cell (v11).
+    """Literature/field-calibrated noise width for one evaluation cell.
 
-    0.0 (the default) reproduces v10 behavior exactly. When the user records a
+    0.0 (the default) applies no floor. When the user records a
     floor (published seed variance, leaderboard neighbor gaps - captured during
-    the evidence/configure phase), a bare-scalar measurement no longer gets a
-    free zero-width interval: hiding the error bar stops being the winning
-    move, which is the adverse-selection fix the measurement audit demanded.
+    the evidence/configure phase), a bare-scalar measurement gets no free
+    zero-width interval: hiding the error bar is not the winning move.
 
-    v11.1 P3: in preplanned multi-seed mode the engine measures the actual
+    in preplanned multi-seed mode the engine measures the actual
     seed-to-seed spread per cell (st["observed_noise"], >= 2 seed sets) and
     that measured value outranks the literature guess - our own runs on our
     own harness beat someone else's published variance. Observed noise lives
@@ -1312,6 +1356,57 @@ def noise_floor(cfg: dict[str, Any], cell_id: str, st: dict[str, Any] | None = N
             and math.isfinite(float(raw)) and float(raw) > 0:
         return float(raw)
     return 0.0
+
+
+def node_ceiling(cfg: dict[str, Any]) -> dict[str, float]:
+    """The most one node may plan to spend, per unit (resource_contract.node_ceiling)."""
+    raw = (cfg.get("resource_contract") or {}).get("node_ceiling") or {}
+    out: dict[str, float] = {}
+    if isinstance(raw, dict):
+        for unit, value in raw.items():
+            if isinstance(value, (int, float)) and not isinstance(value, bool) \
+                    and math.isfinite(float(value)) and float(value) > 0:
+                out[str(unit)] = float(value)
+    return out
+
+
+def node_ceiling_source(cfg: dict[str, Any]) -> str:
+    return str((cfg.get("resource_contract") or {}).get("node_ceiling_source") or "")
+
+
+def max_devices(cfg: dict[str, Any]) -> int | None:
+    """How many accelerators our jobs may hold at once (resource_contract.max_devices); None = unlimited."""
+    raw = (cfg.get("resource_contract") or {}).get("max_devices")
+    if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 1:
+        return raw
+    return None
+
+
+def busy_wait_minutes(cfg: dict[str, Any]) -> int:
+    raw = (cfg.get("resource_contract") or {}).get("busy_wait_minutes", 180)
+    if isinstance(raw, int) and not isinstance(raw, bool) and raw >= 1:
+        return raw
+    return 180
+
+
+def noise_floor_multiple(cfg: dict[str, Any]) -> float:
+    """How many floor widths a real win must clear (evaluation_contract.noise_floor_multiple).
+    The recorded floor is the field's measurement noise; the multiple is the
+    user's own bar on top of it. Anything unusable reads as 1."""
+    raw = (cfg.get("evaluation_contract") or {}).get("noise_floor_multiple", 1.0)
+    if isinstance(raw, (int, float)) and not isinstance(raw, bool) \
+            and math.isfinite(float(raw)) and float(raw) > 0:
+        return float(raw)
+    return 1.0
+
+
+def decision_floor(cfg: dict[str, Any], cell_id: str, st: dict[str, Any] | None = None) -> float:
+    """The band a scalar comparison must clear to count as a real difference:
+    the cell's noise floor times the user's multiple. Every decision that asks
+    "did it really move" (wins, records, dominance, equivalence) reads this;
+    what asks "how noisy is one run" (repeat bands, ablation sizing) reads the
+    bare noise_floor()."""
+    return noise_floor(cfg, cell_id, st) * noise_floor_multiple(cfg)
 
 
 def noise_floor_source(cfg: dict[str, Any], cell_id: str, st: dict[str, Any] | None = None) -> str:
@@ -1384,41 +1479,18 @@ def resource_limits(cfg: dict[str, Any]) -> dict[str, float]:
             if isinstance(v, (int, float)) and not isinstance(v, bool) and math.isfinite(float(v)) and float(v) > 0}
 
 
-def budget_tolerance(cfg: dict[str, Any]) -> float:
-    """Validity tolerance band for declared per-stage/eval budget caps.
-
-    v12: caps are frozen at spec time, but real timing evidence only exists
-    after implementation.  Under a registered RNG the cost trajectory is
-    deterministic, so a cap set slightly too low invalidates the evidence,
-    and every replacement rerun repeats the same overage - a structural
-    livelock whose only exit was abandoning the node.  The band moves ONLY
-    the validity judgment (usage > cap * band invalidates); every recorded
-    number - usage accounting, receipts, capacity reservations, E-gate
-    resource comparisons - stays the actual measurement.  The key is a
-    documented mutable governance control (like policy.autonomy): it sits
-    OUTSIDE the bootstrap contract digest, and changing it affects only
-    future ingestions, never already-disposed evidence.  Default 1.0 keeps
-    the historical strict semantics; the accessor clamps defensively while
-    validate_config reports malformed values loudly.
-    """
-    raw = cfg.get("stage_budget_tolerance")
-    if isinstance(raw, bool) or not isinstance(raw, (int, float)):
-        return 1.0
-    value = float(raw)
-    if not math.isfinite(value) or value < 1.0:
-        return 1.0
-    return value
-
-
-def bootstrap_contract_digest(cfg: dict[str, Any]) -> str:
-    """Digest the user-confirmed scientific and resource contract.
+def bootstrap_contract_payload(cfg: dict[str, Any]) -> dict[str, Any]:
+    """The signed part of the config: what the bootstrap digest covers, as a
+    tree whose dotted paths are config paths. Everything outside it is either
+    a notebook fact (corrected on record with `evo amend`), a documented
+    control (`evo autonomy`, the preset word) or display-only text.
 
     Supervision/tempo may change through their documented controls, but the
     objective, evaluation semantics, evidence-spend policy and project limits
     may not silently change after the mandatory bootstrap sign-off.
     """
     project = cfg.get("project") or {}
-    # R7 external audit: freeze by exclusion, not by omission. budgets and
+    # Freeze by exclusion, not by omission. budgets and
     # policy drive the real state machine (rounds_max, max_attempts, on_stuck,
     # critic_isolation), and README promises they are part of the signed
     # contract - only the DOCUMENTED mutable controls stay outside the digest:
@@ -1426,24 +1498,76 @@ def bootstrap_contract_digest(cfg: dict[str, Any]) -> str:
     # preset-owned tempo keys (the documented one-word flip).
     policy = {k: v for k, v in (cfg.get("policy") or {}).items()
               if k not in ("autonomy", "preset") + PRESET_KEYS}
-    # R9 audit: the project block now freezes BY EXCLUSION too (the stated
+    # The project block now freezes BY EXCLUSION too (the stated
     # principle above) - vcs, code_root, rehearsal and docs all change
     # execution semantics (worktree rules, code root, per-node rehearsal
-    # duty, card inputs) and used to drift silently after sign-off because the
-    # old include-list carried only four fields. Only the display-only name
-    # stays outside the digest.
-    payload = {
+    # duty, card inputs) so none of them can drift silently after sign-off.
+    # Only the display-only name stays outside the digest.
+    # World facts inside the contract are notebook material, not part of the
+    # signature: how noisy a cell is, what step counts as an advance, which
+    # cells must not slip, the ablation allowance. They are corrected on record
+    # (evo amend) and settled nodes keep the floor they were judged with.
+    contract = json.loads(json.dumps(cfg.get("evaluation_contract") or {}))
+    for key in ("noise_floors", "noise_floor_sources", "margin_sources", "noise_floor_multiple"):
+        contract.pop(key, None)
+    contract["cells"] = [
+        {k: v for k, v in cell.items()
+         if k not in ("min_improvement", "noninferiority_margin", "required", "goal_threshold",
+                      "goal_threshold_source")}
+        for cell in (contract.get("cells") or []) if isinstance(cell, dict)]
+    evidence = json.loads(json.dumps(cfg.get("evidence_policy") or {}))
+    if isinstance(evidence.get("ablation"), dict):
+        evidence["ablation"] = {k: v for k, v in evidence["ablation"].items()
+                                if k not in ("budget_multiple", "basis")}
+    return {
         "project": {k: v for k, v in project.items() if k not in ("name",)},
         "metrics": cfg.get("metrics"),
-        "evaluation_contract": cfg.get("evaluation_contract"),
-        "evidence_policy": cfg.get("evidence_policy"),
-        "resource_contract": cfg.get("resource_contract"),
+        "evaluation_contract": contract,
+        "evidence_policy": evidence,
+        # The node ceiling and the projection gap are the user's own bars on
+        # single experiments - notebook facts, not the signed project totals.
+        "resource_contract": {k: v for k, v in (cfg.get("resource_contract") or {}).items()
+                              if k not in ("node_ceiling", "node_ceiling_source", "node_ceiling_basis",
+                                           "max_devices", "busy_wait_minutes")},
         "research": cfg.get("research"),
         "budgets": cfg.get("budgets"),
         "policy": policy,
     }
-    raw = json.dumps(payload, ensure_ascii=False, sort_keys=True, separators=(",", ":"))
+
+
+def bootstrap_contract_digest(cfg: dict[str, Any]) -> str:
+    """Digest of the signed contract (bootstrap_contract_payload)."""
+    raw = json.dumps(bootstrap_contract_payload(cfg), ensure_ascii=False, sort_keys=True,
+                     separators=(",", ":"))
     return hashlib.sha256(raw.encode("utf-8")).hexdigest()
+
+
+FACT_SOURCES = ("user", "literature", "provisional")
+
+
+def smoke_must_contain(step: dict) -> list[dict]:
+    """One reading of a smoke step's must_contain, whichever legal spelling the
+    author used: the row form [{file, text}] or the mapping form
+    {file: text | [texts]}. Anything else raises ValueError with the text the
+    runner would print."""
+    raw = (step or {}).get("must_contain")
+    if raw is None:
+        return []
+    rows: list[dict] = []
+    if isinstance(raw, dict):
+        for file, texts in raw.items():
+            for text in (texts if isinstance(texts, list) else [texts]):
+                rows.append({"file": str(file), "text": str(text)})
+    elif isinstance(raw, list):
+        for item in raw:
+            if not isinstance(item, dict) or not str(item.get("file") or ""):
+                raise ValueError("must_contain must be a list of objects with file+text, or a mapping "
+                                 "{file: text | [texts]}")
+            rows.append({"file": str(item["file"]), "text": str(item.get("text") or "")})
+    else:
+        raise ValueError("must_contain must be a list of objects with file+text, or a mapping "
+                         "{file: text | [texts]}")
+    return rows
 
 
 def budget_limits(budget: Any) -> dict[str, float]:
@@ -1516,12 +1640,11 @@ def workflow_seed(spec: dict, replica_index: int = 0) -> Any | None:
     return seeds[replica_index] if 0 <= replica_index < len(seeds) else None
 
 
-# (R10-012 reconciliation) There is deliberately NO repeat-specific landing
-# derivation anymore. v11.4 derived `_seed-X` paths for the bought-back
-# repeat attempt, but the frozen launch command of a single-run spec keeps
-# writing its fixed paths - so the command, the expected landings, the
-# product acceptance check and the registry registration contradicted each
-# other. One rule for every attempt now: resolve_seed_template. The repeat
+# There is deliberately NO repeat-specific landing derivation: the frozen
+# launch command of a single-run spec keeps writing its fixed paths, so a
+# derived `_seed-X` landing would make the command, the expected landings,
+# the product acceptance check and the registry registration contradict
+# each other. One rule for every attempt: resolve_seed_template. The repeat
 # attempt reuses the spec's own resolved landings; safety against the sealed
 # first attempt comes from the four standing mechanisms - prepare-time
 # preexisting-landing archives, the landing lease, immutable per-RUN evidence
@@ -1533,8 +1656,15 @@ def workflow_replica_count(spec: dict) -> int:
     return len(seeds) if seeds else 1
 
 
-def ablation_mode(cfg: dict[str, Any]) -> str:
-    return str((((cfg.get("evidence_policy") or {}).get("ablation") or {}).get("mode")) or "off")
+def ablation_budget_multiple(cfg: dict[str, Any]) -> float:
+    """How much a concluded node may spend settling its own mechanism, as a
+    multiple of what that node itself cost. 0 = no ablation spend."""
+    raw = ((cfg.get("evidence_policy") or {}).get("ablation") or {}).get("budget_multiple")
+    try:
+        value = float(raw)
+    except (TypeError, ValueError):
+        return 0.0
+    return value if math.isfinite(value) and value > 0 else 0.0
 
 
 def stage_slots(cfg: dict[str, Any]) -> int:

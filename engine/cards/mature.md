@@ -39,11 +39,31 @@ Use these exact sections:
 - `## Formal statement` only for a formal lane, in the posed symbols.
 - `## Predictions` - every registered P# and kill threshold.
 - `## Mechanism check` for non-platform candidates with an
-  irreducible/paradigm kernel - the cheapest attributable intermediate signal
-  and which DAG decision it changes. An explicit waiver is legal when no
-  intermediate can be observed without another training run, but it licenses
-  performance recording only: mechanism status remains `unverified` and the
-  node cannot receive scientific promotion under this claim.
+  irreducible/paradigm kernel - which instrument, if any, will speak to the
+  kernel, and which DAG decision its answer changes. Instruments come in
+  layers, and each layer answers a different question: legality (a leak
+  self-test on the same run: no extra run, one report), usability ("is the trained model using
+  the part?" - an eval-only intervention on the trained model, cheap ONLY
+  when the part has an inference-time switch and one evaluation is cheap;
+  an optimizer, a loss term or a curriculum leave no switch), and
+  counterfactual training ("what is the part worth?" - the parent as the
+  untreated arm when the parent differs by exactly this kernel, otherwise a
+  targeted ablation). This is a menu, not a ladder: pick the instrument that
+  answers the question you actually have at a cost you can state. A probe's
+  answer is INFORMATION beside the node (does the model use the part); it never
+  decides parenthood and never replaces the ablation - after a program-level
+  win the engine opens the ablation whatever the probe said, and a probe that
+  reads "not used" may simply be a bad probe. Deferring is legal and often right for a large rebuild: the
+  node then settles on its effect claim, mechanism status reads `deferred`,
+  and the causal question is paid for later - by `evo ablate` - when a
+  descendant depends on the answer - and after a program-level win the
+  engine opens that ablation itself (research mode). Where the bundle prints a recorded noise
+  floor for a cell, read it before registering a micro-claim: the smallest
+  effect the rule must detect divided by that floor says whether one or two
+  runs can resolve it; a claim they cannot resolve is coarsened or left to the
+  ablation. Where no floor is recorded the engine sizes nothing - state your
+  own basis (a reported interval, a deterministic pipeline, an effect far
+  above any plausible spread) or leave the mechanism deferred.
 - `## Falsification experiment` for non-platform candidates whose novelty kind
   is `known`/`composition`. This duty follows mechanism novelty, not L1--L4
   implementation scope.
@@ -102,7 +122,6 @@ drift rejects the submit. Edit the file IN PLACE and add the fields below:
     "cheaper_modes_rejected": [{"mode": "<earlier mode>", "reason": ">=30 chars why it cannot answer the question"},
                                "...one row for EVERY mode earlier in evidence_policy.probe_mode_order than the chosen mode; [] only when the chosen mode is first"]
   },
-  "attribution_waiver": ">=40 chars: why no measurable intermediate exists; performance-only, scientific promotion blocked",
   "nearest_published": {"paper": "E###", "difference": "research >=80 chars",
                         "adaptation": "engineering >=80 chars"},
   "sota_targets": [{"sota": "S###", "cell": "C#", "dimension": "effect|efficiency|modeling|generality",
@@ -143,16 +162,29 @@ forbidden.
 
 Platform ideas omit `effect_case`, `claim_scope`, metric `predictions` and
 model-only probe fields, and list >=2 concrete `enables` in the meta JSON.
-`mechanism_probe.decision_rule` is mandatory when a probe is present. It must
-name one `required_fields` key and use exactly either
+`mechanism_probe` is optional for every idea; omit the key to defer the
+mechanism question (status `deferred`, settled later by ablation when it
+matters). When present it is complete: `decision_rule` names one
+`required_fields` key and uses exactly either
 `{field,aggregation,comparison,threshold}` for `>=|<=`, or
 `{field,aggregation,comparison,lower,upper}` for `between` with `lower < upper`.
-This numeric predicate, not later interpretation, will settle the mechanism
-status from sealed observations.
-An `attribution_waiver` is not a softer probe or a reviewer-discretion escape:
-it must replace `mechanism_probe`, preserves any observed performance result,
-and necessarily blocks `scientific_promotion_status=met` for the research
-claim.
+This numeric predicate, not later interpretation, settles the mechanism status
+from sealed observations - with one honesty rule built in: an aggregate that
+lands inside its own seed scatter of the line settles `unclear`, not a verdict.
+Keep the rule on one instrument and one unit (a ratio of an AUC to an
+AP-derived constant is not a mechanism, it is a unit conversion). Until the
+node's production compute launches, the bet is notebook material - the rule,
+the predictions, the effect claim and its scope may be corrected on record
+with `evo amend` (the identity of the idea - program, kernel, lineage - is
+not: that is a different idea, rewound or re-opened). Once a node exists,
+`sota_targets`, `metric_bridge_needed` and `external_interface_changed` stay
+amendable until launch and the node's copies follow; the probe wiring
+(`mode`, `artifact`, `required_fields`, `extra_eval_arms`) follows into the
+spec until a build realizes it; `effect_case.comparator_id` is fixed at node
+creation (a different comparator is a new lane). After launch the bet is
+history: a wrong FORMULA goes through `evo correct-instrument`; a line that
+turns out mispriced is not an error and gets a post-hoc claim (`evo claim`)
+on the concluded node.
 The `scaling` object stays
 optional and follows the configured policy: under `scaling_mode=off` the key
 is rejected outright; under `reuse_only` only `execution: "existing_artifact"`

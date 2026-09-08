@@ -1,28 +1,21 @@
-"""v12 regressions - field-trial round (ENGINE_REVIEW 2026-09-01 + DEADLOCKS).
+"""Field-trial regressions: defects a long real run paid for, pinned.
 
-Pins for the v12 fixes, each of which corresponds to a defect the tgmin field
-run actually paid for:
-  - X1 novelty: a can_emulate-only tournament kill retires the exact contract
-    but no longer banks the kernel fingerprint (the direction stays
-    retryable); structural grounds (non_reducible=false / collage=true) still
-    bank it
-  - X2 validate: the read-only dry-run verb reports exactly what submit's
+  - novelty: a can_emulate-only tournament kill retires the exact contract
+    but never banks the kernel fingerprint (the direction stays retryable);
+    structural grounds (non_reducible=false / collage=true) still bank it
+  - validate: the read-only dry-run verb reports exactly what submit's
     validators would, spends no attempt and writes no state bytes
-  - X4 budget band: usage > cap * stage_budget_tolerance invalidates; within
-    the band the evidence is valid; the recorded floor on a sealed RUN
-    era-gates later band changes; config validation refuses malformed values;
-    the repeat-spend gate disclosures the deterministic-cost consideration on
-    budget-cap failures
-  - X6 rehearsal: a PASSING rehearsal submission has a real success
-    transition (v11.7 fell into the terminal no-transition branch)
-  - X7 probe seed: eval_intervention + '{seed}' is admitted under preplanned
+  - budget caps: usage above a declared cap parks the evidence and names the
+    notebook exit (amend the cap on record, reconcile the same RUN); the
+    repeat-spend gate discloses the deterministic-cost trap on cap failures
+  - rehearsal: a PASSING rehearsal submission has a real success transition
+  - probe seed: eval_intervention + '{seed}' is admitted under preplanned
     complete-workflow replication at BOTH layers and expands per-seed at
     runtime; it is refused coherently (idea layer first) otherwise
-  - X8 sota refs: a tournament binding a non-exact-comparability S# in
+  - sota refs: a tournament binding a non-exact-comparability S# in
     frontier_refs is refused at seal time, before the downstream
     IDEA_SOTA_DRIFT/IDEA_SOTA_NONCOMPARABLE pair becomes unsatisfiable
-  - cards: the authoring cards document the validator-enforced fields the
-    field run paid attempts to discover
+  - cards: the authoring cards document the validator-enforced fields
 """
 import json
 import shutil
@@ -47,7 +40,7 @@ import evalid     # noqa: E402
 
 
 def _repo(tag):
-    repo = HERE / f"v12-{tag}-{uuid.uuid4().hex[:8]}"
+    repo = HERE / f"field-{tag}-{uuid.uuid4().hex[:8]}"
     repo.mkdir()
     return repo
 
@@ -68,68 +61,36 @@ class _FixtureStore:
         self.events_log.append({"actor": actor, "event": event, **data})
 
 
-# ------------------------------------------------------------ budget band ----
-def band_semantics() -> None:
-    check(econfig.budget_tolerance({}) == 1.0, "absent key means strict (band 1.0)")
-    check(econfig.budget_tolerance({"stage_budget_tolerance": 1.5}) == 1.5, "a valid band is honored")
-    check(econfig.budget_tolerance({"stage_budget_tolerance": 0.5}) == 1.0,
-          "a sub-1 value clamps to strict in the accessor")
-    bad = econfig.validate_config({"stage_budget_tolerance": 0.5})
-    check(any(e.startswith("CONFIG_BUDGET_TOLERANCE") for e in bad),
-          "a malformed band value surfaces loudly at config validation")
-    good = econfig.validate_config({"stage_budget_tolerance": 1.25})
-    check(not any(e.startswith("CONFIG_BUDGET_TOLERANCE") for e in good),
-          "a legal band raises no config deficiency")
-
-    repo = _repo("band")
+# ------------------------------------------------------------ budget caps ----
+def cap_overage_parks_evidence() -> None:
+    """A cap is a notebook number: overage parks the evidence and the refusal
+    names the on-record correction (amend the cap, reconcile the same RUN)."""
+    check("stage_budget_tolerance" not in json.dumps(econfig.merged_default()),
+          "no project-wide tolerance band exists; caps are corrected per node on record")
+    repo = _repo("cap")
     try:
         stage = {"budget": {"limits": {"gpu_hours": 4.0}},
                  "control": {"mode": "fixed"}}
         _write(repo, "m.json", json.dumps({"summary": {"acc": 0.5},
                                            "usage": {"gpu_hours": 4.05}}))
-        _write(repo, "m_big.json", json.dumps({"summary": {"acc": 0.5},
-                                               "usage": {"gpu_hours": 6.5}}))
-
-        def _errs(cfg, mf="m.json", floor=None):
-            ctx = SimpleNamespace(cfg=cfg, store=SimpleNamespace(repo=repo))
-            return evalid.stage_result_errors(
-                ctx, stage, mf, None, where="w", budget_band_floor=floor)
-
-        strict = _errs({})
-        check(any("STAGE_RESULT_BUDGET_EXCEEDED" in e for e in strict),
-              f"over-cap usage under the strict default invalidates: {strict}")
-        check(any("stage_budget_tolerance" in e for e in strict),
-              "the strict-mode message names the governed remedy")
-        banded = _errs({"stage_budget_tolerance": 1.5})
-        check(not any("BUDGET_EXCEEDED" in e for e in banded),
-              f"the same usage inside the band is valid evidence: {banded}")
-        over_band = _errs({"stage_budget_tolerance": 1.5}, mf="m_big.json")
-        check(any("BUDGET_EXCEEDED" in e and "1.5" in e for e in over_band),
-              "beyond the band the refusal states the applied formula")
-        floored = _errs({}, floor=1.5)
-        check(not any("BUDGET_EXCEEDED" in e for e in floored),
-              "a sealed RUN's recorded floor era-gates a later band lowering")
-
+        _write(repo, "ok.json", json.dumps({"summary": {"acc": 0.5},
+                                            "usage": {"gpu_hours": 3.9}}))
+        ctx = SimpleNamespace(cfg={}, store=SimpleNamespace(repo=repo))
+        over = evalid.stage_result_errors(ctx, stage, "m.json", None, where="w")
+        hit = [e for e in over if "STAGE_RESULT_BUDGET_EXCEEDED" in e]
+        check(bool(hit), f"usage above the cap parks the evidence: {over}")
+        check("evo amend" in hit[0] and "run-reconcile" in hit[0] and "charged usage never changes" in hit[0],
+              f"the refusal names the notebook exit and the accounting rule: {hit[0]}")
+        check(not any("BUDGET_EXCEEDED" in e for e in
+                      evalid.stage_result_errors(ctx, stage, "ok.json", None, where="w")),
+              "usage under the cap is valid evidence")
         eval_spec = {"eval": {"budget": {"limits": {"wallclock_minutes": 30.0}}}}
         _write(repo, "e.json", json.dumps({"_usage": {"wallclock_minutes": 30.4}}))
-
-        def _eerrs(cfg, floor=None):
-            ctx = SimpleNamespace(cfg=cfg, store=SimpleNamespace(repo=repo))
-            return evalid.evaluation_result_errors(
-                ctx, eval_spec, "e.json", where="w", budget_band_floor=floor)
-
-        check(any("EVAL_RESULT_BUDGET_EXCEEDED" in e for e in _eerrs({})),
-              "the eval side shares the strict default")
-        check(not any("BUDGET_EXCEEDED" in e for e in _eerrs({"stage_budget_tolerance": 1.1})),
-              "the eval side shares the band")
+        ehit = [e for e in evalid.evaluation_result_errors(ctx, eval_spec, "e.json", where="w")
+                if "EVAL_RESULT_BUDGET_EXCEEDED" in e]
+        check(bool(ehit) and "evo amend" in ehit[0], "the eval side shares the same exit")
     finally:
         shutil.rmtree(repo, ignore_errors=True)
-    check(evalid.budget_band_floor_of(None) is None
-          and evalid.budget_band_floor_of({"budget_overages_within_tolerance": []}) is None,
-          "no overage stamps means no floor")
-    check(evalid.budget_band_floor_of(
-        {"budget_overages_within_tolerance": [{"band": 1.2}, {"band": 1.5}]}) == 1.5,
-        "the floor is the highest band actually applied at seal time")
 
 
 def repeat_gate_budget_disclosure() -> None:
@@ -151,8 +112,8 @@ def repeat_gate_budget_disclosure() -> None:
     egate.GateMixin._repeat_spend_gate(stub, node, "stage", "train")
     check("CAUTION (budget-cap failure)" in captured.get("text", ""),
           "a budget-cap failure discloses the deterministic-cost consideration on the decision surface")
-    check("stage_budget_tolerance" in captured.get("text", ""),
-          "the disclosure names the governed remedy, not just the trap")
+    check("evo amend" in captured.get("text", ""),
+          "the disclosure names the on-record remedy, not just the trap")
 
     captured.clear()
 
@@ -253,7 +214,7 @@ def rehearsal_success_transition() -> None:
         eng = esched.Engine(store)
         task = {"id": "T900", "type": "rehearsal", "status": "open",
                 "subject": {"node": "N9"}, "outputs": []}
-        eng._transition(task)  # v11.7 raised: no transition for task type rehearsal
+        eng._transition(task)  # a passing rehearsal must have a transition
         events = eutil.read_jsonl(store.events_path)
         check(any(e.get("event") == "rehearsal_accepted" and e.get("node") == "N9"
                   for e in events),
@@ -318,9 +279,9 @@ def probe_seed_contract() -> None:
     check(evalid.idea_probe_seed_template_errors(pre, probe, purpose="candidate") == [],
           "a candidate under preplanned policy keeps the placeholder")
     src = (HERE.parent / "engine" / "evalid.py").read_text(encoding="utf-8")
-    check("idea_probe_seed_template_errors(\n                ctx.cfg, meta[\"mechanism_probe\"]" in src
-          or "idea_probe_seed_template_errors(" in src.split("Probe SHAPE and the waiver")[1][:1200],
-          "the idea-layer check runs in the UNIVERSAL probe-shape block, not only for research candidates")
+    universal = src.split("def mechanism_probe_errors(")[1].split("\ndef ")[0]
+    check("idea_probe_seed_template_errors(" in universal,
+          "the idea-layer check runs in the universal probe validator, not only for research candidates")
 
 
 # ----------------------------------------------------------- frontier refs ----
@@ -382,7 +343,7 @@ def tournament_frontier_ref_comparability() -> None:
         check(not any(e.startswith("TOURNAMENT_FRONTIER_REF_NONCOMPARABLE") for e in errs2),
               "an exact-comparability ref carries no such refusal")
 
-        # Self-review F3 axes: the check fires ONLY where maturation's
+        # The check fires ONLY where maturation's
         # DRIFT x NONCOMPARABLE pair exists (research mode, research kernel,
         # non-exploratory); everywhere else non-exact refs stay legal.
         eng_cfg = dict(cfg, project={"mode": "engineering"})
@@ -410,88 +371,16 @@ def tournament_frontier_ref_comparability() -> None:
         shutil.rmtree(repo, ignore_errors=True)
 
 
-def band_exit_guidance() -> None:
-    """The field's own RUN143 lesson: an over-cap RUN is NOT a dead RUN. The
-    refusal, the terminal-disposition verb and the docs all name the no-rerun
-    exit (raise the key, run-reconcile the same RUN)."""
-    ctx = SimpleNamespace(cfg={}, store=SimpleNamespace(repo=Path(".")))
-    repo = _repo("bandexit")
-    try:
-        _write(repo, "m.json", json.dumps({"summary": {"acc": 1.0}, "usage": {"gpu_hours": 7.5}}))
-        ctx = SimpleNamespace(cfg={}, store=SimpleNamespace(repo=repo))
-        errs = evalid.stage_result_errors(
-            ctx, {"budget": {"limits": {"gpu_hours": 4.0}}}, "m.json", None, where="w")
-        hit = [e for e in errs if "BUDGET_EXCEEDED" in e]
-        check(hit and "run-reconcile" in hit[0] and "stage_budget_tolerance" in hit[0]
-              and "no rerun" in hit[0],
-              f"the strict refusal names the no-rerun exit: {hit[:1]}")
-        ctx2 = SimpleNamespace(cfg={"stage_budget_tolerance": 1.5}, store=SimpleNamespace(repo=repo))
-        errs2 = evalid.stage_result_errors(
-            ctx2, {"budget": {"limits": {"gpu_hours": 4.0}}}, "m.json", None, where="w")
-        hit2 = [e for e in errs2 if "BUDGET_EXCEEDED" in e]
-        check(hit2 and "run-reconcile" in hit2[0],
-              "an out-of-band refusal names the same exit (raise the band further, reconcile)")
-        ctx3 = SimpleNamespace(cfg={"stage_budget_tolerance": 2.0}, store=SimpleNamespace(repo=repo))
-        errs3 = evalid.stage_result_errors(
-            ctx3, {"budget": {"limits": {"gpu_hours": 4.0}}}, "m.json", None, where="w")
-        check(not any("BUDGET_EXCEEDED" in e for e in errs3),
-              "7.5h against a 4h cap validates once the user grants band 2.0 - same bytes, no rerun")
-    finally:
-        shutil.rmtree(repo, ignore_errors=True)
-    for rel, needle in (("engine/eabsorb.py", "would adopt the "),
-                        ("engine/egate.py", "intended FIRST exit"),
-                        ("README.md", "not to rerun it"),
-                        ("OPERATOR_PROMPT.md", "never rerun or discard it"),
-                        ("skills/model-evolution/SKILL.md", "no rerun")):
+def cap_exit_guidance() -> None:
+    """An over-cap RUN is NOT a dead RUN. The terminal-disposition verb, the
+    repeat gate and the operator docs all name the no-rerun exit (amend the
+    cap on record, run-reconcile the same RUN)."""
+    for rel, needle in (("engine/eabsorb.py", "would adopt the SAME evidence"),
+                        ("engine/egate.py", "FIRST exit for an acceptable overage"),
+                        ("OPERATOR_PROMPT.md", "nothing is rerun"),
+                        ("skills/clade/SKILL.md", "nothing is rerun")):
         check(needle in (HERE.parent / rel).read_text(encoding="utf-8"),
               f"{rel} teaches the reconcile exit for an acceptable overage")
-
-
-def band_stamp_provenance() -> None:
-    repo = _repo("stamp")
-    try:
-        _write(repo, "specs/N1.json", json.dumps(
-            {"workflow": {"stages": [{"name": "train",
-                                      "budget": {"limits": {"gpu_hours": 4.0}}}]}}))
-        _write(repo, "m.json", json.dumps({"summary": {"acc": 1.0},
-                                           "usage": {"gpu_hours": 4.05}}))
-        events = []
-        stub = SimpleNamespace(
-            cfg={"stage_budget_tolerance": 1.5},
-            store=SimpleNamespace(repo=repo,
-                                  event=lambda actor, event, **kw: events.append(event)),
-            _spec=lambda self_node: json.loads((repo / "specs/N1.json").read_text(encoding="utf-8")))
-        stub._spec = lambda node: json.loads((repo / "specs/N1.json").read_text(encoding="utf-8"))
-        import eabsorb
-        # stage resolved by NAME (no stage_index) - self-review F1a
-        run = {"id": "RUN1", "kind": "stage", "stage": "train", "metrics_file": "m.json"}
-        eabsorb.AbsorbMixin._disclose_budget_overage(stub, run, {"id": "N1"})
-        stamps = run.get("budget_overages_within_tolerance") or []
-        check(len(stamps) == 1 and stamps[0]["unit"] == "gpu_hours",
-              f"a name-resolved stage still stamps its overage: {stamps}")
-        check(stamps[0]["band"] >= 1.5, "the stamp records at least the admitting band")
-        # era skew - self-review F1b: replay under a LOWERED band still stamps
-        # the ratio the sealed numbers themselves prove
-        run2 = {"id": "RUN2", "kind": "stage", "stage": "train", "stage_index": 0,
-                "metrics_file": "m.json"}
-        stub.cfg = {}
-        eabsorb.AbsorbMixin._disclose_budget_overage(stub, run2, {"id": "N1"})
-        stamps2 = run2.get("budget_overages_within_tolerance") or []
-        check(len(stamps2) == 1 and stamps2[0]["band"] >= 4.05 / 4.0,
-              f"a crash-replay under a lowered band stamps the proven ratio floor: {stamps2}")
-        floor = evalid.budget_band_floor_of(run2)
-        ctx = SimpleNamespace(cfg={}, store=SimpleNamespace(repo=repo))
-        replay = evalid.stage_result_errors(
-            ctx, {"budget": {"limits": {"gpu_hours": 4.0}}}, "m.json", None,
-            where="w", budget_band_floor=floor)
-        check(not any("BUDGET_EXCEEDED" in e for e in replay),
-              "the stamped floor keeps the sealed evidence valid at strict-band replay")
-        # idempotence across re-seal
-        eabsorb.AbsorbMixin._disclose_budget_overage(stub, run2, {"id": "N1"})
-        check(len(run2.get("budget_overages_within_tolerance") or []) == 1,
-              "re-sealing the same numbers does not duplicate the stamp")
-    finally:
-        shutil.rmtree(repo, ignore_errors=True)
 
 
 def _init_repo(repo: Path) -> Path:
@@ -536,7 +425,7 @@ def validate_dry_run() -> None:
               or bool(report["errors"]) == bool(out.get("errors")),
               "the dry run predicted the submit-time deficiency surface")
 
-        # Self-review F4: the dry run stamps the session on a COPY, exactly as
+        # The dry run stamps the session on a COPY, exactly as
         # submit stamps the row - and never on the stored row.
         seen = {}
         original = evalid.VALIDATORS[task["type"]]
@@ -578,8 +467,8 @@ def card_schema_sync() -> None:
     check(has("tournament.md", "does\nnot close the kernel direction")
           or has("tournament.md", "not close the kernel direction"),
           "the tournament card states the scope of an emulation kill")
-    check(has("plan_node.md", "stage_budget_tolerance"),
-          "plan_node states the budget band and the worst-case derivation duty")
+    check(has("plan_node.md", "worst case x1.3") and has("plan_node.md", "evo amend"),
+          "plan_node states the worst-case derivation duty and the on-record cap correction")
     check(has("rehearsal.md", "ACCEPTED"),
           "the rehearsal card states what a passing submit does")
     footer = (HERE.parent / "engine" / "ecards.py").read_text(encoding="utf-8")
@@ -594,9 +483,8 @@ def card_schema_sync() -> None:
 
 
 def main() -> None:
-    band_semantics()
-    band_exit_guidance()
-    band_stamp_provenance()
+    cap_overage_parks_evidence()
+    cap_exit_guidance()
     repeat_gate_budget_disclosure()
     emulation_kill_scope()
     rehearsal_success_transition()
@@ -604,7 +492,7 @@ def main() -> None:
     tournament_frontier_ref_comparability()
     validate_dry_run()
     card_schema_sync()
-    done("V12 FIELD-TRIAL REGRESSIONS")
+    done("FIELD-TRIAL REGRESSIONS")
 
 
 if __name__ == "__main__":

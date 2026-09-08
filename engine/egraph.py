@@ -22,6 +22,106 @@ def by_id(g: dict) -> dict[str, dict]:
     return {n["id"]: n for n in g.get("nodes", [])}
 
 
+PROBE_WORDS = {"confirmed": "used", "refuted": "not used", "unclear": "unclear"}
+
+
+def probe_label(node: dict) -> str:
+    """The probe's answer written beside the node - information, never a
+    verdict: `probe used` / `probe not used` / `probe unclear`, with the
+    correction id when a formula error was corrected on record; empty when no
+    probe was registered."""
+    probe = node.get("probe_result") if isinstance(node.get("probe_result"), dict) else None
+    if not probe or not str(probe.get("status") or ""):
+        return ""
+    status = str(probe.get("status") or "")
+    word = PROBE_WORDS.get(status, status)
+    corrections = [r for r in (node.get("mechanism_corrections") or []) if isinstance(r, dict)]
+    if corrections:
+        return f"probe {word} (corrected {corrections[-1].get('id')})"
+    return f"probe {word}"
+
+
+def mechanism_label(node: dict) -> str:
+    """The node's live CAUSAL status - did the kernel cause the gain - credited
+    to the ablation that settled it (`via N###`; an inconclusive ablation
+    settles nothing and prints `unclear via N###` beside the unchanged status;
+    a refuted kernel names the control version to build on), with the open or
+    declined tax lane while nothing has settled, and the probe's answer as a
+    trailing note. Knowledge, not a gate: nothing here decides parenthood."""
+    status = str(node.get("mechanism_status") or "-")
+    probe = probe_label(node)
+    tail = f"; {probe}" if probe else ""
+    # An OPEN tax lane is the freshest fact about a deferred mechanism (the
+    # pointer is cleared when the lane concludes or is abandoned).
+    if node.get("ablation_lane") and status == "deferred":
+        return f"{status} (ablation {node.get('ablation_lane')} open){tail}"
+    settlements = [r for r in (node.get("mechanism_settlements") or []) if isinstance(r, dict)]
+    settlement = settlements[-1] if settlements else None
+    if settlement:
+        if str(settlement.get("effect") or "") == "inconclusive":
+            return f"{status} (unclear via {settlement.get('ablation')}){tail}"
+        if status == "refuted":
+            rk = node.get("refuted_kernel") if isinstance(node.get("refuted_kernel"), dict) else {}
+            control = str(rk.get("control") or "")
+            advice = f"build on {control}" if control else \
+                f"remove {', '.join(str(k) for k in (rk.get('kernels') or [])) or 'the kernel'} in children"
+            return f"{status} (via {settlement.get('ablation')}; {advice}){tail}"
+        return f"{status} (via {settlement.get('ablation')}){tail}"
+    declined = node.get("ablation_declined") if isinstance(node.get("ablation_declined"), dict) else None
+    if declined and status == "deferred":
+        return f"{status} (ablation {declined.get('lane')} declined){tail}"
+    return f"{status}{tail}"
+
+
+def open_ablation_lane(node: dict, st: dict | None) -> str | None:
+    """The node's inheritance-tax lane while it is still OPEN: the lane the
+    node points at, provided that lane exists and has neither concluded nor
+    been abandoned. A pointer at a finished lane is nobody's open tax - the
+    doors (a portfolio lane, `evo ablate`, the engine's own retry) are free."""
+    lid = str(node.get("ablation_lane") or "")
+    if not lid:
+        return None
+    lane = next((ln for ln in ((st or {}).get("lanes") or []) if str(ln.get("id") or "") == lid), None)
+    if lane is None or str(lane.get("status") or "") in ("done", "abandoned"):
+        return None
+    return lid
+
+
+def losses_fragment(node: dict) -> str:
+    """What the node LOST, from its evaluation summary, printed next to the
+    node on every frontier surface: `required: C4,C5; guardrail: C3;
+    breadth: C2`, or `-` (no pipe: the fragment sits inside markdown table
+    cells). Losses are shown, never a veto on parenthood."""
+    summary = node.get("evaluation_summary") if isinstance(node.get("evaluation_summary"), dict) else {}
+    required = [str(c) for c in (summary.get("required_target_losses") or [])]
+    target = [str(c) for c in (summary.get("target_losses") or []) if str(c) not in required]
+    parts = []
+    for label, cells in (("required", required), ("target", target),
+                         ("guardrail", [str(c) for c in (summary.get("guardrail_losses") or [])]),
+                         ("breadth", [str(c) for c in (summary.get("breadth_losses") or [])])):
+        if cells:
+            parts.append(f"{label}: {','.join(cells)}")
+    over = summary.get("resource_overrun") if isinstance(summary.get("resource_overrun"), dict) else {}
+    if over:
+        parts.append("resources over cap: " + ",".join(
+            f"{axis} +{row.get('over_pct'):g}%" if isinstance(row, dict) and isinstance(row.get("over_pct"), (int, float))
+            else f"{axis}" for axis, row in sorted(over.items())))
+    deviations = [d for d in (node.get("launch_deviations") or []) if isinstance(d, dict)]
+    if deviations:
+        last = str(deviations[-1].get("note") or "")
+        parts.append(f"launch changed from plan x{len(deviations)}: {last[:60]}" + ("..." if len(last) > 60 else ""))
+    return "; ".join(parts) or "-"
+
+
+def promotion_label(node: dict) -> str:
+    """The node's live promotion status, marked when a post-hoc claim is the
+    claim inheritance reads (the original bet stays on record)."""
+    status = str(node.get("scientific_promotion_status") or "-")
+    if node.get("active_claim"):
+        return f"{status} (post-hoc {node.get('active_claim')})"
+    return status
+
+
 def level_label(node: dict) -> str:
     """Implementation scope is undefined for instrumental work."""
     labels = {"targeted_ablation": "diagnostic", "diagnostic_probe": "probe",
@@ -47,7 +147,7 @@ def role_parent_errors(role: str, nid: str, parents: list[str], idx: dict[str, d
     unknown = [p for p in parents if p not in idx]
     if unknown:
         errs.append(f"GRAPH_PARENT_UNKNOWN: {nid} references nonexistent parents {unknown}")
-    # R8: duplicated parent ids are one parent, not two (a repeated id used to
+    # Duplicated parent ids are one parent, not two (a repeated id must not
     # satisfy the hybrid ">= 2" count and freeze an unsatisfiable contract).
     dups = sorted({p for p in parents if parents.count(p) > 1})
     if dups:
@@ -234,7 +334,7 @@ def _pareto_dominates(a: dict, b: dict, cfg: dict, st: dict | None = None) -> bo
     cells = decision_cells(cfg)
     directions = {str(c.get("result_key") or ""): econfig.result_direction(
         cfg, str(c.get("result_key") or "")) for c in cells}
-    floors = {str(c.get("result_key") or ""): econfig.noise_floor(cfg, str(c.get("id") or ""), st)
+    floors = {str(c.get("result_key") or ""): econfig.decision_floor(cfg, str(c.get("id") or ""), st)
               for c in cells}
     for cell in cells:
         result_key = str(cell.get("result_key") or "")
@@ -249,7 +349,7 @@ def _pareto_dominates(a: dict, b: dict, cfg: dict, st: dict | None = None) -> bo
         _rd, raw_lower, raw_upper = econfig.improvement_interval(
             ar, br, directions[result_key], floor=0.0)
         compared += 1
-        # One floor application (v11 R2): the inferiority VETO settles on the
+        # One floor application: the inferiority VETO settles on the
         # as-reported interval with the floor folded into the margin only when
         # a side was scalar; the WIN test keeps the floored lower bound.
         active = floor > 0 and (f_lower, f_upper) != (raw_lower, raw_upper)
@@ -294,7 +394,7 @@ def _pareto_equivalent(a: dict, b: dict, cfg: dict, st: dict | None = None) -> b
         if not _measured(ar):
             continue
         direction = econfig.result_direction(cfg, rk)
-        floor = econfig.noise_floor(cfg, str(cell.get("id") or ""), st)
+        floor = econfig.decision_floor(cfg, str(cell.get("id") or ""), st)
         _d1, lower_ab, _u1 = econfig.improvement_interval(ar, br, direction, floor=0.0)
         _d2, lower_ba, _u2 = econfig.improvement_interval(br, ar, direction, floor=0.0)
         # Equivalence uses as-reported bounds with the floor inside the
@@ -330,8 +430,8 @@ def instrumental_frontier_excluded(node: dict, cfg: dict) -> bool:
       later exploit of the repaired lineage.  The repaired base stays usable
       as a parent (parity=met licenses it) without competing as a tip.
     - `targeted_ablation` is one diagnostic run, excluded under preplanned
-      replication (unchanged v9.2 rule).
-    - `exploratory` (v11.1 P5) declared reconnaissance at admission: it bought
+      replication.
+    - `exploratory` declared reconnaissance at admission: it bought
       freedom from prediction/theory registration by agreeing its numbers are
       observations only - never frontier material, never a record holder. A
       later confirmatory candidate must reproduce them under full rigor.
@@ -372,7 +472,7 @@ NO_DELIVERABLE_VERDICTS = {"screened_out", "failed"}
 def observation_eligible(node: dict, cfg: dict) -> bool:
     """May this node's measured vector compete on the observed frontier?
 
-    R9 audit: retirement is a LINEAGE decision, never an observation one.
+    retirement is a LINEAGE decision, never an observation one.
     The old special case deleted a pruned node's measured numbers from the
     performance frontier, the cell records and the stagnation input - the
     exact rewriting this docstring already refused to do for `archived`
@@ -490,13 +590,13 @@ def _inheritance(g: dict, cfg: dict, st: dict | None = None) -> tuple[list[dict]
     observed tip happens to be unsettled, collapse inheritance to the floor
     while real settled parents sit unused.
     """
-    # R7 multi-round audit + R9: BOTH retirement forms keep the measured
+    # BOTH retirement forms keep the measured
     # record (performance frontier, cell records) but NOT inheritance rights:
     # every legal retirement waives the node's working-byte/Git duties, so a
     # new consumer needs `evo revive` to re-prove the bytes first - exactly
-    # what the revive verb promises. (pruned used to be excluded upstream in
-    # observation_eligible, which wrongly deleted its measurements too; the
-    # lineage exclusion for both forms now lives HERE, on the lineage axis.)
+    # what the revive verb promises. (Excluding pruned upstream in
+    # observation_eligible would wrongly delete its measurements too; the
+    # lineage exclusion for both forms lives HERE, on the lineage axis.)
     pool = [n for n in g.get("nodes", []) if observation_eligible(n, cfg)
             and n.get("retire_reason") not in ("archived", "pruned")]
     if econfig.is_research(cfg):
@@ -517,11 +617,16 @@ def _inheritance(g: dict, cfg: dict, st: dict | None = None) -> tuple[list[dict]
 def frontier(g: dict, cfg: dict, st: dict | None = None) -> list[dict]:
     """Active inheritance frontier: what a new candidate may build on.
 
-    Research mode inherits only where the frozen M/E/T claim settled;
-    engineering mode inherits from observed performance directly.  Use
-    :func:`performance_frontier` when diagnosing useful gains whose mechanism
-    claim was refuted or whose E contract missed - those nodes are legal
-    reform/hybrid parents, they just do not transfer a settled claim.
+    Research mode inherits a claim that STANDS - a claimed cell really rose
+    and the user's vote passed inside the claimed groups (verdict improved /
+    specialist / dominant, or tradeoff with a claimed win) - whose build is
+    audited: `scientific_promotion_status == met`. The effect contract is the
+    bet's record and mechanism knowledge (probe answer, ablation verdict) is
+    written beside the node; neither gates parenthood. Engineering mode
+    inherits from observed performance directly. Use
+    :func:`performance_frontier` when diagnosing useful gains whose claimed
+    cells did not really win - those nodes are legal reform/hybrid parents,
+    they just do not transfer a settled claim.
     """
     return _inheritance(g, cfg, st)[0]
 
@@ -536,14 +641,14 @@ def retired_settled_ids(g: dict, cfg: dict) -> list[str]:
 
     When the inheritance floor engages BECAUSE of retirement, the honest
     story is 'revive one or root anew' - not the cold-start line 'nothing
-    has a settled claim yet' (R7 audit: the false diagnosis steered a fresh
+    has a settled claim yet' (that false diagnosis would steer a fresh
     agent away from the actionable revive decision)."""
     research = econfig.is_research(cfg)
     out = []
     for n in g.get("nodes", []):
         if n.get("retire_reason") not in ("pruned", "archived"):
             continue
-        # R8 audit: "revive one of these" is only honest for verdicts that CAN
+        # "revive one of these" is only honest for verdicts that CAN
         # anchor future work - NO_DELIVERABLE_VERDICTS (screened_out, failed)
         # are excluded from the observed frontier and refused as model
         # parents by the validators, so suggesting their revival promised an
@@ -616,7 +721,7 @@ def advances_measurement(node: dict, prior: list[dict], cfg: dict, st: dict | No
             continue
         direction = econfig.result_direction(cfg, result_key)
         improve = float(cell.get("min_improvement") or 0.0)
-        floor = econfig.noise_floor(cfg, str(cell.get("id") or ""), st)
+        floor = econfig.decision_floor(cfg, str(cell.get("id") or ""), st)
         rivals = [r for r in (cell_raw(p, result_key) for p in prior) if _measured(r)]
         if not rivals:
             continue
@@ -648,7 +753,7 @@ def provisional_record(node: dict, prior: list[dict], cfg: dict,
         if cell_id is not None and str(cell.get("id") or "") != str(cell_id):
             continue
         result_key = str(cell.get("result_key") or "")
-        floor = econfig.noise_floor(cfg, str(cell.get("id") or ""), st)
+        floor = econfig.decision_floor(cfg, str(cell.get("id") or ""), st)
         if floor <= 0:
             continue
         value = econfig.result_value(cell_raw(node, result_key))
@@ -762,7 +867,7 @@ def new_node(g: dict, st_counters_id: str, *, title: str, role: str, parents: li
         "created_at": eutil.utc_now(),
         "updated_at": eutil.utc_now(),
     }
-    # R8 (external audit r5): the three-file save writes graph.json before the
+    # The three-file save writes graph.json before the
     # state.json commit marker. A crash in that window leaves this id in the
     # graph while the committed counter still points below it - the retry then
     # re-allocates the same id and duplicated it. The committed counter is the
@@ -784,6 +889,7 @@ _MERMAID_CLASSES = [
     "classDef improved fill:#0b3d2e,stroke:#22c55e,stroke-width:2px,color:#d1fae5",
     "classDef specialist fill:#0f3b46,stroke:#22d3ee,stroke-width:2px,color:#cffafe",
     "classDef tradeoff fill:#3f2b16,stroke:#fb923c,stroke-width:2px,color:#ffedd5",
+    "classDef partial fill:#2b2f3a,stroke:#9ca3af,color:#e5e7eb",
     "classDef baseline fill:#172554,stroke:#60a5fa,stroke-width:2px,color:#dbeafe",
     "classDef regressed fill:#3f1d1d,stroke:#ef4444,color:#fecaca",
     "classDef inconclusive fill:#3b2f14,stroke:#f59e0b,color:#fde68a",
@@ -802,7 +908,7 @@ def _mermaid_class(n: dict) -> str:
     if n.get("retire_reason") is not None or n.get("status") == "abandoned":
         return "retired"
     v = n.get("verdict")
-    if v in ("improved", "specialist", "tradeoff", "baseline", "regressed", "inconclusive",
+    if v in ("improved", "specialist", "tradeoff", "partial", "baseline", "regressed", "inconclusive",
              "promising", "dominant", "screened_out", "failed", "enabled"):
         return v
     return "pending"
@@ -894,12 +1000,14 @@ def render_views(store: Any, g: dict, cfg: dict, st: dict | None = None) -> None
             f"{n.get('verdict') or '-'} | {sc if sc is not None else '-'} | "
             f"{'yes' if n['id'] in frontier_ids else '-'} | "
             f"{'yes' if n['id'] in performance_ids else '-'} | "
-            f"{n.get('scientific_promotion_status') or '-'} | {n.get('retire_reason') or '-'} |"
+            f"{promotion_label(n)} | {n.get('retire_reason') or '-'} |"
         )
     eutil.write_text(store.views_dir() / "GRAPH.md", "\n".join(cycle_note + lines) + "\n")
 
     eutil.write_text(store.views_dir() / "FRONTIER.md",
                      "\n".join(cycle_note + _frontier_view(g, cfg, st)) + "\n")
+    import efieldmap
+    efieldmap.render(store, g, cfg, st)
 
 
 def _frontier_view(g: dict, cfg: dict, st: dict | None = None) -> list[str]:
@@ -917,6 +1025,9 @@ def _frontier_view(g: dict, cfg: dict, st: dict | None = None) -> list[str]:
         src = econfig.noise_floor_source(cfg, cid, st)
         if src != "none":
             floor_rows.append(f"{cid}={econfig.noise_floor(cfg, cid, st):g} ({src})")
+    if floor_rows and econfig.noise_floor_multiple(cfg) != 1.0:
+        floor_rows.append(f"a real win clears {econfig.noise_floor_multiple(cfg):g} x the floor "
+                          "(evaluation_contract.noise_floor_multiple)")
     fr = frontier(g, cfg, st)
     fr_ids = {n["id"] for n in fr}
     perf_full = performance_frontier(g, cfg, st)
@@ -928,7 +1039,7 @@ def _frontier_view(g: dict, cfg: dict, st: dict | None = None) -> list[str]:
     holders: dict[str, list[str]] = {}
     for row in records:
         # Same "?" provisional tag the bundle block prints - one question, one
-        # answer on every surface (final audit C11/L30).
+        # Answer on every surface.
         holder_n = idx_all.get(row["node"]) or {}
         tag = "?" if provisional_record(
             holder_n, [n for n in eligible_pool if n.get("id") != row["node"]],
@@ -966,7 +1077,7 @@ def _frontier_view(g: dict, cfg: dict, st: dict | None = None) -> list[str]:
     for n in perf:
         out.append(
             f"| {n['id']} | {_mdcell(n.get('title',''))} | {n.get('role','')} | {level_label(n)} | "
-            f"{n.get('verdict') or '-'} | {n.get('scientific_promotion_status') or '-'} | "
+            f"{n.get('verdict') or '-'} | {promotion_label(n)} | "
             f"{primary_score(n, primary)} | {','.join(holders.get(n['id'], [])) or '-'} | "
             f"{'yes' if n['id'] in fr_ids else '-'} |")
     if not perf:
@@ -976,7 +1087,15 @@ def _frontier_view(g: dict, cfg: dict, st: dict | None = None) -> list[str]:
     out.append("## Active inheritance frontier (legal exploit parents)")
     out.append("")
     if econfig.is_research(cfg):
-        out.append("Research mode: performance non-domination AND a settled frozen M/E/T claim.")
+        out.append("Research mode: performance non-domination AND a claim that stands - a claimed cell")
+        out.append("really rose and the user's vote passed inside the claimed groups (verdict improved /")
+        out.append("specialist / dominant, or tradeoff with a claimed win) - build audited. The effect")
+        out.append("column is the bet's record, `losses` shows what the node lost, `mechanism` is the")
+        out.append("causal status the ablation settled with the probe's answer beside it; none of them")
+        out.append("gates parenthood. `deferred` = the ablation has not settled it yet: build on the")
+        out.append("program, never cite the kernel as a cause; `refuted (via N###; build on N###)` =")
+        out.append("the kernel did not carry the gain - build on the named control version and never")
+        out.append("carry that kernel into a child.")
     else:
         out.append("Engineering mode: the observed performance frontier is inherited directly.")
     if frontier_is_origin_floor(g, cfg, st):
@@ -991,13 +1110,15 @@ def _frontier_view(g: dict, cfg: dict, st: dict | None = None) -> list[str]:
             out.append("legal exploit parent. This is a cold-start fallback, not an endorsement - a")
             out.append("reform/hybrid lane on a measured-but-unsettled node below is usually stronger.")
     out.append("")
-    out.append("| id | title | role | purpose | scope | " + (primary or "primary")
-               + " | descendants | improved desc | best desc |")
-    out.append("|---|---|---|---|---|---|---|---|---|")
+    out.append("| id | title | role | purpose | scope | verdict | effect | science | mechanism | losses | "
+               + (primary or "primary") + " | descendants | improved desc | best desc |")
+    out.append("|---|---|---|---|---|---|---|---|---|---|---|---|---|---|")
     for n in fr:
         r = n.get("rollup") or {}
         out.append(
             f"| {n['id']} | {_mdcell(n.get('title',''))} | {n.get('role','')} | {n.get('experiment_purpose','candidate')} | {level_label(n)} | "
+            f"{n.get('verdict') or '-'} | {n.get('effect_contract_status') or '-'} | {promotion_label(n)} | "
+            f"{mechanism_label(n)} | {losses_fragment(n)} | "
             f"{primary_score(n, primary)} | {r.get('descendants', 0)} | {r.get('descendants_improved', 0)} | "
             f"{r.get('best_descendant_primary') if r.get('best_descendant_primary') is not None else '-'} |")
     out.append("")
@@ -1010,21 +1131,21 @@ def _frontier_view(g: dict, cfg: dict, st: dict | None = None) -> list[str]:
     out.append("consume until the user runs 'evo revive --node N### --note ...'. A trailing ?")
     out.append("on a record cell = provisional (lead within the cell's noise floor).")
     out.append("")
-    out.append("| id | title | verdict | science | effect | mechanism | " + (primary or "primary")
+    out.append("| id | title | verdict | science | effect | mechanism | losses | " + (primary or "primary")
                + " | cell records | on perf frontier |")
-    out.append("|---|---|---|---|---|---|---|---|---|")
+    out.append("|---|---|---|---|---|---|---|---|---|---|")
     unsettled = [n for n in g.get("nodes", [])
                  if observation_eligible(n, cfg) and n["id"] not in fr_ids]
     for n in sorted(unsettled, key=lambda x: str(x["id"])):
         out.append(
             f"| {n['id']}{f" ({n.get('retire_reason')} - revive first)" if str(n.get('retire_reason') or '') in ('archived', 'pruned') else ''} | "
             f"{_mdcell(n.get('title',''))} | {n.get('verdict') or '-'} | "
-            f"{n.get('scientific_promotion_status') or '-'} | {n.get('effect_contract_status') or '-'} | "
-            f"{n.get('mechanism_status') or '-'} | {primary_score(n, primary)} | "
+            f"{promotion_label(n)} | {n.get('effect_contract_status') or '-'} | "
+            f"{mechanism_label(n)} | {losses_fragment(n)} | {primary_score(n, primary)} | "
             f"{','.join(holders.get(n['id'], [])) or '-'} | "
             f"{'yes' if n['id'] in perf_ids else '-'} |")
     if not unsettled:
-        out.append("| - | none | | | | | | | |")
+        out.append("| - | none | | | | | | | | |")
     out.append("")
 
     out.append("## Instrumental work (no novelty claim)")
@@ -1075,7 +1196,7 @@ def _frontier_view(g: dict, cfg: dict, st: dict | None = None) -> list[str]:
     out.append("")
     out.append("| id | title | verdict | " + (primary or "primary") + " | confirmed by |")
     out.append("|---|---|---|---|---|")
-    # R7 audit: "confirmed by" is a settlement claim - a planned, failed or
+    # "confirmed by" is a settlement claim - a planned, failed or
     # abandoned confirmatory child must render as an attempt with its true
     # state, never as a confirmation. And a pruned scout's door needs revival.
     confirms: dict[str, str] = {}
@@ -1108,13 +1229,13 @@ def _frontier_view(g: dict, cfg: dict, st: dict | None = None) -> list[str]:
     idx_rec = by_id(g)
     # Same pool the record table itself ranks (observation-eligible), not all
     # concluded nodes: judging the lead against frontier-excluded rivals
-    # mis-labeled records (R2).
+    # Mis-labeled records.
     measured_pool = [n for n in g.get("nodes", [])
                      if n.get("status") == "concluded" and observation_eligible(n, cfg)]
     for row in records:
         origin_value = econfig.result_value(cell_raw(origin, row["result_key"])) \
             if origin is not None else None
-        # Winner's-curse disclosure (v11): a record whose winning margin sits
+        # Winner's-curse disclosure: a record whose winning margin sits
         # inside the recorded noise floor is printed as provisional - the max
         # of N noisy single runs systematically overestimates, and this is
         # where that max becomes the number everyone compares against next.

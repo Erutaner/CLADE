@@ -1,4 +1,4 @@
-"""Engine-observed full-chain rehearsal for one node (v11.7).
+"""Engine-observed full-chain rehearsal for one node.
 
 Before a node's first FULL-SCALE run, one tiny real pass over its ENTIRE
 workflow (every stage + the evaluation) must run on the real platform: every
@@ -213,7 +213,7 @@ def _run_locked(store, node_id: str) -> dict:
     if isinstance(prior, dict) and prior.get("status") == "passed" \
             and str(prior.get("implementation_digest") or "") == impl_digest \
             and str(prior.get("plan_digest") or "") == plan_digest:
-        # C2 (correctness audit): reuse only what still AUTHENTICATES - a
+        # Reuse only what still AUTHENTICATES - a
         # damaged receipt would otherwise short-circuit here forever while
         # every launch keeps refusing it, with no verb able to regenerate it.
         try:
@@ -228,7 +228,7 @@ def _run_locked(store, node_id: str) -> dict:
     nonce = secrets.token_hex(16)
     stages = [str(s.get("name") or f"stage{i}") for i, s in enumerate(econfig.stages_of(spec))]
     request = _request_payload(store, cfg, node, spec, nonce=nonce)
-    # C3 (correctness audit): persist the attempt INTENT through the
+    # Persist the attempt INTENT through the
     # TRANSACTIONAL channel before any external side effect - the command may
     # submit real platform jobs, and a crash between execution and the attach
     # must leave a discoverable trace (doctor: REHEARSAL_RECEIPT_ORPHAN plus

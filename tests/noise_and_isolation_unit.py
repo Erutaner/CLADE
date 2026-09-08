@@ -1,13 +1,15 @@
-"""v11 feature contracts at unit speed.
+"""Noise-floor and isolation contracts at unit speed.
 
-    python tests/v11_feature_unit.py
+    python tests/noise_and_isolation_unit.py
 
-Covers the v11 additions: single-spawn git facts, invocation memo, noise-floor
+Covers: single-spawn git facts, invocation memo, noise-floor
 substitution + provisional records, critic isolation, abandon_request,
 expensive-terminal protection, sweep cadence config, ERRORS.json capping,
 launcher input slimming, and the mature-time SOTA comparability front-shift.
 """
 from __future__ import annotations
+
+import json
 
 import sys
 import tempfile
@@ -31,7 +33,7 @@ def noise_floor_substitution():
     cfg = econfig.merged_default()
     cfg["evaluation_contract"]["noise_floors"] = {"C1": 0.02}
     check(econfig.noise_floor(cfg, "C1") == 0.02, "recorded floor is read")
-    check(econfig.noise_floor(cfg, "C2") == 0.0, "absent floor is 0 (v10 behavior)")
+    check(econfig.noise_floor(cfg, "C2") == 0.0, "absent floor is 0")
     check(econfig.noise_floor(cfg, "C1") >= 0, "floor is non-negative")
 
     # A bare scalar widens to +-floor; a reported interval is kept as reported.
@@ -64,6 +66,39 @@ def noise_floor_substitution():
           "a floor naming no cell is rejected")
 
 
+
+def noise_floor_multiple_is_the_users_bar():
+    cfg = econfig.merged_default()
+    cfg["evaluation_contract"]["cells"] = [
+        {"id": "C1", "result_key": "auc", "direction": "max", "role": "target",
+         "required": True, "weight": 1.0, "min_improvement": 0.0}]
+    cfg["metrics"] = [{"key": "auc", "direction": "max"}]
+    cfg["evaluation_contract"]["noise_floors"] = {"C1": 0.02}
+    cfg["evaluation_contract"]["noise_floor_sources"] = {"C1": "user"}
+    check(econfig.noise_floor_multiple(cfg) == 1.0 and econfig.decision_floor(cfg, "C1") == 0.02,
+          "the default bar is one floor width")
+    cfg["evaluation_contract"]["noise_floor_multiple"] = 2.0
+    check(abs(econfig.decision_floor(cfg, "C1") - 0.04) < 1e-12,
+          "the decision band is the recorded floor times the user's multiple")
+    check(econfig.noise_floor(cfg, "C1") == 0.02,
+          "the recorded floor itself is untouched: it is the field's noise, the multiple is policy")
+    bad = json.loads(json.dumps(cfg))
+    bad["evaluation_contract"]["noise_floor_multiple"] = 0
+    check(any("CONFIG_NOISE_FLOOR_MULTIPLE" in e for e in econfig.validate_config(bad)),
+          "a non-positive multiple is refused at config time")
+    other = json.loads(json.dumps(cfg))
+    other["evaluation_contract"]["noise_floor_multiple"] = 3.0
+    check(econfig.bootstrap_contract_digest(cfg) == econfig.bootstrap_contract_digest(other),
+          "the multiple is a notebook fact outside the signed digest")
+    ctx = SimpleNamespace(cfg=cfg, st={})
+    node = {"eval_floor_frozen": {"C1": 0.02}, "eval_floor_multiple_frozen": 3.0}
+    check(abs(evalid._settlement_floor(ctx, node, "C1") - 0.06) < 1e-12,
+          "a node settles with the multiple it was measured with, not the live one")
+    check(abs(evalid._settlement_floor(ctx, {"eval_floor_frozen": {"C1": 0.02}}, "C1") - 0.04) < 1e-12,
+          "a node frozen before the multiple existed reads the live multiple")
+    check(abs(evalid._settlement_floor(ctx, {}, "C1") - 0.04) < 1e-12,
+          "without a frozen ruler the live decision band applies")
+
 def provisional_records():
     import egraph
     cfg = econfig.merged_default()
@@ -86,7 +121,7 @@ def provisional_records():
           "a record clearing the floor is not provisional")
     cfg["evaluation_contract"]["noise_floors"] = {}
     check(not egraph.provisional_record(winner, pool, cfg),
-          "no recorded floor -> no labeling (v10 behavior)")
+          "no recorded floor -> no labeling")
 
 
 def critic_isolation():
@@ -230,8 +265,8 @@ def sota_comparability_front_shift():
 
 
 def sweep_scope_behavior():
-    """The R1 review proved the scoped/cadence machinery had config tests only.
-    These exercise the BEHAVIOR on a synthetic engine."""
+    """The scoped/cadence machinery needs behavior tests, not config tests
+    only. These exercise the BEHAVIOR on a synthetic engine."""
     import json as _json
     with tempfile.TemporaryDirectory() as td:
         repo = Path(td)
@@ -242,7 +277,7 @@ def sweep_scope_behavior():
                               "full_sweep_max_minutes": 30},
                    "metrics": [{"key": "auc", "direction": "max"}],
                    "evaluation_contract": {"cells": []}}
-        # Fixture discipline (R2): each consumed-set ADDITION must be the ONLY
+        # Fixture discipline: each consumed-set ADDITION must be the ONLY
         # path by which its object enters the set, or reverting the addition
         # stays green. N009 is 'building' (real post-rollback status - the
         # executing/evaluating/evaluated base loop must NOT shadow it); N002
@@ -314,8 +349,33 @@ def sweep_scope_behavior():
         check(eng._next_sweep_scope() is None, "outside rounds every sweep is full")
 
 
+def evaluation_seal_tolerance():
+    """A field the seal never recorded cannot have moved: an assessment key
+    added after a node was measured is not OUTCOME_EVALUATION_SEAL_DRIFT; a
+    recorded value that the recomputation no longer reproduces still is."""
+    sealed = {"verdict": "improved", "real_win": True,
+              "effect_contract": {"status": "met", "targets": {"C1": {"status": "met"}}},
+              "cells": [{"id": "C1", "status": "improved"}]}
+    live = dict(sealed, group_rule_met=True, required_target_groups_improved=1,
+                effect_contract={"status": "met", "targets": {"C1": {"status": "met"}},
+                                 "group_rule_met": True})
+    check(evalid.evaluation_seal_moved(sealed, live) == [],
+          "keys absent from the seal (top level and nested) are not drift")
+    check(evalid.evaluation_seal_moved(sealed, dict(live, verdict="tradeoff")) == ["verdict"],
+          "a sealed scalar that recomputes differently is drift")
+    check(evalid.evaluation_seal_moved(
+        sealed, dict(live, effect_contract=dict(live["effect_contract"], status="partial"))) == ["effect_contract"],
+        "a nested sealed value that recomputes differently is drift, named by its top-level field")
+    check(evalid.evaluation_seal_moved(sealed, dict(live, cells=[])) == ["cells"],
+          "a sealed list whose length changes is drift")
+    check(evalid.evaluation_seal_moved(sealed, {k: v for k, v in live.items() if k != "real_win"}) == ["real_win"],
+          "a sealed key the recomputation dropped is drift")
+
+
 def main() -> None:
     noise_floor_substitution()
+    noise_floor_multiple_is_the_users_bar()
+    evaluation_seal_tolerance()
     provisional_records()
     critic_isolation()
     abandon_request_gate()
@@ -324,7 +384,7 @@ def main() -> None:
     sweep_scope_behavior()
     git_status_facts()
     sota_comparability_front_shift()
-    done("V11 FEATURE UNIT")
+    done("NOISE / ISOLATION UNIT")
 
 
 if __name__ == "__main__":

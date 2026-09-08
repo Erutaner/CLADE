@@ -1,19 +1,18 @@
 #!/usr/bin/env python3
-"""Mock drive for Model Evolution v9.2 - the package's broad regression suite.
+"""Mock drive - the package's broad regression suite.
 
 Token-cheap skeleton of an 18-round evolution (research mode, SOTA library,
 focus directions) plus a gated/copy-mode engineering mini-run: a scripted
 'agent' answers every engine task with minimal canned artifacts that satisfy
 the validators, while the choreography exercises the complex machinery:
 
-  everything the v7 suite exercised: staged training + artifact registry with
+  staged training + artifact registry with
     reuse/waiver/URI-collision, parallel background training with slot
     deferral and watch supersession, failure -> error journal -> fix ->
     relaunch, theory dialectic (REVISE/READ), moonshot floors, two-tier
     stagnation forcing, wildcat cadence, exploit-share cap, prune/revive,
     escalation reset, doctor --fix, git branch<->DAG mapping, engine-run smoke
-  v8 additions:
-    an engine-observed integrated infrastructure canary (legacy hand-written
+    an engine-observed integrated infrastructure canary (hand-written
       drill transcripts rejected; blocked/full_auto gate + fresh retry), SOTA
       library scan + idea binding + conclusion settlement
     the formal problem ladder: explicit theory rigor, pose (typed
@@ -290,6 +289,14 @@ def nx(d, typ=None, kind="task"):
         r = d.submit(out["task"])
         ok(r["kind"] == "accepted", f"post-freeze collision audit must accept before tournament: {r}")
         out = d.next()
+    # Research mode taxes every program-level win with an engine-opened
+    # ablation the moment the win is accepted. This scenario's user declines
+    # the tax wherever the choreography asked for something else (the decline
+    # is recorded on the parent); the explicit ablation section and doors_drive
+    # pay it end to end.
+    if typ not in (None, "design_ablation") and out.get("kind") == "task" and out.get("type") == "design_ablation" \
+            and decline_engine_ablations(d):
+        out = d.next()
     # Every research kernel, including a local one, now carries implementation
     # fidelity. Scenarios that are testing another transition still execute the
     # audit; dedicated fidelity scenarios request it explicitly and keep their
@@ -386,7 +393,7 @@ def w_project_scan(d, out, *, gpu_hours=10000, wallclock_minutes=100000,
             "claim_and_cost_reasoning": long(70, "the claim concerns ranking quality rather than typical-run variance and full retraining is material relative to the project envelope"),
         },
         "ablation_assessment": {
-            "recommended_mode": "targeted",
+            "recommended_budget_multiple": 2.0,
             "reasoning": long(70, "a single component intervention may distinguish causal explanations that cheap frozen-output evaluation cannot separate"),
         },
         "unknowns": [],
@@ -394,7 +401,7 @@ def w_project_scan(d, out, *, gpu_hours=10000, wallclock_minutes=100000,
             "limits": {"gpu_hours": gpu_hours, "wallclock_minutes": wallclock_minutes},
             "basis": "the test user explicitly confirmed these cumulative project totals",
         },
-        # v11.7: engine-fit assessment + readiness are mandatory scan outputs
+        # Engine-fit assessment + readiness are mandatory scan outputs
         "engine_fit": fit if fit is not None else {
             "assumptions": [
                 {"id": fid, "verdict": "holds", "evidence": ["README.md"],
@@ -487,9 +494,8 @@ def w_config(d, out, *, autonomy, rounds_max, vcs, on_stuck="ask", bad_docs=Fals
             "revisit_when": long(55, "reopen only if observed instability or a changed scientific claim makes typical-run behavior decision-relevant"),
         },
         "ablation": {
-            "mode": ablation_mode,
-            "max_costly_runs_per_node": 1 if ablation_mode == "targeted" else 0,
-            "basis": long(70, "the user allows only one manually gated intervention when it resolves a concrete causal fork and cheap evidence is insufficient"),
+            "budget_multiple": 2.0 if ablation_mode == "targeted" else 0.0,
+            "basis": long(70, "the user pre-authorizes settling a win's mechanism for up to twice what the winning node cost; anything larger waits for the user"),
         },
         "scaling_mode": "budgeted" if scaling_probe else "off",
         "max_scaling_costly_arms": 2 if scaling_probe else 0,
@@ -630,8 +636,10 @@ def w_interview(d, out, *, bad=None, llm=False):
           + (f"{rep.get('planned_runs')} full training runs are fixed in advance and aggregated by {rep.get('aggregation')}; "
              if rep.get("mode") == "preplanned" else
              "one seed is recorded and no full retraining repeats are planned; ")
-          + f"the ablation policy is {abl.get('mode')} with at most {abl.get('max_costly_runs_per_node')} "
-          "manually approved changed-component run and never an ablation-by-seed cross-product.")
+          + f"the ablation allowance is {abl.get('budget_multiple')} times what the winning node cost, "
+          "opened by the engine after a program-level win, and never an ablation-by-seed cross-product. "
+          "The user chose not to set a node ceiling (the most one node may spend) for this project, and "
+          "left the number of accelerators our jobs may hold at once to the scheduler (devices: unlimited).")
     if bad == "no_pm":
         pm = "the evaluation is confirmed [src: docs/kb/metrics.md] but this section forgets the configured result keys."
     svcs = ("- hub-cli batch queue is the only compute surface documented [src: docs/kb/platform.md]\n"
@@ -1267,7 +1275,7 @@ def w_problem(d, out, *, bad=None):
 
 
 def formal_step_lines(n_steps, *, bad=None):
-    """A canned derivation chain that satisfies (or violates) the v8 step audit."""
+    """A canned derivation chain that satisfies (or violates) the step audit."""
     lines = []
     for i in range(1, n_steps + 1):
         prem = "A1" if i == 1 else ("A2, S1" if i == 2 else f"S{i - 1}")
@@ -1400,7 +1408,7 @@ def w_mature(d, out, lane_id, *, mech_ids, preds, n_assum=2, deriv_chars=300,
     assum = [{"id": f"A{i}", "statement": long(45, f"assumption A{i} about propensity validity on slice {i}"),
               "source": "dossier" if i % 2 else "profile"} for i in range(1, n_assum + 1)]
     if obs_source:
-        assum[0]["source"] = obs_source   # v9: a ledger observation grounds an assumption
+        assum[0]["source"] = obs_source   # A ledger observation grounds an assumption
     npb = {"paper": "E001"}
     if adapt_only:
         npb["adaptation"] = long(95, "the published reweighting mechanism is borrowed wholesale and refit to the "
@@ -1441,8 +1449,7 @@ def w_mature(d, out, lane_id, *, mech_ids, preds, n_assum=2, deriv_chars=300,
     research_kernel = str((winner.get("novelty") or {}).get("kind")) in eprogram.RESEARCH_NOVELTY
     if research_kernel and not platform and purpose == "candidate" and bad != "no_probe":
         if waiver:
-            meta["attribution_waiver"] = long(45, "the mechanism has no measurable intermediate on this "
-                                                  "harness because the decoding change only exists at the API boundary")
+            pass   # no instrument registered: the mechanism settles as deferred
         else:
             repeat_policy = ((project_cfg(d).get("evidence_policy") or {}).get("training_replication") or {})
             probe_artifact = (f".evo/probes/{iid}/seed-{{seed}}.json"
@@ -1461,7 +1468,7 @@ def w_mature(d, out, lane_id, *, mech_ids, preds, n_assum=2, deriv_chars=300,
                 "cheaper_modes_rejected": []}
     if dominance:
         meta["dominance"] = dominance
-    # v9.2 scaling evidence: auto-register an after-signal follow-up contract
+    # Scaling evidence: auto-register an after-signal follow-up contract
     # for L4 non-platform ideas only when evidence_policy permits it.
     cfg0 = project_cfg(d)
     # "== candidate", not "!= targeted_ablation": research fields are candidate
@@ -1537,7 +1544,7 @@ def w_mature(d, out, lane_id, *, mech_ids, preds, n_assum=2, deriv_chars=300,
                                       "mechanism attains the posed bound for V_hat on the frozen protocol")))
     wt(d.repo, out["outputs"][0], md(*secs))
     if meta_extra:
-        meta.update(meta_extra)   # v11.1 doors drive: repeat_rule etc.
+        meta.update(meta_extra)   # doors drive: repeat_rule etc.
     wj(d.repo, out["outputs"][1], meta)
 
 
@@ -1604,6 +1611,9 @@ def w_design_ablation(d, out, lane_id, *, bad=None):
         "decision_if_no_effect": long(65, "drop the objective story and redirect descendants toward the optimization-side-effect explanation"),
         "why_cheaper_evidence_insufficient": long(65, "saved logs and fixed-output evaluation cannot remove a train-time objective term"),
         "costly_runs": 1,
+        "settles_parent_mechanism": True,
+        "control_is_clean_program": True,
+        "runs_basis": long(70, "the decision-relevant effect of 0.02 auc is four times the C1 noise floor of 0.005, so one changed-component run resolves the fork"),
     }
     if bad == "missing_trigger":
         contract["trigger_artifacts"] = [f".evo/nodes/{parent}/missing.json"]
@@ -1734,7 +1744,7 @@ def w_plan(d, out, lane_id, *, role, workdir, stages, cost="medium", enables=Non
         "eval": ev,
     }
     if purpose in ("candidate", "exploratory"):
-        # v11.1: program-carrying purposes share one custody chain
+        # Program-carrying purposes share one custody chain
         spec.update({
             "program_digest": meta["program_digest"],
             "kernel_ids": eprogram.kernel_ids(meta),
@@ -1761,7 +1771,7 @@ def w_plan(d, out, lane_id, *, role, workdir, stages, cost="medium", enables=Non
         for stg in stages:
             if econfig.stage_requires_ledger(stg) and not stg.get("ledger_file"):
                 stg["ledger_file"] = f"{workdir}/ledger_{stg.get('name')}.jsonl"
-            # R9 (landing lease): stage landings are per-RUN exclusive now; a
+            # Stage landings are per-RUN exclusive now; a
             # bare repo-root name shared by parallel nodes is exactly the
             # cross-RUN aliasing the engine rejects. Namespace bare paths
             # under this node's workdir (mirrors the ledger default above).
@@ -1787,7 +1797,7 @@ def w_plan(d, out, lane_id, *, role, workdir, stages, cost="medium", enables=Non
                             product["uri"] = str(product.get("uri") or "").rstrip("/") + "/seed-{seed}"
         spec["workflow"] = {"stages": stages}
     probe = meta.get("mechanism_probe") or {}
-    if probe.get("mode") in econfig.PROBE_MODES and not str(meta.get("attribution_waiver") or "").strip():
+    if probe.get("mode") in econfig.PROBE_MODES:
         execution = {k: json.loads(json.dumps(probe[k]))
                      for k in ("mode", "signal", "expect", "artifact", "required_fields", "decision_rule")}
         if probe["mode"] == "same_run":
@@ -1812,7 +1822,7 @@ def w_plan(d, out, lane_id, *, role, workdir, stages, cost="medium", enables=Non
 
 
 def wiring_section_for(d, node, spec):
-    """v10.2 artifact wiring: derive declared consumes/produces from the spec
+    """Artifact wiring: derive declared consumes/produces from the spec
     and write real load/save lines the literal check binds to (shared by the
     initial, fix-pass and recovery implement writers)."""
     want_reads, want_writes = [], []
@@ -2092,12 +2102,11 @@ def w_eval(d, out, nid, auc, logloss=None, *, latency=100.0, bad=None, dist=Fals
         ("Results", long(100, f"C1 ranking auc {auc} against goal 0.80; C2 calibration logloss {logloss} against goal 0.40; C3 serving latency {latency} ms against references")),
         *dyn,
     ]
-    # v9 duties: anomaly hunt + registered mechanism probe + scaling probe
+    # Duties: anomaly hunt + registered mechanism probe + scaling probe
     if bad != "no_anom":
         secs.append(("Anomalies", anomalies or
                      long(50, "NONE - curves, rare level slices and output samples were checked")))
-    if meta.get("mechanism_probe") and not str(meta.get("attribution_waiver") or "").strip() \
-            and bad != "no_mech_section":
+    if meta.get("mechanism_probe") and bad != "no_mech_section":
         observed_text = ", ".join(f"{field}={value:g}" for field, value in probe_values_for_report)
         secs.append(("Mechanism check",
                      long(70, "the structured probe artifact was read under the frozen mechanism contract and compared with its expectation")
@@ -2147,7 +2156,7 @@ def w_conclude(d, out, nid, *, platform=False, baseline=False, lessons=None,
         if want == "regressed" and bad != "no_root_cause" and root_cause is not False:
             outcome["root_cause"] = {"assumptions": ["A1"],
                                      "note": long(50, "the propensity validity assumption failed on the rare levels slice")}
-        # settle every registered SOTA target (v8 duty)
+        # settle every registered SOTA target
         if meta.get("sota_targets") and bad != "no_sota_settle":
             sota_rows = {r["id"]: r for r in ctx.sota_rows()}
             cells = econfig.cell_spec(ctx.cfg)
@@ -2164,9 +2173,8 @@ def w_conclude(d, out, nid, *, platform=False, baseline=False, lessons=None,
                     {"sota": t["sota"], "met": met,
                      "note": long(55, f"compared observed {observed} against {t['sota']} headline {target} on the exact frozen protocol")})
             outcome["sota"] = settlements
-        # v9: mechanism attribution + scaling settlements
-        if meta.get("mechanism_probe") and not str(meta.get("attribution_waiver") or "").strip() \
-                and bad != "no_mech_settle":
+        # Mechanism attribution + scaling settlements
+        if meta.get("mechanism_probe") and bad != "no_mech_settle":
             outcome["mechanism"] = {"status": mech_status,
                                     "note": long(50, "the calibration slope moved with the metric exactly as registered; the gain flows through the claimed channel"),
                                     "evidence": f".evo/nodes/{nid}/eval/metrics.json"}
@@ -2196,7 +2204,7 @@ def w_conclude(d, out, nid, *, platform=False, baseline=False, lessons=None,
             outcome["maintenance_parity"] = evalid.maintenance_parity_status(assessment)
         else:
             outcome["effect_contract_status"] = assessment["effect_contract_status"]
-    # v9: phenomenon-ledger mining (any role)
+    # Phenomenon-ledger mining (any role)
     if observations:
         outcome["observations"] = observations
     if infra_resolutions is not None:
@@ -2455,7 +2463,7 @@ def _write_canary_plan_multi(d, out):
 def w_drills(d, out, *, blocked=False, bad=None, services=(), multi=False):
     """Write the canary plan/report; only ecanary.run may author execution proof.
 
-    The two legacy negative modes intentionally stop before ``ecanary.run``.
+    The two hand-written-transcript negative modes intentionally stop before ``ecanary.run``.
     Every positive or blocked path executes the adapter as a real subprocess.
     """
     _write_canary_report(d, out, "blocked" if blocked else "passed")
@@ -2527,7 +2535,7 @@ def w_drills(d, out, *, blocked=False, bad=None, services=(), multi=False):
 
 def w_sota(d, out, *, bad=None, append=0):
     p = d.repo / ".evo/evidence/SOTA.jsonl"
-    # R7: the declared noise-synthesis handoff file must exist (validator
+    # The declared noise-synthesis handoff file must exist (validator
     # SOTA_NOISE_MISSING); the mock states the no-adjustment case explicitly.
     (d.repo / ".evo/evidence/SOTA_NOISE.md").write_text(
         "No noise-floor adjustment needed: the six comparable works report "
@@ -2572,7 +2580,7 @@ def w_sota(d, out, *, bad=None, append=0):
 
 
 def w_retro(d, out, rid, *, retire=None, bad=None):
-    # v10.1: close_round's only output is RETIRE.json (RETRO.md was removed -
+    # Close_round's only output is RETIRE.json (RETRO.md was removed -
     # the engine computes frontier movement itself and nothing read the prose).
     wj(d.repo, out["outputs"][0], retire or [])
 
@@ -2656,7 +2664,7 @@ def write_stage_result(d, nid, stage_name, metrics_rel, summary, *, seed=None, p
     wj(d.repo, metrics_rel, payload)
     probe = spec.get("probe_execution") or {}
     if probe.get("mode") == "same_run" and probe.get("producer_stage") == stage_name and not repeat:
-        # the repeat buy-back lane carries no probe duty (R9-002)
+        # The repeat buy-back lane carries no probe duty
         artifact = str(econfig.resolve_seed_template(probe.get("artifact") or "", seed)) \
             if seed is not None else str(probe.get("artifact") or "")
         wj(d.repo, artifact, {str(field): probe_value for field in (probe.get("required_fields") or [])})
@@ -2872,7 +2880,7 @@ def drive_node_to_training(d, nid, *, bridge=False, job="job-bg"):
     res = d.smoke(nid)
     ok(res["status"] == "pass", f"smoke for {nid} should pass: {res}")
     sub_ok(d, out)
-    maybe_fidelity(d, nid)   # L3+/heavy nodes carry the claim->code audit (v8)
+    maybe_fidelity(d, nid)   # L3+/heavy nodes carry the claim->code audit
     if bridge:
         out = nx(d, "metric_bridge")
         w_bridge(d, out)
@@ -2992,7 +3000,7 @@ def w_maintenance_review(d, out, lid, *, verdict="ACCEPT"):
 
 
 def run_instrumental(d):
-    """v10.2: mid-round instrumental intake - a user probe and a maintenance
+    """Mid-round instrumental intake - a user probe and a maintenance
     repair ride the idea-gate-node rail without novelty gates, firewalls on."""
     section("R018b: mid-round diagnostic probe + parity-contracted maintenance")
     evo_py = str(PKG / "engine" / "evo.py")
@@ -3008,7 +3016,7 @@ def run_instrumental(d):
        and probe_lane["status"] == "probe_design",
        f"probe lane created mid-round: {probe_lane['id']} {probe_lane['status']}")
 
-    # --- v11.1 P6: in-rounds tamper E2E. The scoped sweep's fail-closed deal,
+    # --- In-rounds tamper E2E. The scoped sweep's fail-closed deal,
     # asserted mid-round for the first time: what the imminent decision
     # CONSUMES is always verified; what it does not consume waits for the
     # cadence tripwire - and the tripwire actually fires.
@@ -3038,7 +3046,7 @@ def run_instrumental(d):
 
     # Out-of-scope subject: mirror esched._next_sweep_scope's node set and pick
     # a concluded node OUTSIDE it (the only pruned node, N009, was revived in
-    # R011 - old dominated variants are the durable out-of-scope population).
+    # Old dominated variants are the durable out-of-scope population).
     # If the engine's scope ever widens past this mirror, the "scoped tick
     # passes" assertion below fails loudly and the mirror must be updated.
     st_now, g_now, cfg_now = d.state(), d.graph(), d.store().load_config()
@@ -3067,11 +3075,15 @@ def run_instrumental(d):
         for f in ("code_parent", "effect_comparator_node"):
             if row.get(f):
                 scoped_nodes.add(str(row.get(f)))
+    # A retired node's working bytes are only binding-checked (its snapshot is
+    # the audited record), so the leg needs a concluded node that is still an
+    # active authority: no retire_reason.
     out_pool = [n for n in g_now["nodes"]
                 if str(n["id"]) not in scoped_nodes and n.get("status") == "concluded"
+                and not n.get("retire_reason")
                 and (d.repo / f".evo/nodes/{n['id']}/NODE_SPEC.json").is_file()]
     ok(bool(out_pool),
-       "a concluded off-scope node with a sealed spec exists for the out-of-scope leg")
+       "an active concluded off-scope node with a sealed spec exists for the out-of-scope leg")
     out_rel = f".evo/nodes/{out_pool[0]['id']}/NODE_SPEC.json"
     out_original = (d.repo / out_rel).read_text(encoding="utf-8")
     out_tampered = json.loads(out_original)
@@ -3097,7 +3109,7 @@ def run_instrumental(d):
        "not a permanently-scoped blind spot")
     force_full_sweep(d)   # leave the next tick full so the restore is re-audited too
 
-    # v11.1 T3: the engine-written winner file exists for every accepted winner
+    # The engine-written winner file exists for every accepted winner
     # and binds the lane's frozen identity (doctor cross-checks the same).
     won = [l for l in st_now.get("lanes", []) if l.get("winner_sketch")]
     ok(bool(won), "at least one lane accepted a tournament winner by R018")
@@ -3109,11 +3121,11 @@ def run_instrumental(d):
        and isinstance(wdata.get("sketch"), dict) and wdata.get("sketch"),
        f"WINNER.json carries the frozen winner identity + full sketch payload: "
        f"{wdata.get('sketch_id')}/{str(wdata.get('winner_program_digest'))[:12]}")
-    # v11.1 T4: breadth tasks are exempt from ledger slices - deep_read always
+    # Breadth tasks are exempt from ledger slices - deep_read always
     # reads the FULL pools, never a .evo/slices/ path.
     dr_tasks = [t for t in st_now.get("tasks", []) if t.get("type") == "deep_read"]
     ok(bool(dr_tasks), "deep_read tasks exist in the flow by R018")
-    # Done tasks drop their _render payload (v11 slimming), so the durable
+    # Done tasks drop their _render payload, so the durable
     # evidence is the bundle file itself.
     dr_bundles = [(d.repo / f".evo/tasks/{t['id']}/BUNDLE.md").read_text(encoding="utf-8")
                   for t in dr_tasks
@@ -3190,7 +3202,7 @@ def run_instrumental(d):
     ok(any(e.startswith("INJECT_DISABLED") for e in off_errs)
        and not any(e.startswith("INJECT_CAP") for e in off_errs),
        f"cap 0 must read as a disabled door, not as an exhausted budget: {off_errs}")
-    # R1 hardening: the lane name is a path component of the engine-written
+    # The lane name is a path component of the engine-written
     # brief, so traversal and duplicates are refused at the door.
     proc = subprocess.run([PY, evo_py, "--repo", str(d.repo), "maintain",
                            "--parent", "N024", "--name", "../../../../escape",
@@ -3296,7 +3308,7 @@ def run_instrumental(d):
            cost="light")
     sub_ok(d, out)
     n_maint = d.lane(lid_m)["node"]
-    # v10.2 R2: a maintenance node inherits its parent's tree and may touch
+    # A maintenance node inherits its parent's tree and may touch
     # ONLY the files its reviewed change_boundary declared; the engine now
     # diffs the execution closure against the parent's sealed manifest, so an
     # out-of-scope edit is MAINT_BOUNDARY_VIOLATION.  First prove the check
@@ -3312,10 +3324,10 @@ def run_instrumental(d):
     maybe_fidelity(d, n_maint)
     # Instrumental compute is never released without the user. eflow.GATE_POLICY
     # lists all three instrumental purposes as manual for workflow_approval, and
-    # _needs_workflow_gate now actually CREATES that gate for each of them - it
-    # used to hard-return True for targeted_ablation alone, so under full_auto a
-    # repair's workflow launched unattended and the policy entry protected
-    # nothing.  This drive runs full_auto, so the gate must appear here.
+    # _needs_workflow_gate CREATES that gate for each of them - hard-returning
+    # True for targeted_ablation alone would let a repair's workflow launch
+    # unattended under full_auto with the policy entry protecting nothing.
+    # This drive runs full_auto, so the gate must appear here.
     gate = nx(d, kind="gate")
     ok(gate["gate_kind"] == "workflow_approval",
        f"full_auto must still pause before spending a repair's workflow: {gate}")
@@ -3355,7 +3367,7 @@ def run_instrumental(d):
     out = nx(d, "conclude")
     w_conclude(d, out, n_maint)
     sub_rej(d, out, "OUTCOME_INFRA_RESOLUTION_REQUIRED")
-    # R1 hardening: 'transient' is not a free escape - it must name the later
+    # 'transient' is not a free escape - it must name the later
     # RUN of this node that succeeded under the SAME implementation revision.
     w_conclude(d, out, n_maint, infra_resolutions=[{
         "error": er_ids[0], "disposition": "transient"}])
@@ -3384,7 +3396,7 @@ def run_instrumental(d):
     idx = egraph.by_id(d.graph())
     ok(egraph.effective_frontier_ancestor(idx, n_maint) == "N024",
        "maintenance is frontier-transparent to its parent")
-    # R1: transparency is BIDIRECTIONAL - a repair (even one that measures
+    # Transparency is BIDIRECTIONAL - a repair (even one that measures
     # better) never competes as a frontier tip, so it cannot evict the very
     # parent whose lineage it repaired and deadlock later exploits.
     cfg_now = project_cfg(d)
@@ -3410,7 +3422,34 @@ def run_instrumental(d):
        f"a parity-met maintenance node is a legal parent: {errs}")
 
 
+def decline_engine_ablations(d):
+    """Research mode: the engine opens an inheritance-tax ablation after every
+    program-level win (probe or no probe - the probe is information). The
+    long-run fixture exercises that lifecycle in its explicit ablation section
+    and doors_drive R005 covers the engine-opened one end to end; here the user
+    declines the tax so the round can close, and the decline is recorded on
+    the parent (ablation_declined) where the frontier shows it."""
+    eng = d.eng()
+    by_lane = {str(n.get("ablation_lane") or ""): n for n in eng.g.get("nodes", [])
+               if n.get("ablation_lane") and n.get("ablation_lane_opened_by") in ("conclude", "open_round")}
+    declined = 0
+    for lane in list(eng.st["lanes"]):
+        if lane.get("experiment_purpose") != "targeted_ablation" or lane.get("status") in ("done", "abandoned"):
+            continue
+        parent = by_lane.get(str(lane.get("id") or ""))
+        if parent is None:
+            continue
+        eng._abandon_lane(lane, "inheritance tax declined by the user for this round")
+        ok("ablation_lane" not in parent and (parent.get("ablation_declined") or {}).get("lane") == lane["id"],
+           f"declining the tax clears the pointer and records the decline on {parent.get('id')}")
+        declined += 1
+    if declined:
+        eng.save()
+    return declined
+
+
 def drive_close(d, rid, *, retire=None):
+    decline_engine_ablations(d)
     out = nx(d, "close_round")
     w_retro(d, out, rid, retire=retire)
     sub_ok(d, out)
@@ -3470,7 +3509,7 @@ def w_config_main(d, out, **kw):
     kw.setdefault("rehearsal", "none")
     kw.setdefault("sota", True)
     kw.setdefault("sota_refresh", 7)
-    kw.setdefault("scaling_probe", True)   # v9: L4 ideas pre-register a cross-scale trend
+    kw.setdefault("scaling_probe", True)   # L4 ideas pre-register a cross-scale trend
     kw.setdefault("focus", MAIN_FOCUS)
     kw.setdefault("focus_neglect", 4)
     w_config(d, out, **kw)
@@ -3979,6 +4018,11 @@ def run_r1(d):
                                       "recommendation": long(30, "prefer slices with recorded propensities")}])
     sub_ok(d, out)
 
+    # N002 won at program level with its probe passing; the probe is
+    # information, so the engine still opened the inheritance tax - this run
+    # declines it (the doors drive pays it end to end)
+    ok(decline_engine_ablations(d) == 1 and (d.node(nid).get("ablation_declined") or {}).get("lane"),
+       f"the engine opened the tax on the R001 win and the decline is recorded: {d.node(nid).get('ablation_declined')}")
     out = nx(d, "close_round")
     w_retro(d, out, "R001")
     sub_ok(d, out)
@@ -3992,9 +4036,9 @@ SKEY_PT = "pretrain|data=part2|obj=bfr|arch=d256l2"
 
 def run_r2(d):
     section("R002: theory dialectic + 2-stage training + parallel lanes + slots + failure journal")
-    # v11.4 fixture sync: voluntary focus service needs a round big enough
-    # for the share cap (1/2 = the 50% cap exactly); the old early D1 service
-    # lived on single-lane R004, which the cap now refuses outside
+    # Voluntary focus service needs a round big enough
+    # for the share cap (1/2 = the 50% cap exactly); a single-lane D1 service
+    # on R004 would be refused by the cap outside
     # starvation. Serving D1 here keeps the later cadence intact: R007 then
     # serves it as the starvation-forced (cap-exempt) lane, and R012's
     # deliberate starvation window (R008-R011) is unchanged.
@@ -4089,7 +4133,7 @@ def run_r2(d):
     out = nx(d, "smoke")
     ok(d.smoke(n3)["status"] == "pass", "N003 smoke")
     sub_ok(d, out)
-    # v8: an L3 idea passes the implementation-fidelity audit before any compute
+    # An L3 idea passes the implementation-fidelity audit before any compute
     ok(d.node(n3).get("fidelity_pending") is True, "L3 node armed for the fidelity audit")
     drive_fidelity(d, n3, neg=True)
     out = nx(d, "metric_bridge")
@@ -4366,8 +4410,8 @@ def run_r3(d):
 
 def run_r4(d):
     section("R004: 2-parent hybrid consuming a platform")
-    # (v11.4 fixture sync: the early D1 service moved to R002's two-lane
-    # round - a voluntary single-lane focus round now exceeds the share cap)
+    # (the D1 service lives on R002's two-lane round - a voluntary
+    # single-lane focus round exceeds the share cap)
     open_round(d, "R004", [
         {"name": "hyb", "intent": "hybrid", "min_level": 2, "parents": ["N005", "N004", "N006"]},
     ])
@@ -4467,6 +4511,7 @@ def run_r6(d):
                   "statement": long(40, "the reweighted head regresses when applied on top of the new principle root"),
                   "evidence": long(30, "N009 fell from 0.724 to 0.710 with A1 refuted"),
                   "recommendation": long(30, "test propensity validity before stacking mechanisms on this root")}])
+    decline_engine_ablations(d)
     out = nx(d, "close_round")
     wt(d.repo, ".evo/profile/DOSSIER_ADDENDUM.md",
        "# addendum\n- B1: rebinding an existing bottleneck id | evidence: [src: eval.py] "
@@ -4539,13 +4584,13 @@ def run_r7(d):
     sub_ok(d, out)
     out = nx(d, "sketch")
     bundle = (d.repo / out["bundle"]).read_text(encoding="utf-8")
-    ok("N009" in bundle, "sibling failure (N009) surfaced in the sketch bundle")
+    ok("N009" in bundle, "sibling failure surfaced in the sketch bundle")
     w_sketches(d, out, lid, L2_DIMS, mech, efficiency=True)
     sub_ok(d, out)
     out = nx(d, "tournament")
     w_tournament(d, out, lid, "K1")
     sub_ok(d, out)
-    # v9 dominance: pre-registered secondary-axis claim; at primary parity a met
+    # Dominance: pre-registered secondary-axis claim; at primary parity a met
     # claim concludes 'dominant' (same-quality-but-cheaper), not 'inconclusive'
     drive_mature_redteam(d, lid, mech_ids=mech, score=0.724,
                          dominance={"metric": "logloss", "comparison": "<=", "value": 0.65,
@@ -4936,7 +4981,7 @@ def run_r13(d):
     bundle = (d.repo / out["bundle"]).read_text(encoding="utf-8")
     ok("agent_eval_raw.json" in bundle, "evaluate bundle points at the background run's metrics")
     w_eval(d, out, n18, 0.751, dist=True, bad="no_n")
-    sub_rej(d, out, "EVAL_METRIC_LEGACY_AGGREGATE")
+    sub_rej(d, out, "EVAL_METRIC_AGGREGATE_AMBIGUOUS")
     w_eval(d, out, n18, 0.751, dist=True)
     sub_ok(d, out)
     ok(d.node(n18)["scores"]["auc"] == 0.751,
@@ -5007,11 +5052,6 @@ def run_r14(d):
              preds=preds_for(0.695), n_assum=4, deriv_chars=1300, theory=True, formal=True,
              bad="no_formal_meta")
     sub_rej(d, out, "IDEA_PROBLEM_LINK", "MD_SECTION_MISSING", "IDEA_SOTA_TARGET")
-    # v9: an L3+ idea without a mechanism probe (and no waiver) is unattributable
-    w_mature(d, out, wl, interface_changed=True, mech_ids=mech,
-             preds=preds_for(0.695), n_assum=4, deriv_chars=1300, theory=True, formal=True,
-             bad="no_probe")
-    sub_rej(d, out, "FIELD_TOO_SHORT")
     w_mature(d, out, wl, interface_changed=True, mech_ids=mech,
              preds=preds_for(0.695), n_assum=4, deriv_chars=1300, theory=True, formal=True)
     sub_ok(d, out)
@@ -5042,9 +5082,18 @@ def run_r14(d):
         "evidence": f".evo/nodes/{n19}/eval/EVAL_REPORT.md"}])
     sub_ok(d, out)
     obs = eutil.read_jsonl(d.repo / ".evo/evidence/OBSERVATIONS.jsonl")
-    ok(len(obs) == 1 and obs[0]["id"] == "OB001" and obs[0]["node"] == n19,
-       f"observation mined into the phenomenon ledger: {[o.get('id') for o in obs]}")
-    ok(len(d.events("observation_recorded")) == 1, "observation event recorded")
+    # every concluded node with a registered probe banked its reading as an
+    # engine-sourced observation before this first agent-mined one
+    mined = [o for o in obs if o.get("source") != "engine"]
+    readings = [o for o in obs if o.get("kind") == "probe_reading"]
+    ok(len(mined) == 1 and mined[0]["node"] == n19 and mined[0]["id"] == obs[-1]["id"]
+       and len(readings) == len(obs) - 1 and len(readings) >= 5,
+       f"observation mined into the phenomenon ledger beside the probe readings: {[o.get('id') for o in obs]}")
+    ok(len([e for e in d.events("observation_recorded") if not e.get("kind")]) == 1,
+       "observation event recorded")
+    ok(all(d.node(o["node"]).get("probe_result", {}).get("observation") == o["id"] for o in readings),
+       "each probe reading is bound to its node's probe_result")
+    ok(len(readings) > 8, f"more readings than the bundle window shows: {len(readings)}")
     node = d.node(n19)
     ok(node["verdict"] == "promising", f"L4 root at parity concludes promising: {node['verdict']}")
     # Parity is not a loophole around the resource contract.  Recompute the
@@ -5116,10 +5165,16 @@ def run_r15(d):
     # interleaving between two lanes at different stages.
     out = nx(d, "sketch")
     bundle = (d.repo / out["bundle"]).read_text(encoding="utf-8")
-    ok("Phenomenon ledger" in bundle and "OB001" in bundle,
-       "phenomenon ledger routed into the sketch bundle")
+    ledger = eutil.read_jsonl(d.repo / ".evo/evidence/OBSERVATIONS.jsonl")
+    mined_ob = next(str(o["id"]) for o in ledger if o.get("source") != "engine")   # N019's mined anomaly
+    first_reading = next(o for o in ledger if o.get("source") == "engine")
+    oldest_reading = f"{first_reading['id']} [{first_reading['kind']}]"
+    ok("Phenomenon ledger" in bundle and f"{mined_ob}:" in bundle and "engine readings" in bundle
+       and oldest_reading not in bundle,
+       "phenomenon ledger routed into the sketch bundle: the mined row in its own window, the probe "
+       "readings in theirs (newest eight), the oldest reading cut")
     ok("Idea-space usage watch" in bundle, "homogenization watch block present in the sketch bundle")
-    w_sketches(d, out, m2, L4_DIMS_NB, [], reframe=True, theory_rigor="full", obs_ref="OB001")
+    w_sketches(d, out, m2, L4_DIMS_NB, [], reframe=True, theory_rigor="full", obs_ref=mined_ob)
     sub_ok(d, out)
     h4 = d.lane_by_name("hyb4")["id"]
     out = nx(d, "sketch")
@@ -5165,7 +5220,7 @@ def run_r15(d):
     # good version: assumption A1 grounded in the mined ledger observation
     w_mature(d, out, m2, mech_ids=mech,
              preds=preds_for(0.760), n_assum=5, deriv_chars=2100, theory=True, formal=True,
-             obs_source="OB001")
+             obs_source=mined_ob)
     sub_ok(d, out)
     out = nx(d, "red_team")
     w_red_team(d, out, m2)
@@ -5202,7 +5257,7 @@ def run_r15(d):
     finish_run(d, run20, "workareas/n020/train_metrics_train.json")
     out = nx(d, "evaluate")
     ok(d.state()["tasks"][-1]["subject"]["node"] == n20, "N020 evaluated while N021 trains")
-    # v9: a registered mechanism probe must be MEASURED in the eval report
+    # A registered mechanism probe must be MEASURED in the eval report
     w_eval(d, out, n20, 0.760, bad="no_mech_section")
     sub_rej(d, out, "EVAL_MECHANISM")
     w_eval(d, out, n20, 0.760)
@@ -5221,7 +5276,7 @@ def run_r15(d):
     w_eval(d, out, n21, 0.752)
     sub_ok(d, out)
     out = nx(d, "conclude")
-    # v9: an observation without evidence is an anecdote, not a ledger entry
+    # An observation without evidence is an anecdote, not a ledger entry
     w_conclude(d, out, n21, observations=[{
         "statement": long(35, "the adapter merge shows a loss spike at stage start"),
         "where": "train stage: first 50 steps",
@@ -5306,7 +5361,7 @@ def core_palette_binding_adversarial_checks(d, lane_id):
         "reading_done lane with all palette bindings erased")
 
     # Pointing state at another internally well-formed palette while retaining
-    # the old seal used to pass digest-only checks.  Reverse the list so the
+    # the old seal would pass digest-only checks.  Reverse the list so the
     # alternate JSON has a distinct digest without changing its CP membership.
     alt_rel = palette_rel.rsplit("/", 1)[0] + "/CORE_PALETTE_ALT.json"
     alt_path = d.repo / alt_rel
@@ -5483,7 +5538,7 @@ def run_r16(d):
     run22 = drive_node_to_training(d, n22, job="job-22")
     drive_watch_finish(d, run22, n22, "train", probe_value=0.5)
     out = nx(d, "evaluate")
-    # v9.2 scaling is an after-positive-signal follow-up node: this primary
+    # Scaling is an after-positive-signal follow-up node: this primary
     # evaluation must NOT pretend those training arms already ran.
     w_eval(d, out, n22, 0.768, bad="no_scaling_section")
     sub_ok(d, out)
@@ -5502,7 +5557,7 @@ def run_r16(d):
 
 
 def run_r17(d):
-    section("R017: refuted mechanism may feed a newly claimed hybrid, not direct exploit")
+    section("R017: a probe that read 'not used' is information; the win is a legal parent and feeds a hybrid")
     open_round(d, "R017", [{"name": "hyb5", "intent": "hybrid", "min_level": 2,
                             "parents": ["N010", "N022"]}])
     evidence_refresh(d)
@@ -5529,10 +5584,14 @@ def run_r17(d):
 def run_r18(d):
     section("R018: scientific stagnation forces a fresh full-program moonshot -> DONE")
     out = nx(d, "open_round")
-    # N022 improved but its registered mechanism was refuted: direct exploit
-    # cannot inherit that scientific claim unchanged.
-    w_portfolio(d, out, "R018", [exploit_lane("last-e", "N022", focus="D1")])
-    sub_rej(d, out, "PORTFOLIO_EXPLOIT_OFF_FRONTIER")
+    # N022 improved; its probe read "not used", but a probe is information and
+    # the program is a legal parent. What no lane may do is build on N022's
+    # STORY: citing its kernel as an established cause while the causal
+    # status is still deferred (the probe never settles it).
+    premised = exploit_lane("last-e", "N022", focus="D1")
+    premised["mechanism_premises"] = ["N022"]
+    w_portfolio(d, out, "R018", [premised])
+    sub_rej(d, out, "PORTFOLIO_MECHANISM_PREMISE_UNSETTLED")
     # D1 was last served in R013 (window R014-R017); a frontier-valid exploit
     # still fails both focus and the now-active paradigm-reform duty.
     w_portfolio(d, out, "R018", [exploit_lane("last-e", "N020")])
@@ -5683,12 +5742,17 @@ def view_asserts(d, *, nodes, rounds_closed, primary="auc"):
            for row in data["rounds"]),
        "every newly closed round freezes observed-performance as well as active-frontier movement")
     ok(data["schema"] == "evo.dashboard.v2", "dashboard publishes the v2 frontend schema")
-    threshold_projection = edash._assessment_view({"mechanism_contract": {
-        "status": "confirmed", "field": "alignment", "aggregation": "mean",
-        "aggregate": 0.91, "comparison": ">=", "threshold": 0.9}})
-    ok(threshold_projection["mechanism_contract"]["threshold"] == 0.9
-       and "lower" not in threshold_projection["mechanism_contract"],
-       "dashboard preserves a one-sided mechanism threshold without inventing between bounds")
+    # the probe's rule and observations live in the probe block; the causal
+    # block carries only the status the ablation settled
+    threshold_projection = edash._assessment_view({
+        "mechanism_contract": {"status": "deferred", "reason": "settled by ablation"},
+        "probe_contract": {"status": "confirmed", "field": "alignment", "aggregation": "mean",
+                           "aggregate": 0.91, "comparison": ">=", "threshold": 0.9}})
+    ok(threshold_projection["probe_contract"]["threshold"] == 0.9
+       and "lower" not in threshold_projection["probe_contract"]
+       and threshold_projection["mechanism_contract"] == {"status": "deferred", "reason": "settled by ablation"},
+       "dashboard preserves a one-sided probe threshold without inventing between bounds and keeps the "
+       "causal block to its status")
     ok(data["project"]["primary"] == primary, "dashboard carries the display result key")
     ok(data["frontier"], "dashboard frontier non-empty")
     ids = {n["id"] for n in data["nodes"]}
@@ -5848,7 +5912,7 @@ def view_asserts(d, *, nodes, rounds_closed, primary="auc"):
     # Verdicts without a current specimen still need first-class template
     # mappings; otherwise the next specialist silently renders as pending.
     for verdict in ("specialist", "tradeoff"):
-        # v12: legend rows carry a third element (the glossary tooltip key) -
+        # Legend rows carry a third element (the glossary tooltip key) -
         # the pinned invariant is the verdict->color binding, not the arity.
         ok(f"--{verdict}:" in html
            and re.search(rf"\b{verdict}\s*:\s*\"var\(--{verdict}\)\"", html)
@@ -5871,7 +5935,7 @@ def view_asserts(d, *, nodes, rounds_closed, primary="auc"):
        "dashboard renders auditable candidate/reference, forecast, mechanism and stop evidence")
     ok('role="img" aria-label="No completed round trend yet"' in html
        and 'svg.setAttribute("aria-label"' in html
-       # v12.1: the faint label colour was lifted for contrast (#8c8576 -> #9c9586);
+       # The faint label colour was lifted for contrast (#8c8576 -> #9c9586);
        # the pinned invariant is a dedicated legible label colour, not its literal value.
        and re.search(r"--faint:#[0-9a-fA-F]{6}", html) is not None,
        "dashboard gives the round trace a screen-reader summary and keeps small labels legible")
@@ -5936,7 +6000,7 @@ def final_asserts(d):
     ok(len(d.events("artifact_registered")) == 24, "artifact registration events")  # +maintenance
     auto = [e for e in d.events("gate_decided") if e.get("note", "") and "auto-approved" in str(e.get("note"))]
     ok(len(auto) >= 15, f"full_auto auto-approvals: {len(auto)}")
-    # v8: the promising root is on the graph, off the frontier, and a legal parent
+    # The promising root is on the graph, off the frontier, and a legal parent
     n19 = d.node("N019")
     ok(n19["verdict"] == "promising" and n19["id"] not in {n["id"] for n in fr},
        "promising root recorded and not on the frontier")
@@ -5945,14 +6009,18 @@ def final_asserts(d):
     ok(len(d.events("lane_formal")) >= 3 and len(d.events("lane_formalize_required")) == 1,
        "formal ladder entered by triage (incl. a 'partial' breakthrough reform) and by FORMALIZE once")
     ok(len(d.events("fidelity_passed")) >= 8, "fidelity audits ran on L3+/heavy nodes")
-    # v9: the breakthrough-reform L4 variant exists with a single model parent
+    # The breakthrough-reform L4 variant exists with a single model parent
     n22 = d.node("N022")
     ok(n22["role"] == "variant" and int(n22["level"]) == 4 and len(n22["parents"]) == 1,
        "breakthrough reform: L4 with inheritance (the VAR/NSA shape) is on the graph")
-    ok(n22["verdict"] == "improved"
-       and n22["id"] not in {n["id"] for n in fr}
-       and n22.get("mechanism_status") == "refuted",
-       "refuted mechanism preserves the measured gain in the graph but blocks direct scientific promotion")
+    # (whether it is on the frontier TODAY is a performance question - later
+    # nodes may dominate it; the science says its claim stands)
+    ok(n22["verdict"] == "improved" and n22["scientific_promotion_status"] == "met"
+       and (n22.get("probe_result") or {}).get("status") == "refuted"
+       and n22.get("mechanism_status") == "deferred"
+       and (n22.get("ablation_declined") or {}).get("opened_by") == "conclude",
+       "a probe that read 'not used' is information beside the node: the measured win keeps its promotion, "
+       "the causal question stays deferred, and the engine still opened (and this user declined) the tax")
     view_asserts(d, nodes=26, rounds_closed=18)
     data = dash_data(d)
     ok(data["counts"]["improved"] == sum(1 for n in g["nodes"] if n.get("verdict") == "improved"),
@@ -5961,7 +6029,7 @@ def final_asserts(d):
     html = (d.repo / ".evo/views/DASHBOARD.html").read_text(encoding="utf-8")
     ok("--promising" in html and "fitText" in html,
        "dashboard has the promising color and the overlap-fix truncation")
-    # v9: dominant verdict + phenomenon ledger + toy checks
+    # Dominant verdict + phenomenon ledger + toy checks
     ok("--dominant" in html, "dashboard has the dominant color")
     ok(d.node("N010")["verdict"] == "dominant"
        and any("N010" in (n.get("parents") or []) for n in g["nodes"]),
@@ -5969,9 +6037,14 @@ def final_asserts(d):
     gm = (d.repo / ".evo/views/GRAPH.md").read_text(encoding="utf-8")
     ok("classDef dominant" in gm, "mermaid carries the dominant class")
     obs = eutil.read_jsonl(d.repo / ".evo/evidence/OBSERVATIONS.jsonl")
-    ok([o.get("id") for o in obs] == ["OB001", "OB002", "OB003"],  # OB003: probe product
-       f"phenomenon ledger holds the mined anomalies: {[o.get('id') for o in obs]}")
-    ok(len(d.events("observation_recorded")) == 3, "observation events recorded")
+    mined = [o for o in obs if o.get("source") != "engine"]
+    ok(len(mined) == 3 and len(obs) > 3,
+       f"phenomenon ledger holds the mined anomalies beside the engine's probe readings: "
+       f"{len(mined)} mined of {len(obs)}")
+    ok(len([e for e in d.events("observation_recorded") if not e.get("kind")]) == 3,
+       "observation events recorded")
+    ok(len(d.events("observation_recorded")) == len(obs),
+       "every ledger observation, mined or engine-sourced, has its event")
     toy_files = list((d.repo / ".evo/rounds").glob("*/lanes/*/TOY_CHECK.py"))
     ok(len(toy_files) >= 2, f"toy checks shipped for full-formal lanes: {len(toy_files)}")
     ok(not data["runs"], "no running jobs at the end")
@@ -5992,7 +6065,7 @@ def run_mini():
     w_project_scan(d, out, readiness_mode="needs_preparation")
     sub_ok(d, out)
 
-    # v11.7: preparation runs BEFORE configure - the contract freezes against
+    # Preparation runs BEFORE configure - the contract freezes against
     # observed reality. Blocked path: typed blockers ride a gate; supplement
     # -> multi-round retry; evidence-free claims are rejected.
     out = nx(d, "provision")
@@ -6092,7 +6165,7 @@ def run_mini():
     w_conclude(d, out, "N001", baseline=True)
     sub_ok(d, out)
 
-    # R1: reform on baseline, idea gate rejected with retry-stage=theorize
+    # Reform on baseline, idea gate rejected with retry-stage=theorize
     open_round(d, "R001", [{"name": "ref", "intent": "reform", "min_level": 3, "parents": ["N001"]}])
     out = nx(d, "evidence")
     w_evidence_initial(d)
@@ -6182,7 +6255,7 @@ def run_mini():
        "round_continue report carries history/frontier/lanes/tempo")
     d.decide(gate["gate"], True)
 
-    # R2: lane dies by validation exhaustion (on_stuck=abandon)
+    # Lane dies by validation exhaustion (on_stuck=abandon)
     open_round(d, "R002", [exploit_lane("junk", n2)])
     evidence_refresh(d)
     jl = d.lane_by_name("junk")["id"]
@@ -6201,7 +6274,7 @@ def run_mini():
     gate = nx(d, kind="gate")
     ok(gate["gate_kind"] == "round_continue", "round gate after R002")
 
-    # ---- mid-run supervision switch (v9): the blessed channel + live effect ----
+    # ---- mid-run supervision switch: the blessed channel + live effect ----
     evo_cli = PKG / "engine" / "evo.py"
 
     def autonomy_cli(mode, note=None):
@@ -6456,11 +6529,11 @@ def run_canary_runtime_exhaustion():
     sub_ok(d, retry)
 
 
-def v91_policy_checks(d):
-    """Focused adversarial checks for the v9.2 contracts added on top of the
+def policy_checks(d):
+    """Focused adversarial checks for the policy contracts on top of the
     18-round choreography. These are read-only against graph/state; scratch
     artifacts live outside the engine-owned idea/node directories."""
-    section("v9.2 policy checks: multi-cell claims, diagnosis binding, experiment budgets")
+    section("policy checks: multi-cell claims, diagnosis binding, experiment budgets")
     cfg = project_cfg(d)
     ok(not econfig.validate_config(d.store().load_config()), "completed multi-dataset config remains valid")
 
@@ -6502,7 +6575,7 @@ def v91_policy_checks(d):
     repair_lane = next(row for row in reversed(st["lanes"])
                        if row.get("search_origin") == "repair"
                        and row.get("diagnosis_path") and row.get("parents"))
-    scratch = ".evo/v91_checks"
+    scratch = ".evo/scratch_checks"
 
     # E is a separately computed scientific contract: exact frozen comparator,
     # worthwhile floor, and realized resource receipts all have veto power.
@@ -6545,8 +6618,16 @@ def v91_policy_checks(d):
     cap = float(effect_meta["effect_case"]["resources"]["candidate"][resource_axis])
     over["_effect_resources"][resource_axis]["upper"] = cap + max(1.0, abs(cap) * 0.01)
     over_assessment = evalid.effect_contract_assessment(ctx, effect_node, over, effect_meta)
-    ok(over_assessment["resources"]["status"] == "failed" and over_assessment["status"] == "failed",
-       "buying a gain above the frozen resource cap blocks scientific E promotion")
+    # the money is spent: the overrun is written next to the gain (cap, actual,
+    # percent over), the target rows keep their own status, and nothing vetoes
+    over_row = (over_assessment["resources"].get("overrun") or {}).get(resource_axis) or {}
+    ok(over_assessment["resources"]["status"] == "failed"
+       and over_assessment["status"] == settled["status"]
+       and over_row.get("cap") == cap and over_row.get("actual") > cap
+       and isinstance(over_row.get("over_pct"), (int, float)) and over_row["over_pct"] > 0,
+       f"a run above the frozen resource cap is recorded as an overrun beside its gain: {over_row}")
+    ok(evalid.promotion_status("improved", over_assessment, fidelity_settled=True, real_win=True) == "met",
+       "the overrun is a record, not a veto: the measured win still seeds the frontier")
 
     # A declared tradeoff is neither hidden matching nor a free engineering
     # escape hatch: only named axes may worsen, and even those remain capped.
@@ -6590,7 +6671,7 @@ def v91_policy_checks(d):
     ok(any(e.startswith("PROGRAM_RESOURCE_CLAIM_BINDING") for e in binding_errs),
        "an efficiency resource regime is legal iff the scientific claim itself is explicitly efficiency")
 
-    # (delivery debug R1) the contract is now replay-aware: a vector that
+    # The contract is replay-aware: a vector that
     # DIFFERS from the engine's sealed receipt is analyst smuggling; a
     # byte-identical one is the transition's own crash-window injection
     # replayed after a died submit, and blaming the analyst for it would
@@ -6639,30 +6720,32 @@ def v91_policy_checks(d):
        and any(e.startswith("SEALED_ARTIFACT_MUTATED") for e in seal_errs),
        "receipt value tampering fails both raw-evidence binding and its content seal")
 
-    ok((effect_node.get("evaluation_summary") or {}).get("mechanism_contract_status") == "refuted"
-       and effect_node.get("scientific_promotion_status") == "blocked",
-       "sealed numeric probe predicate, not analyst prose, blocks a refuted mechanism claim")
-    raw_mechanism = (effect_node.get("evaluation_summary") or {}).get("mechanism_contract") or {}
+    ok((effect_node.get("evaluation_summary") or {}).get("probe_contract_status") == "refuted"
+       and (effect_node.get("evaluation_summary") or {}).get("mechanism_contract_status") == "deferred"
+       and effect_node.get("scientific_promotion_status") == "met",
+       "the sealed numeric probe predicate, not analyst prose, settles the probe's answer; it is information "
+       "and the causal status stays deferred for the ablation")
+    raw_mechanism = (effect_node.get("evaluation_summary") or {}).get("probe_contract") or {}
     projected_mechanism = (edash._assessment_view(effect_node.get("evaluation_summary") or {})
-                           .get("mechanism_contract") or {})
+                           .get("probe_contract") or {})
     ok(projected_mechanism.get("observation_count") == len(raw_mechanism.get("values") or [])
        and projected_mechanism.get("values") == (raw_mechanism.get("values") or [])[:32],
        "dashboard mechanism audit preserves bounded numeric observations and their exact count")
 
-    waiver_meta = json.loads(json.dumps(effect_meta))
-    waiver_meta["attribution_waiver"] = long(
-        70, "the intervention has no separately measurable intermediate and is evaluated only as an unapportioned performance change")
-    waiver_idea = f"{scratch}/WAIVER_IDEA.md"
-    wt(d.repo, waiver_idea, "# synthetic attribution-waiver fixture\n")
-    wj(d.repo, waiver_idea.replace(".md", ".meta.json"), waiver_meta)
-    waiver_node = json.loads(json.dumps(effect_node))
-    waiver_node["id"] = "NWAIVER"
-    waiver_node["idea_doc"] = waiver_idea
-    waiver_assessment = evalid.computed_assessment(ctx, waiver_node, effect_metrics)
-    ok(waiver_assessment["verdict"] == "improved"
-       and waiver_assessment["mechanism_contract_status"] == "unverified"
-       and waiver_assessment["scientific_promotion_status"] == "blocked",
-       "an attribution waiver preserves an observed performance gain but cannot promote an unverified scientific mechanism")
+    deferred_meta = json.loads(json.dumps(effect_meta))
+    deferred_meta.pop("mechanism_probe", None)
+    deferred_idea = f"{scratch}/DEFERRED_IDEA.md"
+    wt(d.repo, deferred_idea, "# synthetic no-instrument fixture\n")
+    wj(d.repo, deferred_idea.replace(".md", ".meta.json"), deferred_meta)
+    deferred_node = json.loads(json.dumps(effect_node))
+    deferred_node["id"] = "NDEFER"
+    deferred_node["idea_doc"] = deferred_idea
+    deferred_assessment = evalid.computed_assessment(ctx, deferred_node, effect_metrics)
+    ok(deferred_assessment["verdict"] == "improved"
+       and deferred_assessment["mechanism_contract_status"] == "deferred"
+       and deferred_assessment["scientific_promotion_status"] != "blocked",
+       "an idea without a mechanism instrument settles at program level: mechanism deferred, "
+       f"promotion never blocked by the missing probe ({deferred_assessment['scientific_promotion_status']})")
 
     dossier = (d.repo / ".evo/profile/PROBLEM_DOSSIER.md").read_text(encoding="utf-8")
     dossier_path = f"{scratch}/BAD_DOSSIER.md"
@@ -6679,7 +6762,7 @@ def v91_policy_checks(d):
 
     diag_task = next(t for t in st["tasks"] if t.get("type") == "diagnose"
                      and (t.get("subject") or {}).get("lane") == repair_lane["id"])
-    # v10.1: terminal tasks drop the _render recipe; the persisted BUNDLE.md is
+    # Terminal tasks drop the _render recipe; the persisted BUNDLE.md is
     # the durable record of what the diagnosis actually saw.
     diag_bundle = (d.repo / diag_task["bundle"]).read_text(encoding="utf-8")
     diag_inputs = re.findall(r"^- `([^`]+)` - ", diag_bundle, re.M)
@@ -6720,12 +6803,9 @@ def v91_policy_checks(d):
        "complete program set is bound to the immutable diagnosis")
 
     spec = json.loads((d.repo / d.node("N022")["spec"]).read_text(encoding="utf-8"))
-    spec["evidence_budget"] = {"extra_costly_arms": 1}
     spec["workflow"]["stages"][0]["launch"] += " --sweep ablation"
     errs = evalid._spec_errors(ctx, spec, expect_role="variant", expect_parents=spec["parents"],
-                               expect_level=spec["level"], where="v91 scratch spec")
-    ok(any(e.startswith("SPEC_EVIDENCE_BUDGET_LEGACY") for e in errs),
-       "the old generic costly-arm bucket is rejected as ambiguous")
+                               expect_level=spec["level"], where="scratch spec")
     ok(any(e.startswith("SPEC_ABLATION_IN_CANDIDATE") for e in errs),
        "ablation hidden inside a candidate-producing stage is rejected")
 
@@ -6763,11 +6843,11 @@ def v91_policy_checks(d):
        and any(e.startswith("SPEC_STAGE_BUDGET") for e in errs),
        "adaptive work cannot omit its controller, ledger or finite caps")
 
-    legacy = json.loads(json.dumps(adaptive))
-    legacy["train"] = legacy.pop("workflow")
-    errs = evalid._spec_errors(clean_ctx, legacy, expect_role="variant",
-                               expect_parents=legacy["parents"], expect_level=legacy["level"],
-                               where="legacy scratch spec")
+    misspelled = json.loads(json.dumps(adaptive))
+    misspelled["train"] = misspelled.pop("workflow")
+    errs = evalid._spec_errors(clean_ctx, misspelled, expect_role="variant",
+                               expect_parents=misspelled["parents"], expect_level=misspelled["level"],
+                               where="misspelled scratch spec")
     ok(any(e.startswith("SPEC_TRAIN_SCHEMA_UNSUPPORTED") for e in errs),
        "top-level train schema is unsupported rather than runtime-compatible")
 
@@ -6886,12 +6966,16 @@ def v91_policy_checks(d):
     ok(ass["verdict"] == "tradeoff", f"same vector under a broad claim is a tradeoff: {ass}")
     metrics["latency_ms"] = 110.0
     ass = evalid.computed_assessment(ctx, syn_node, metrics)
-    ok(ass["verdict"] == "regressed" and ass["guardrail_losses"] == ["C3"],
-       "hard global guardrail loss blocks an otherwise positive claim")
+    # a real claimed win plus a guardrail loss is a tradeoff (both facts listed), not a regression;
+    # the guardrail loss makes the node undeliverable
+    ok(ass["verdict"] == "tradeoff" and ass["guardrail_losses"] == ["C3"] and ass["deliverable"] is False,
+       f"hard global guardrail loss is listed and blocks delivery, the claimed win keeps the verdict a tradeoff: {ass['verdict']}")
     metrics = {"auc": 0.500, "logloss": 0.400, "latency_ms": 100.0}
     ass = evalid.computed_assessment(ctx, syn_node, metrics)
-    ok(ass["verdict"] == "regressed" and ass["required_target_losses"] == ["C1"],
-       "a gain elsewhere cannot compensate for regression on a required target")
+    # a required-cell loss vetoes the deliverable, never the record of the C2 win: tradeoff
+    ok(ass["verdict"] == "tradeoff" and ass["required_target_losses"] == ["C1"]
+       and ass["required_group_losses"] == ["G1"] and ass["deliverable"] is False,
+       f"a gain elsewhere cannot make a required-target regression deliverable: {ass['verdict']}")
     ass = evalid.computed_assessment(
         ctx, syn_node, {"auc": 0.810, "logloss": 0.650, "latency_ms": 100.0})
     ok(ass["project_goal_attained"] is True and ass["goal_groups_met"] == ["G1"],
@@ -6923,8 +7007,8 @@ def v91_policy_checks(d):
        and interval_view["evidence"]["kind"] == "fixed_eval_uncertainty"
        and interval_view["evidence"]["unit_count"] == 1000,
        "dashboard preserves fixed-evaluation interval provenance without exposing its source path")
-    legacy_errs = evalid.metric_evidence_errors(ctx, "auc", {"mean": 0.81, "std": 0.01, "n": 3})
-    ok(any(e.startswith("EVAL_METRIC_LEGACY_AGGREGATE") for e in legacy_errs),
+    ambiguous_errs = evalid.metric_evidence_errors(ctx, "auc", {"mean": 0.81, "std": 0.01, "n": 3})
+    ok(any(e.startswith("EVAL_METRIC_AGGREGATE_AMBIGUOUS") for e in ambiguous_errs),
        "ambiguous mean/std/n cannot trigger hidden seed repetitions")
     seed_errs = evalid.metric_evidence_errors(ctx, "auc", {"value": 0.81, "uncertainty": {
         "method": "repeated_seeds", "unit": "case", "unit_count": 1000,
@@ -7136,13 +7220,13 @@ def seal_chain_adversarial_checks(d):
 
 
 def force_full_sweep(d):
-    """v11: make the next `evo next` a deterministic FULL sweep by deleting the
-    cadence marker. NOTE (R1 audit): the tail adversarial sections run in
+    """Make the next `evo next` a deterministic FULL sweep by deleting the
+    cadence marker. NOTE: the tail adversarial sections run in
     phase=done, where every sweep is already full - there this is explicit
     documentation, not a behavior change. Scoped-sweep mechanics (consumed set,
     cadence trip, fail-safe degradation) are covered at unit level in
-    v11_feature_unit.sweep_scope_behavior; the in-rounds tamper E2E lives in
-    the R018b section (v11.1 closed that coverage debt)."""
+    noise_and_isolation_unit.sweep_scope_behavior; the in-rounds tamper E2E lives in
+    the R018b section."""
     marker = d.repo / ".evo" / "cache" / "sweep_cadence.json"
     if marker.exists():
         marker.unlink()
@@ -7154,7 +7238,7 @@ def git_integrity_failure_checks(d):
     original = evcs._git
     HEAD = "# branch.oid " + "a" * 40
     try:
-        # v11: cleanliness comes from ONE status --porcelain=v2 probe. A dirty
+        # Cleanliness comes from ONE status --porcelain=v2 probe. A dirty
         # tree is a SUBSTANTIVE rc=0 answer with entry lines - the old
         # diff-rc=1 semantics moved into the output, and the same fail-closed
         # retry wrapper still owns operational failures.
@@ -7175,7 +7259,7 @@ def git_integrity_failure_checks(d):
             evcs.tracked_tree_clean(Path("."))
             failed_closed = False
         except evcs.GitCheckError as exc:
-            # v10: bounded 3-try retry with backoff (F19) instead of v9.2's two
+            # Bounded 3-try retry with backoff
             failed_closed = "failed 3 times" in str(exc) and "rc=127" in str(exc)
         ok(failed_closed, "repeated operational failure raises a typed fail-closed error")
 
@@ -7198,7 +7282,7 @@ def git_integrity_failure_checks(d):
         ok(untracked_failed_closed,
            "an unavailable untracked-source query cannot silently return an empty safe set")
 
-        # v11: the whole-web tripwire runs on a cadence; this scenario tests
+        # The whole-web tripwire runs on a cadence; this scenario tests
         # the tripwire itself, so force the full-sweep tick deterministically.
         force_full_sweep(d)
         try:
@@ -7454,11 +7538,6 @@ def seed_and_ablation_policy_checks(d):
     ok(any(e.startswith("CONFIG_TRAINING_REPLICATION_PREPLANNED_RUNS")
            for e in econfig.validate_config(bad_cfg)),
        "preplanned replication cannot hide behind one run")
-    legacy_cfg = json.loads(json.dumps(cfg))
-    legacy_cfg["evidence_policy"]["max_extra_costly_arms_pre_signal"] = 0
-    ok(any(e.startswith("CONFIG_EVIDENCE_LEGACY_COST_BUCKET")
-           for e in econfig.validate_config(legacy_cfg)),
-       "the ambiguous generic costly-arm bucket is rejected at configuration")
 
     ctx_pre = evalid.Ctx(store, st, pre_cfg, graph, reg)
     base_spec = json.loads((d.repo / d.node("N022")["spec"]).read_text(encoding="utf-8"))
@@ -7472,7 +7551,7 @@ def seed_and_ablation_policy_checks(d):
               launch='python train.py --stage posttrain --seed {seed}'),
     ]}
     for rs in repeated["workflow"]["stages"]:
-        rs["metrics_file"] = f".evo/v91_checks/{rs['name']}_seed-{{seed}}.json"
+        rs["metrics_file"] = f".evo/scratch_checks/{rs['name']}_seed-{{seed}}.json"
     repeated["training_replication"] = {
         "mode": "preplanned", "runs": 3, "seeds": seeds, "aggregation": "mean",
         "source": "workflow",
@@ -7582,7 +7661,7 @@ def seed_and_ablation_policy_checks(d):
             "experiment_purpose": "targeted_ablation", "parents": [ablation_contract["parent"]],
             "status": "concluded", "verdict": "improved", "retire_reason": None,
             "scores": {"auc": 1.0, "logloss": 0.0, "latency_ms": 0.0},
-            "score_evidence": {}, "spec": ".evo/v91_checks/ablation_spec.json"}
+            "score_evidence": {}, "spec": ".evo/scratch_checks/ablation_spec.json"}
     wj(d.repo, fake["spec"], ab_spec)
     g2 = json.loads(json.dumps(graph))
     g2["nodes"].append(fake)
@@ -7606,7 +7685,8 @@ def seed_and_ablation_policy_checks(d):
     gate = {"id": "GABL", "kind": "idea_approval", "status": "open",
             "subject": {"idea": "IABL"}}
     ok(esched.Engine(store)._maybe_auto_resolve(gate) is False,
-       "targeted ablation cannot auto-approve even in full_auto mode")
+       "an ablation idea gate whose lane the engine cannot see never auto-approves: the allowance "
+       "is judged from the lane, so a gate with only an idea subject waits for the user")
 
 
 def workflow_replication_execution_checks(source_d):
@@ -7684,7 +7764,7 @@ def workflow_replication_execution_checks(source_d):
             resolved_launch=str(econfig.resolve_seed_template(stg.get("launch") or "", seed)),
             declared_metrics_file=metrics_rel)
         # the job executes AFTER the prepared intent (real completed-mode
-        # order); R7 archives any pre-attempt leftovers at prepare, so the
+        # order); prepare archives any pre-attempt leftovers, so the
         # landing is written post-prepare exactly like a real job's output
         wj(repo, metrics_rel, {"seed": seed, "summary": {"loss": 0.2 + sidx / 100},
                                "usage": {"wallclock_minutes": 2.0}})
@@ -7829,10 +7909,17 @@ def targeted_ablation_flow_checks(d):
     w_review_ablation(d, out, lid, verdict="ACCEPT")
     sub_ok(d, out)
 
+    # the ablation allowance is the user's standing pre-authorization: a
+    # one-run design inside it resolves its idea gate under full_auto; a
+    # design above the allowance (or any probe) still waits for the user
     gate_out = direct_lane_next(d, lid)
-    ok(gate_out.get("kind") == "gate" and gate_out.get("gate_kind") == "idea_approval",
-       "full_auto still pauses for user approval of a targeted causal design")
-    d.decide(gate_out["gate"], True, "user approves the one-factor causal question and one-run ceiling")
+    abl_gates = [g for g in d.state()["gates"] if g["kind"] == "idea_approval"
+                 and (g.get("subject") or {}).get("lane") == lid]
+    if gate_out.get("kind") == "gate":
+        ok(False, f"a one-run ablation inside the allowance should not pause under full_auto: {gate_out}")
+    ok(abl_gates and abl_gates[-1]["status"] == "approved"
+       and "auto" in str(abl_gates[-1].get("decision_note") or "").lower(),
+       f"inside the allowance the ablation idea gate resolves itself and says so: {abl_gates[-1:]}")
 
     out = direct_lane_next(d, lid, "plan_node")
     bad_stage = stage(
@@ -7870,11 +7957,21 @@ def targeted_ablation_flow_checks(d):
     w_ablation_fidelity(d, out, nid)
     sub_ok(d, out)
 
+    # the workflow gate follows the same rule: a one-run spec inside the
+    # allowance (one retrain at the parent's own caps is always inside)
+    # resolves itself under full_auto; a larger spend waits for the user
     workflow_gate = direct_node_next(d, nid)
-    ok(workflow_gate.get("kind") == "gate" and workflow_gate.get("gate_kind") == "workflow_approval",
-       "full_auto also pauses before spending the one costly ablation run")
-    d.decide(workflow_gate["gate"], True, "user approves the audited fixed/single workflow")
-    out = direct_node_next(d, nid, "stage_launch")
+    wf_gates = [g for g in d.state()["gates"] if g["kind"] == "workflow_approval"
+                and (g.get("subject") or {}).get("node") == nid]
+    if workflow_gate.get("kind") == "gate":
+        ok(False, f"a one-run ablation spec inside the allowance should not pause under full_auto: "
+                  f"{workflow_gate} / {wf_gates[-1:]}")
+    ok(wf_gates and wf_gates[-1]["status"] == "approved"
+       and "auto" in str(wf_gates[-1].get("decision_note") or "").lower(),
+       f"inside the allowance the ablation workflow gate resolves itself and says so: {wf_gates[-1:]}")
+    # the auto-resolved gate already handed out the launch card in that same call
+    out = workflow_gate if workflow_gate.get("type") == "stage_launch" else direct_node_next(d, nid, "stage_launch")
+    ok(out.get("type") == "stage_launch", f"the ablation proceeds straight to its launch card: {out}")
     metrics_rel = f"{d.node(nid)['workdir']}/ablation_stage_metrics.json"
     write_stage_result(d, nid, "changed_component_run", metrics_rel, {"loss": 0.12})
     w_launch(d, out, "changed_component_run", mode="completed", metrics_rel=metrics_rel)
@@ -8020,8 +8117,8 @@ def scientific_transition_checks(source_d):
             stage="prerequisite", stage_index=0, replica_seed=1009,
             replica_index=0, replica_total=1, resolved_launch=str(first.get("launch") or ""),
             declared_metrics_file=metrics_rel)
-        # written post-prepare (real completed-mode order; R7 archives
-        # pre-attempt leftovers at prepare)
+        # written post-prepare (real completed-mode order; prepare archives
+        # pre-attempt leftovers)
         wj(repo, metrics_rel, {"summary": summary, "usage": {"wallclock_minutes": 2}})
         if completed:
             launch_rel = f".evo/nodes/{nid}/stages/LAUNCH_prerequisite.json"
@@ -8296,7 +8393,7 @@ def main():
     git_integrity_failure_checks(d)
     seal_chain_adversarial_checks(d)
     cli_preflight_adversarial_checks(d)
-    v91_policy_checks(d)
+    policy_checks(d)
     scientific_axes_orthogonality_checks(d)
     seed_and_ablation_policy_checks(d)
     workflow_replication_execution_checks(d)

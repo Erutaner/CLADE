@@ -1,4 +1,4 @@
-"""RUN lifecycle (v10): preparation, binding, updates, reconciliation,
+"""RUN lifecycle: preparation, binding, updates, reconciliation,
 evidence ingest/sealing, resource receipts, stage advancement, scientific
 stops and failure routing. External facts are monotone; evidence and adoption
 are separate axes (see erun).
@@ -24,8 +24,7 @@ import evalid
 
 stages_of = econfig.stages_of
 
-# The one authority-upstream field list (v9.2 kept three copies and the
-# fallback copy had drifted: it omitted workflow_reuse_seal).
+# The one authority-upstream field list; every consumer reads it from here.
 AUTHORITY_UPSTREAM_FIELDS = (
     "spec_seal", "implementation_seal", "workflow_reuse_seal", "fidelity_seal",
     "ablation_fidelity_seal", "metric_bridge_seal")
@@ -51,8 +50,8 @@ class AbsorbMixin:
     @staticmethod
     def _repeat_run_pending(node: dict) -> Any | None:
         """The approved repeat_measure's fresh seed while its engine-run
-        workflow+eval is still owed (R9-002: the buy-back is a REAL pair of
-        RUNs now, scheduled/leased/charged like any other attempt). Returns
+        workflow+eval is still owed (the buy-back is a real pair of
+        RUNs, scheduled/leased/charged like any other attempt). Returns
         None once the repeat evaluation settled, or when the approval was
         waived/archived/settled."""
         rm = node.get("repeat_measure")
@@ -61,15 +60,13 @@ class AbsorbMixin:
         return node.get("repeat_pending_seed")
 
     def _run_is_current_attempt(self, run: dict, node: dict) -> bool:
-        """R10 audit (owner-transition unity): is this RUN the attempt whose
-        outcome the owner is still waiting on? The old test - "the node has
-        already transitioned to executing/evaluating" - missed every attempt
-        that ended BEFORE a job id existed (the launch transition is what
-        flips the node), so a real external failure was archived as unrelated
-        history: no failure ledger entry, no retry counter, no
-        replacement-spend door, and the scheduler immediately re-prepared the
-        same position for free. Ownership is judged from the RUN's slot
-        identity and the node's position, never from launch timing."""
+        """Is this RUN the attempt whose outcome the owner is still waiting on?
+        Ownership is judged from the RUN's slot identity and the node's
+        position, never from launch timing: an attempt that ends BEFORE a job
+        id exists (the launch transition is what flips the node) is still the
+        owner's attempt, so its failure reaches the failure ledger, the retry
+        counter and the replacement-spend door instead of being archived as
+        unrelated history while the same position is re-prepared for free."""
         if node is None or run.get("superseded") or run.get("orphaned") \
                 or run.get("confirmed_not_launched"):
             return False
@@ -109,13 +106,12 @@ class AbsorbMixin:
         return False
 
     def _ensure_run_claims(self, run: dict) -> None:
-        """Sweep G-3: RUN rows written before the unified claim set (pre-R9
-        states) carry only the two declared landing fields, so every overlap
-        guard judged them by that fragment - probe artifacts and
-        seed-resolved products of a migrated, still-unsettled RUN were
+        """A RUN row that carries only its two declared landing fields (a
+        hand-built or torn row) would be judged by that fragment alone by
+        every overlap guard - its probe artifacts and seed-resolved products
         invisible to the lease and the later-claimant rule. Backfill the full
-        canonical set once from the frozen spec; it persists with the next
-        state commit."""
+        canonical claim set once from the frozen spec; it persists with the
+        next state commit."""
         if "landing_claims" in run:
             return
         node = self.node(str(run.get("node") or ""))
@@ -140,8 +136,8 @@ class AbsorbMixin:
     @staticmethod
     def _run_claim_set(run: dict) -> set[str]:
         """Every canonical landing path a RUN row claims. New rows carry the
-        full precomputed set (landing_claims); legacy rows fall back to the
-        two declared fields they were written with."""
+        full precomputed set (landing_claims); a row without one falls back to
+        the two declared fields it was written with."""
         claims = {eutil.norm_uri(str(c)) for c in (run.get("landing_claims") or [])}
         claims |= {eutil.norm_uri(str(run.get("declared_metrics_file") or "")),
                    eutil.norm_uri(str(run.get("declared_ledger_file") or ""))}
@@ -153,15 +149,14 @@ class AbsorbMixin:
                         declared_metrics_file: str = "",
                         declared_ledger_file: str = "",
                         repeat: bool = False) -> list[str]:
-        """R9 audit (root cause): ownership was retailed per field - metrics
-        and ledger got a lease while the producer probe artifact and the
-        seed-resolved declared products stayed unowned, so two spec-obeying
-        parallel RUNs could archive each other's files and seal the wrong
-        producer's bytes. ONE resolved, canonical claim set per attempt now
-        covers every path it writes; the lease, the scheduler probes and the
-        later-claimant rule all judge this set.
+        """ONE resolved, canonical claim set per attempt covers every path it
+        writes - metrics, ledger, the producer probe artifact and the
+        seed-resolved declared products; the lease, the scheduler probes and
+        the later-claimant rule all judge this set, so two spec-obeying
+        parallel RUNs can never archive each other's files or seal the wrong
+        producer's bytes.
 
-        repeat=True marks the bought-back repeat attempt (R9-002/R10-012): it
+        repeat=True marks the bought-back repeat attempt: it
         claims the SAME spec-resolved landings as any attempt (one resolution
         rule everywhere; the prepare-time archive and the lease protect the
         sealed first attempt), and it claims no probe artifacts - mechanism
@@ -196,10 +191,10 @@ class AbsorbMixin:
                 uri = str(p_row.get("uri") or "") if isinstance(p_row, dict) else ""
                 if not uri:
                     continue
-                # R10-002: remote scheme URIs are claimed too - registry law
+                # Remote scheme URIs are claimed too - registry law
                 # says a producer URI is globally unique, so two live
                 # attempts declaring the same remote landing must serialize
-                # exactly like two local writers (the later one used to lose
+                # exactly like two local writers (otherwise the later one loses
                 # its product row to a conflict event silently)
                 resolved = str(econfig.resolve_seed_template(uri, replica_seed)) \
                     if replica_seed is not None else uri
@@ -213,12 +208,11 @@ class AbsorbMixin:
         live. A landing is an exclusive lease while its RUN lives - schedulers
         probe this BEFORE preparing a competing attempt and defer (watch/wait)
         instead of crashing mid-scheduling. Comparison is by canonical path
-        (R7 audit: `a/./b` vs `a/b` reached the same file while missing the
-        lease). R8 audit: the lease must cover the MATERIAL lifecycle, not
-        just the execution one - a finished RUN still awaiting late evidence
-        (needs_reconciliation) repairs files at this very landing, so
-        releasing at execution-terminal let a sibling take the path over and
-        the late repair then ingested the sibling's bytes. R9 audit: the
+        (`a/./b` and `a/b` are the same file). The lease covers the MATERIAL
+        lifecycle, not just the execution one: a finished RUN still awaiting
+        late evidence (needs_reconciliation) repairs files at this very
+        landing, so releasing at execution-terminal would let a sibling take
+        the path over and the late repair ingest the sibling's bytes. The
         holder's side of the comparison is its full claim set (metrics,
         ledger, probe artifact, seed-resolved products), not just the two
         declared fields."""
@@ -226,7 +220,7 @@ class AbsorbMixin:
         wanted.discard("")
         if not wanted:
             return None
-        # R10-002: overlap-aware - a directory claim and a file inside it are
+        # Overlap-aware - a directory claim and a file inside it are
         # ONE landing (equality alone let two live attempts write/move the
         # same physical object while every guard said they were disjoint)
         for r in self.st.get("runs", []):
@@ -234,7 +228,7 @@ class AbsorbMixin:
                 continue
             if erun.is_terminal(r) and not erun.needs_reconciliation(r):
                 continue
-            self._ensure_run_claims(r)  # G-3: legacy rows get their full set
+            self._ensure_run_claims(r)  # rows without claims get their full set
             if any(eutil.paths_overlap(w, c)
                    for w in wanted for c in self._run_claim_set(r)):
                 return r
@@ -247,7 +241,7 @@ class AbsorbMixin:
                      declared_metrics_file: str = "", declared_ledger_file: str = "",
                      repeat: bool = False) -> dict:
         """Persist an idempotent intent before an agent can cause external work."""
-        # R9 (external audit r6): a landing path is an exclusive LEASE while
+        # A landing path is an exclusive LEASE while
         # any other RUN that declared it is still non-terminal. Without this,
         # RUN-B's prepare archived RUN-A's half-written landing as "leftovers",
         # then A's ingest sealed B's bytes under A's identity - two spec-obeying
@@ -276,10 +270,10 @@ class AbsorbMixin:
                 node, kind=kind, launch=resolved_launch),
             implementation_digest=str((node.get("implementation_seal") or {}).get("digest") or ""))
         if repeat:
-            # R9-002: stamped BEFORE the landing archives below, so every
+            # Stamped BEFORE the landing archives below, so every
             # helper that branches on the repeat lane sees it from birth
             run["repeat_measure_attempt"] = True
-        # R11-013: an interrupted predecessor prepare may have moved landing
+        # An interrupted predecessor prepare may have moved landing
         # bytes under this very id (allocated ids only collide with
         # UNCOMMITTED predecessors) - restore that world before archiving
         self._reconcile_orphan_archives(str(run.get("id") or ""))
@@ -310,7 +304,7 @@ class AbsorbMixin:
         return run
 
     def _probe_expectations(self, run: dict, node: dict) -> tuple[bool, list[dict]]:
-        # R9-002: the bought-back repeat attempt is never a probe producer.
+        # The bought-back repeat attempt is never a probe producer.
         # The mechanism probe was measured and sealed by the base attempt
         # (whose evidence head stays authoritative); re-demanding it here
         # would re-archive the base landing and re-open a settled duty over a
@@ -334,7 +328,7 @@ class AbsorbMixin:
     _ARCHIVE_DIRS = ("preexisting_probe_landings", "preexisting_landings")
 
     def _reconcile_orphan_archives(self, run_id: str) -> None:
-        """R11-013 (+ sweep G-2): a landing archive whose manifest sits under
+        """A landing archive whose manifest sits under
         a run id that is only NOW being allocated belongs to an interrupted
         predecessor prepare - committed ids are never reused (the counter
         advances with the same state commit that persists the RUN row), so
@@ -374,7 +368,7 @@ class AbsorbMixin:
                 pass
 
     def _write_archive_manifest(self, archive_dir, run_id: str, rows: list[dict]) -> None:
-        """R11-013: the manifest is the committed intent for the destructive
+        """The manifest is the committed intent for the destructive
         moves that follow - durably written BEFORE the first byte moves, so
         an interruption anywhere in the move batch leaves a disk-recoverable
         record even though the state may know nothing about this RUN yet."""
@@ -406,7 +400,7 @@ class AbsorbMixin:
             }, source, target))
         if not plan:
             return
-        # manifest first, moves second (R11-013)
+        # Manifest first, moves second
         self._write_archive_manifest(
             archive_dir, str(run.get("id") or ""),
             [{"declared": rec["declared_artifact"], "archived": rec["archived_artifact"]}
@@ -419,11 +413,10 @@ class AbsorbMixin:
                          artifacts=run["preexisting_probe_landings"])
 
     def _archive_preexisting_result_landings(self, run: dict, node: dict) -> None:
-        """R7 external audit: the probe-landing archive existed because a new
-        attempt must never inherit a prior attempt's bytes - but ordinary
-        stage/eval metrics and ledger landings had no such guard, so a job
-        that silently wrote nothing (or elsewhere) let the previous attempt's
-        pre-fix numbers be absorbed and billed as fresh evidence. Archive
+        """A new attempt must never inherit a prior attempt's bytes - probe
+        landings, stage/eval metrics and ledger landings alike; otherwise a
+        job that silently writes nothing (or elsewhere) lets the previous
+        attempt's numbers be absorbed and billed as fresh evidence. Archive
         every declared result landing that already exists at prepare time;
         a job that actually runs recreates its output."""
         archive_dir = eutil.rpath(
@@ -443,11 +436,11 @@ class AbsorbMixin:
                 "archived_artifact": eutil.rel(self.store.repo, target),
                 "digest": digest, "archived_at": eutil.utc_now(),
             }, source, target))
-        # R8 audit: declared PRODUCTS need the same guard. Bytes left at a
+        # Declared PRODUCTS need the same guard: bytes left at a
         # produces[] URI by an earlier attempt (or an earlier implementation
-        # revision) used to be re-attributed to the new RUN at settlement -
-        # record_generation hashed whatever sat there. Move them aside at
-        # prepare; whatever exists at settlement was written by THIS attempt
+        # revision) must not be re-attributed to the new RUN at settlement,
+        # since record_generation hashes whatever sits there. Move them aside
+        # at prepare; whatever exists at settlement was written by THIS attempt
         # (STAGE_PRODUCT_MISSING enforces the other half).
         if run.get("kind") == "stage" and node is not None:
             stage_row = next(
@@ -474,7 +467,7 @@ class AbsorbMixin:
                 }, source, target))
         if not plan:
             return
-        # manifest first, moves second (R11-013)
+        # Manifest first, moves second
         self._write_archive_manifest(
             archive_dir, str(run.get("id") or ""),
             [{"declared": rec["declared"], "archived": rec["archived_artifact"]}
@@ -549,11 +542,11 @@ class AbsorbMixin:
             run["probe_artifact_snapshots"] = ordered
 
     def _ingest_run_landings(self, run: dict) -> None:
-        """R7 external audit: snapshot the producer landing BEFORE validation.
-        Validation, the stage gate decision and the seal each re-opened the
-        mutable landing path, so the bytes that were validated and the bytes
-        that were sealed could differ (a still-flushing job, a late remote
-        sync, a duplicate writer). Ingest at absorption entry; every later
+        """Snapshot the producer landing BEFORE validation. If validation, the
+        stage gate decision and the seal each re-opened the mutable landing
+        path, the bytes that were validated and the bytes that were sealed
+        could differ (a still-flushing job, a late remote sync, a duplicate
+        writer). Ingest at absorption entry; every later
         reader - validators, gate decision, seal - uses the immutable per-run
         snapshot. While the evidence is UNSEALED and incomplete/invalid, a
         reconciliation that supplies different producer bytes re-ingests as a
@@ -563,7 +556,7 @@ class AbsorbMixin:
         evidence_dir = eutil.rpath(self.store.repo, prefix)
         revisable = run.get("evidence_status") in {"incomplete", "invalid"} \
             and not isinstance(run.get("evidence_seal"), dict)
-        # R7 external audit: field-LEVEL revision. The old whole-RUN rule let a
+        # Field-LEVEL revision. The old whole-RUN rule let a
         # ledger-only reconcile silently re-read the producer metrics landing -
         # which a sibling RUN may legally occupy by then (the lease ends at
         # execution-terminal, the revision window ends at the seal) - and seal
@@ -590,7 +583,7 @@ class AbsorbMixin:
                 target = evidence_dir / f"{field}_r{revision}_{source.name}"
             else:
                 target = evidence_dir / f"{field}_{source.name}"
-                # R9 (external audit r6): when the operator reconciles with a
+                # When the operator reconciles with a
                 # NEW producer path, run[field] points back at a live landing,
                 # so the branch above is skipped and this fixed name overwrote
                 # the FIRST cost/measurement snapshot in place - erasing the
@@ -669,7 +662,7 @@ class AbsorbMixin:
         if not frozen_upstreams:
             # Engine-created RUNs always carry the frozen list.  Keep a narrow
             # fallback for hand-built focused fixtures - over the SAME field
-            # tuple as _prepare_run (the v9.2 fallback had drifted).
+            # tuple as _prepare_run.
             frozen_upstreams = [str((node.get(field) or {}).get("digest") or "")
                                 for field in AUTHORITY_UPSTREAM_FIELDS]
         run["evidence_seal"] = self._seal(
@@ -677,7 +670,6 @@ class AbsorbMixin:
             revision=int(run.get("evidence_revision") or 0) + 1)
         run["evidence_revision"] = run["evidence_seal"]["revision"]
         erun.transition_evidence(run, "complete", note="engine validation and evidence seal passed")
-        self._disclose_budget_overage(run, node)
         if adopt:
             slot = str(run.get("logical_slot_key") or "")
             for prior in self.st.get("runs", []):
@@ -687,7 +679,7 @@ class AbsorbMixin:
                     erun.transition_adoption(
                         prior, "superseded", note=f"active evidence head replaced by {run.get('id')}")
             erun.transition_adoption(run, "adopted")
-            # R9-002: the bought-back repeat lands under its OWN head keys.
+            # The bought-back repeat lands under its OWN head keys.
             # Sharing the base keys would evict the sealed first measurement
             # from the active-evidence view the moment the purchased second
             # one arrives - the repeat buys a second number, never a rewrite.
@@ -767,7 +759,7 @@ class AbsorbMixin:
     def _run_adoption_blocked(self, run: dict) -> bool:
         """A recovery may bypass only its own brake, never another hold.
 
-        R7 external audit: the brake is SCOPED. active_holds_for_subject
+        the brake is SCOPED. active_holds_for_subject
         already returns every hold that genuinely covers this RUN's node/run
         (recovery holds included); the former second clause additionally
         froze adoption of every unrelated terminal RUN in the project for as
@@ -779,7 +771,7 @@ class AbsorbMixin:
             self.st, self.g, node=run.get("node"), run=run.get("id")))
         blocking = sorted(hid for hid in covering if hid != own_hold)
         if blocking:
-            # R8 audit: the deferral must OUTLIVE the hold. The hold's own
+            # The deferral must OUTLIVE the hold. The hold's own
             # stdout promises "resume -> run-reconcile (adopts) -> plan
             # BEFORE next", but next's very first step is this absorption -
             # once the hold was released, the RUN was adopted before the
@@ -814,14 +806,13 @@ class AbsorbMixin:
 
     def _settle_unfinishable_launch_task(self, task: dict, run: dict | None,
                                          reason: str) -> None:
-        """R11 audit (gate<->owner unity): ONE settlement for a launch task
-        that can never be discharged again - its RUN is terminal (or gone), so
-        neither bind, nor confirm-not-launched, nor any submit shape can ever
-        be accepted. Four callers used to hold three private copies of half
-        of this (update_run's stranded branch, the gap-acceptance branch) and
-        two callers had none at all (the stale-escalation decision and the
-        replaying recovery's stuck check) - the ownerless halves are exactly
-        where a recovery wedged forever on a decision nobody could make."""
+        """ONE settlement for a launch task that can never be discharged again
+        - its RUN is terminal (or gone), so neither bind, nor
+        confirm-not-launched, nor any submit shape can ever be accepted.
+        Every caller (update_run's stranded branch, the gap-acceptance branch,
+        the stale-escalation decision and the replaying recovery's stuck
+        check) settles through here, so no path can leave a recovery wedged
+        on a decision nobody could make."""
         if not task or task.get("status") not in {"open", "paused", "stuck"}:
             return
         run_id = str((run or {}).get("id") or (task.get("subject") or {}).get("run") or "")
@@ -843,7 +834,7 @@ class AbsorbMixin:
                          task=task.get("id"), run=run_id or None, reason=reason)
 
     def _cancel_task_gates(self, task: dict, reason: str) -> None:
-        """R9 (external audit r6): cancelling/superseding a task must retire the
+        """Cancelling/superseding a task must retire the
         undecided gates that point at it, in the SAME transition. A surviving
         escalation gate is presented before all other work and its APPROVE
         reopens a task whose world has moved on."""
@@ -864,7 +855,7 @@ class AbsorbMixin:
     def _mark_run_evidence_pending(self, node: dict, run: dict,
                                    errors: list[str]) -> None:
         target = self._record_run_evidence_errors(run, errors)
-        # R9 (external audit r6): the producer already reported what it spent.
+        # The producer already reported what it spent.
         # Evidence being INVALID (e.g. over its declared cap) must not make that
         # cost invisible to capacity: hold the higher of reserved vs reported so
         # a sibling cannot launch into money that is already gone. This raises a
@@ -898,59 +889,6 @@ class AbsorbMixin:
         self.store.event("engine", "run_evidence_pending", node=node["id"], run=run["id"],
                          evidence_status=target, errors=errors[:12])
 
-    def _disclose_budget_overage(self, run: dict, node: dict) -> None:
-        """v12: an over-cap-but-within-band ingestion leaves a visible trace.
-
-        The tolerance band (econfig.budget_tolerance) moves only the validity
-        judgment; honesty requires the overage FACT to be on the record the
-        moment the evidence is accepted, not discoverable only by re-deriving
-        usage against caps later. No numbers change - this is disclosure.
-        """
-        mf = str(run.get("metrics_file") or "")
-        data = (eutil.read_json(eutil.rpath(self.store.repo, mf), {}) or {}) if mf else {}
-        if not isinstance(data, dict):
-            return
-        spec = self._spec(node)
-        if run.get("kind") == "stage":
-            stages = econfig.stages_of(spec)
-            idx = run.get("stage_index")
-            # Self-review F1a: mirror _run_result_errors' stage resolution
-            # exactly (index, then name fallback) - a name-resolved row that
-            # sealed without a stamp would fail forever under a later, lower
-            # band at doctor replay.
-            stage = (stages[idx] if isinstance(idx, int) and not isinstance(idx, bool)
-                     and 0 <= idx < len(stages) else
-                     next((row for row in stages if row.get("name") == run.get("stage")), {}))
-            limits = ((stage.get("budget") or {}).get("limits") or {})
-            usage = data.get("usage")
-        else:
-            limits = econfig.eval_budget(spec)
-            usage = data.get("_usage")
-        if not isinstance(usage, dict):
-            return
-        for unit, limit in limits.items():
-            actual = usage.get(unit)
-            if isinstance(actual, bool) or not isinstance(actual, (int, float)):
-                continue
-            if isinstance(limit, (int, float)) and float(limit) + 1e-12 < float(actual):
-                # Sealing implies the validators admitted these numbers, so an
-                # over-cap seal was necessarily authorized by SOME band. Do
-                # not trust the live config for the stamp (self-review F1b: a
-                # crash-replay re-seals in a LATER invocation, possibly after
-                # the band was lowered) - record at least the minimal band the
-                # sealed ratio itself proves, so the floor survives any era.
-                band = max(econfig.budget_tolerance(self.cfg),
-                           float(actual) / float(limit) * (1.0 + 1e-9))
-                row = {"unit": str(unit), "actual": float(actual), "cap": float(limit), "band": band}
-                stamps = run.setdefault("budget_overages_within_tolerance", [])
-                if any(r.get("unit") == row["unit"] and r.get("actual") == row["actual"]
-                       and r.get("cap") == row["cap"] for r in stamps if isinstance(r, dict)):
-                    continue  # re-seal (reconcile/revision) repeats the numbers, not the fact
-                stamps.append(row)
-                self.store.event("engine", "budget_overage_within_tolerance",
-                                 run=str(run.get("id") or ""), node=str(node.get("id") or ""),
-                                 unit=str(unit), actual=float(actual), cap=float(limit), band=band)
-
     def _record_run_evidence_errors(self, run: dict, errors: list[str]) -> str:
         target = "incomplete" if self._run_evidence_is_incomplete(errors) else "invalid"
         erun.transition_evidence(run, target, note="; ".join(errors[:12]))
@@ -975,7 +913,7 @@ class AbsorbMixin:
                 self.ctx(), source, required_probe_fields,
                 where=f"run {run.get('id')} immutable probe")
             for row in expected_probes)
-        # R9-002: the repeat attempt carries no probe duty at all (mechanism
+        # The repeat attempt carries no probe duty at all (mechanism
         # authority stays with the base head; _probe_expectations already
         # returns no expectations for it) - so its raw metrics are validated
         # with the probe envelope waived, not against the base snapshots.
@@ -994,7 +932,7 @@ class AbsorbMixin:
             errors.extend(evalid.resource_measurement_errors(
                 spec, raw, where=f"run {run.get('id')} evaluation"))
             if run.get("repeat_measure_attempt"):
-                # R9-002 (reviewer finding): the repeat evaluation's landing
+                # The repeat evaluation's landing
                 # identity is enforced like the stage half - reporting the
                 # base attempt's leftover landing would let the pin check
                 # endorse a copied base value as the "repeat measurement".
@@ -1021,7 +959,7 @@ class AbsorbMixin:
         if enforce_current:
             cur = int(node.get("stage_cursor") or 0)
             if run.get("repeat_measure_attempt"):
-                # R9-002: the repeat lane's expected position is the pending
+                # The repeat lane's expected position is the pending
                 # repeat seed with no replica index (it is not a preplanned
                 # lane), judged against the same stage cursor.
                 expected_index = None
@@ -1037,7 +975,7 @@ class AbsorbMixin:
                     f"but node expects {expected_seed!r}/{expected_index}/{cur}")
         strict_paths = ((spec.get("training_replication") or {}).get("mode") == "preplanned")
         if run.get("repeat_measure_attempt") and seed is not None:
-            # R9-002/R10-012: the repeat attempt lands at the spec's OWN
+            # The repeat attempt lands at the spec's OWN
             # resolved paths (one resolution rule for every attempt); path
             # identity stays enforced so the repeat cannot report elsewhere.
             expected_metrics = str(econfig.resolve_seed_template(stage.get("metrics_file") or "", seed))
@@ -1048,7 +986,7 @@ class AbsorbMixin:
                 if seed is not None and strict_paths else None
             expected_ledger = str(econfig.resolve_seed_template(stage.get("ledger_file") or "", seed)) \
                 if seed is not None and strict_paths and econfig.stage_requires_ledger(stage) else None
-        # R7: path IDENTITY binds the producer landing (where the job wrote),
+        # Path IDENTITY binds the producer landing (where the job wrote),
         # which ingestion preserves as producer_*; CONTENT reads use the
         # ingested immutable snapshot in run["metrics_file"].
         declared_metrics = str(run.get("producer_metrics_file") or run.get("metrics_file") or "")
@@ -1076,15 +1014,18 @@ class AbsorbMixin:
         self._assert_frozen_contract()
         run = self.store.get_run(self.st, run_id)
         if run is None:
-            raise SystemExit(f"[evo] no run {run_id}")
+            raise SystemExit(f"[evo] no run {run_id}; RUN ids are printed by the launch card that "
+                             "prepared them ('evo status' lists the unsettled ones)")
         self._assert_artifact_seals(only_node=str(run.get("node") or "") or None)
         if str(run.get("attempt_token") or "") != str(attempt_token or ""):
-            raise SystemExit("[evo] attempt token does not match the prepared RUN")
+            raise SystemExit("[evo] attempt token does not match the prepared RUN; pass --attempt-token "
+                             "exactly as the launch card printed it for this RUN")
         try:
             erun.transition_execution(run, "running", job=str(job or ""),
                                       note="platform job bound through run-bind")
         except erun.RunError as exc:
-            raise SystemExit(f"[evo] cannot bind {run_id}: {exc}") from exc
+            raise SystemExit(f"[evo] cannot bind {run_id}: {exc} (a re-launch opens a new RUN through "
+                             "its launch card: 'evo next')") from exc
         self.store.event("agent", "run_bound", run=run_id, job=run.get("job"),
                          attempt_key=run.get("attempt_key"))
         self.save()
@@ -1094,11 +1035,14 @@ class AbsorbMixin:
         self._assert_frozen_contract()
         run = self.store.get_run(self.st, run_id)
         if run is None:
-            raise SystemExit(f"[evo] no run {run_id}")
+            raise SystemExit(f"[evo] no run {run_id}; RUN ids are printed by the launch card that "
+                             "prepared them ('evo status' lists the unsettled ones)")
         try:
             erun.confirm_not_launched(run, note=note)
         except erun.RunError as exc:
-            raise SystemExit(f"[evo] cannot reconcile non-launch for {run_id}: {exc}") from exc
+            raise SystemExit(f"[evo] cannot reconcile non-launch for {run_id}: {exc} (if the job did run, "
+                             f"record it: 'evo run-bind --run {run_id} --job ... --attempt-token ...' or "
+                             f"'evo run-update --run {run_id} --status ...')") from exc
         node = self.node(str(run.get("node") or ""))
         if node and node.get("status") == "abandoned":
             erun.transition_execution(run, "cancelled", note="owner abandoned; confirmed never launched")
@@ -1120,26 +1064,33 @@ class AbsorbMixin:
         self._assert_frozen_contract()
         run = self.store.get_run(self.st, run_id)
         if run is None:
-            raise SystemExit(f"[evo] no run {run_id}")
+            raise SystemExit(f"[evo] no run {run_id}; RUN ids are printed by the launch card that "
+                             "prepared them ('evo status' lists the unsettled ones)")
         self._assert_artifact_seals(only_node=str(run.get("node") or "") or None)
         target = "finished" if status in {"succeeded", "finished"} else status
         if target not in {"running", "finished", "failed", "cancelled"}:
             raise SystemExit("[evo] --status must be running|succeeded|finished|failed|cancelled")
         for label, rel in (("metrics", metrics_file), ("ledger", ledger_file)):
             if rel and not eutil.rpath(self.store.repo, rel).is_file():
-                raise SystemExit(f"[evo] {label} file {rel} does not exist")
+                raise SystemExit(f"[evo] {label} file {rel} does not exist; pass the repo-relative path "
+                                 "of the produced file (--metrics-file / --ledger-file)")
         if erun.is_terminal(run):
             if target != run.get("status"):
-                raise SystemExit("[evo] terminal execution facts are immutable; a different execution needs a new RUN")
+                raise SystemExit("[evo] terminal execution facts are immutable; a different execution needs "
+                                 "a new RUN (the relaunch card via 'evo next', or 'evo recover-plan --target "
+                                 f"node:{run.get('node')} ...') - late evidence on a finished RUN goes "
+                                 f"through 'evo run-reconcile --run {run_id} ...'")
             supplied = {"metrics_file": metrics_file, "ledger_file": ledger_file,
                         "failure_class": failure_class, "repair_scope": repair_scope,
                         "note": note}
             changed = [field for field, value in supplied.items()
                        if value is not None and str(value) != str(run.get(field) or "")]
             if changed:
-                hint = ("use run-reconcile for late evidence" if run.get("status") == "finished"
+                hint = (f"late evidence goes through 'evo run-reconcile --run {run_id} ...'"
+                        if run.get("status") == "finished"
                         and run.get("adoption_status") not in {"adopted", "superseded"}
-                        else "accepted facts require a reviewed recovery/new attempt")
+                        else "accepted facts change only through 'evo recover-plan --target "
+                             f"node:{run.get('node')} ...' or a new RUN (relaunch card via 'evo next')")
                 raise SystemExit(f"[evo] terminal RUN fields cannot be rewritten ({', '.join(changed)}); {hint}")
             return run
         if target == "failed":
@@ -1161,7 +1112,8 @@ class AbsorbMixin:
         try:
             erun.transition_execution(run, target, note=note)
         except erun.RunError as exc:
-            raise SystemExit(f"[evo] cannot update {run_id}: {exc}") from exc
+            raise SystemExit(f"[evo] cannot update {run_id}: {exc} (a different execution needs a new RUN: "
+                             "the relaunch card via 'evo next')") from exc
         if target == "failed":
             run["failure_class"] = failure_class
             if repair_scope:
@@ -1169,7 +1121,7 @@ class AbsorbMixin:
         if target == "finished":
             run["metrics_file"] = metrics_file or run.get("metrics_file")
             run["ledger_file"] = ledger_file or run.get("ledger_file")
-            # R10-004: the hold-review obligation is persisted at the moment
+            # The hold-review obligation is persisted at the moment
             # the terminal fact lands, not at whichever later scan happens to
             # run first - otherwise "run-update then resume" and "run-update
             # then next then resume" gave the same facts different adoption
@@ -1208,7 +1160,7 @@ class AbsorbMixin:
                 self._cancel_task_gates(launch_task, "its launch task was settled with the RUN")
             self.store.event("user", "unlaunched_run_intent_cancelled", run=run_id,
                              note=note or run.get("note"))
-        # R9 (external audit r6): a launcher can die BEFORE the platform returns
+        # A launcher can die BEFORE the platform returns
         # a job id. The terminal fact is legal and irreversible, but the launch
         # card that produced it had no failure output shape - background needs a
         # job, completed needs passing metrics, confirm-not-launched only accepts
@@ -1234,19 +1186,20 @@ class AbsorbMixin:
                       accept_missing_evidence: bool = False) -> dict:
         """Attach late bytes to the same finished attempt and re-run ingestion.
 
-        ``accept_missing_evidence`` (R9 audit): the USER's terminal
+        ``accept_missing_evidence``: the USER's terminal
         disposition for materials that are confirmed permanently unavailable.
-        A run abandoned mid-flight whose late arrival lacked its files used to
-        keep an evidence obligation open forever with no closing verb (the
-        probe gap had one, ordinary materials did not) - blocking landings and
-        the terminal verdict while nothing could ever settle it."""
+        Without it, a run abandoned mid-flight whose late arrival lacked its
+        files would keep an evidence obligation open forever with no closing
+        verb - blocking landings and the terminal verdict while nothing could
+        ever settle it."""
         self._assert_frozen_contract()
         run = self.store.get_run(self.st, run_id)
         if run is None:
-            raise SystemExit(f"[evo] no run {run_id}")
+            raise SystemExit(f"[evo] no run {run_id}; RUN ids are printed by the launch card that "
+                             "prepared them ('evo status' lists the unsettled ones)")
         node = self.node(str(run.get("node") or ""))
         if node is None:
-            raise SystemExit(f"[evo] run {run_id} has no owning node")
+            raise SystemExit(f"[evo] run {run_id} has no owning node; run 'evo doctor'")
         self._assert_artifact_seals(only_node=node["id"])
         if accept_missing_evidence:
             if not str(note or "").strip():
@@ -1259,23 +1212,27 @@ class AbsorbMixin:
                 raise SystemExit("[evo] settle the execution fact first (run-update / run-bind / "
                                  "run-confirm-not-launched); the evidence disposition comes after")
             if run.get("evidence_disposition") in erun.TERMINAL_EVIDENCE_DISPOSITIONS:
-                raise SystemExit("[evo] this RUN already carries a terminal evidence disposition")
+                raise SystemExit("[evo] this RUN already carries a terminal evidence disposition; nothing to "
+                                 "accept - a fresh measurement needs a new RUN (relaunch card via 'evo "
+                                 f"next') or 'evo recover-plan --target node:{node['id']} ...'")
             if run.get("adoption_status") == "adopted":
                 raise SystemExit("[evo] adopted evidence is immutable; use recover-plan for an "
                                  "authority revision")
-            # v12 field case (RUN143 class): a finished RUN whose ONLY defect
-            # is a declared-cap overage has its materials right there - the
-            # terminal disposition below discards evidence that a raised
-            # validity band would adopt as-is. Say so on the way through; the
-            # user's --note already makes this a knowing decision.
+            # A finished RUN whose ONLY defect is a declared-cap overage has its
+            # materials right there - the terminal disposition below discards
+            # evidence that a corrected cap would adopt as-is. Say so on the
+            # way through; the user's --note already makes this a knowing
+            # decision.
             budget_only = bool(run.get("evidence_errors")) and all(
                 "BUDGET_EXCEEDED" in str(e) for e in (run.get("evidence_errors") or []))
-            if budget_only and str(run.get("metrics_file") or "") and                     eutil.rpath(self.store.repo, str(run.get("metrics_file"))).is_file():
+            if budget_only and str(run.get("metrics_file") or "") and \
+                    eutil.rpath(self.store.repo, str(run.get("metrics_file"))).is_file():
                 print("[evo] CAUTION: this RUN's materials exist; its only defect is a budget-cap "
-                      "overage. Raising the config key stage_budget_tolerance and "
-                      f"'evo run-reconcile --run {run_id}' (without this flag) would adopt the "
-                      "SAME evidence with no rerun. Proceeding discards it terminally.")
-            # R10-014 (shape b): an applied stage_evidence recovery's whole
+                      "overage. Correcting the cap on record ('evo amend' the node's NODE_SPEC.json "
+                      f"budget.limits with the reason) and 'evo run-reconcile --run {run_id}' "
+                      "(without this flag) would adopt the SAME evidence with no rerun. Proceeding "
+                      "discards it terminally.")
+            # An applied stage_evidence recovery's whole
             # completion condition is THIS RUN reaching complete+adopted. A
             # terminal disposition makes that condition unsatisfiable forever
             # - the case would sit repairing while every same-RUN verb is
@@ -1313,7 +1270,7 @@ class AbsorbMixin:
                 self._account_run(run)
             run["absorbed"] = True
             run.pop("adoption_deferred_by_hold", None)
-            # R10 self-audit: a still-open launch card for this RUN has no
+            # A still-open launch card for this RUN has no
             # legal submission shape once the RUN is terminally dispositioned
             # - settle it in the SAME transition through the shared primitive.
             launch_task = self.store.get_task(self.st, str(run.get("launch_task") or ""))
@@ -1326,12 +1283,12 @@ class AbsorbMixin:
                              node=node["id"], note=note)
             pending_match = (node.get("status") == "evidence_pending"
                              and node.get("evidence_pending_run") == run_id)
-            # R10-014 (shape a): the v11.4 seam fix routed only the
-            # evidence_pending holder; a node still executing/evaluating on
-            # this very attempt (the finished RUN not yet absorbed - a hold
-            # window, or accept before the next scan) was left claiming to
-            # execute forever with no live RUN, no material obligation and no
-            # generatable card. ONE ownership predicate now decides: the
+            # Routing only the evidence_pending holder would leave a node
+            # still executing/evaluating on this very attempt (the finished
+            # RUN not yet absorbed - a hold window, or accept before the next
+            # scan) claiming to execute forever with no live RUN, no material
+            # obligation and no generatable card. ONE ownership predicate
+            # decides: the
             # current attempt's disposition always routes its owner through
             # the ordinary failure channel (replacement spend stays behind
             # its protected gate; exhaustion still escalates).
@@ -1345,18 +1302,25 @@ class AbsorbMixin:
             self.save()
             return run
         if run.get("status") != "finished":
-            raise SystemExit("[evo] only a successfully finished RUN can reconcile result evidence")
+            raise SystemExit("[evo] only a successfully finished RUN can reconcile result evidence; this RUN "
+                             f"is {run.get('status')} - settle the execution first ('evo run-update --run "
+                             f"{run_id} --status succeeded|failed ...'); a failed/cancelled RUN has no "
+                             "evidence to reconcile (its relaunch card opens the next attempt)")
         if run.get("evidence_disposition") in erun.TERMINAL_EVIDENCE_DISPOSITIONS:
             raise SystemExit("[evo] this RUN was terminally quarantined by an aborted recovery; "
-                             "its historical evidence gap is immutable")
+                             "its historical evidence gap is immutable - a fresh measurement needs a new "
+                             f"RUN (relaunch card via 'evo next') or 'evo recover-plan --target node:{node['id']} ...'")
         if run.get("adoption_status") in {"adopted", "superseded"}:
             raise SystemExit("[evo] accepted/superseded evidence is immutable; use recover-plan for an authority revision")
         if run.get("evidence_status") == "complete":
-            raise SystemExit("[evo] this RUN already has a sealed complete historical package; it is immutable")
+            raise SystemExit("[evo] this RUN already has a sealed complete historical package; it is immutable - "
+                             "a different evidence set needs a new RUN or 'evo recover-plan --target "
+                             f"node:{node['id']} --boundary evaluation|stage_evidence ...'")
         for label, rel in (("metrics", metrics_file), ("ledger", ledger_file)):
             if rel and not eutil.rpath(self.store.repo, rel).is_file():
-                raise SystemExit(f"[evo] {label} file {rel} does not exist")
-        # R7 external audit: a supplied landing must not be one a LIVE sibling
+                raise SystemExit(f"[evo] {label} file {rel} does not exist; pass the repo-relative path "
+                                 "of the produced file (--metrics-file / --ledger-file)")
+        # A supplied landing must not be one a LIVE sibling
         # RUN currently leases - reading it would ingest the sibling's bytes
         # under this RUN's identity.
         lease = self._landing_lease_holder(metrics_file or "", ledger_file or "",
@@ -1378,7 +1342,7 @@ class AbsorbMixin:
         # documented same-RUN repair loop). That re-read is safe exactly when
         # no LATER attempt has claimed the same landing meanwhile - otherwise
         # the bytes there are a sibling's results and re-ingesting them seals
-        # the wrong producer's science under this RUN (the R7-010 poisoning).
+        # the wrong producer's science under this RUN.
 
         def _run_seq(row) -> int:
             try:
@@ -1390,10 +1354,10 @@ class AbsorbMixin:
             wanted = eutil.norm_uri(rel)
             if not wanted:
                 return None
-            # R9 audit: judged against the full claim set (probe artifact and
+            # Judged against the full claim set (probe artifact and
             # seed-resolved products included), not just the two declared
-            # landing fields. R10-002: overlap-aware (directory vs child).
-            # G-3: legacy rows are backfilled before judging.
+            # landing fields, overlap-aware (directory vs child). Rows without a
+            # claim set are backfilled before judging.
             for r2 in self.st.get("runs", []):
                 if str(r2.get("id") or "") == run_id or _run_seq(r2) <= _run_seq(run):
                     continue
@@ -1402,12 +1366,12 @@ class AbsorbMixin:
                     return r2
             return None
 
-        # R8 audit: the later-claimant rule must also cover EXPLICITLY
-        # resupplied paths. With the claimant already terminal, the live-lease
-        # check above passes, and the old code skipped resupplied fields here
-        # - so pointing --metrics-file at the shared landing ingested the
-        # sibling's bytes under this RUN's identity. Refuse outright: the fix
-        # is to supply this RUN's own bytes at a distinct path.
+        # The later-claimant rule must also cover EXPLICITLY
+        # resupplied paths: with the claimant already terminal, the live-lease
+        # check above passes, so pointing --metrics-file at the shared
+        # landing would ingest the sibling's bytes under this RUN's identity.
+        # Refuse outright: the fix is to supply this RUN's own bytes at a
+        # distinct path.
         for field in sorted(refresh):
             supplied = str(run.get(field) or "")
             claimant = _later_claimant(supplied)
@@ -1435,19 +1399,21 @@ class AbsorbMixin:
         if accept_missing_probe:
             if not str(note or "").strip():
                 raise SystemExit("[evo] --accept-missing-probe needs --note explaining why the observation is unrecoverable")
-            # R9-002 pairing: judge producer-ship through the SAME predicate
+            # Judge producer-ship through the SAME predicate
             # absorption/claims/seal use. The repeat buy-back lane is never a
             # probe producer, so a probe-gap disposition on it must be refused
-            # here too - accepting it used to stamp probe_evidence_status=
+            # here too - accepting it would stamp probe_evidence_status=
             # "unavailable" on a lane with no probe duty, and once that RUN
-            # became the repeat_eval head, active_probe_unavailable degraded
-            # the whole node's mechanism evidence from a lane that never owed
-            # any.
+            # became the repeat_eval head, active_probe_unavailable would
+            # degrade the whole node's mechanism evidence from a lane that
+            # never owed any.
             is_producer, _ = self._probe_expectations(run, node)
             if not is_producer:
                 raise SystemExit("[evo] this RUN is not the frozen mechanism-probe producer"
                                  + (" (the repeat buy-back lane carries no probe duty)"
-                                    if run.get("repeat_measure_attempt") else ""))
+                                    if run.get("repeat_measure_attempt") else "")
+                                 + "; file --accept-missing-probe on the producer RUN instead, or omit "
+                                   "the flag here")
             probe = self._spec(node).get("probe_execution") or {}
             gap_rel = f".evo/runs/{run_id}/evidence/PROBE_GAP.json"
             eutil.write_json_atomic(eutil.rpath(self.store.repo, gap_rel), {
@@ -1459,7 +1425,7 @@ class AbsorbMixin:
             run["probe_gap_receipt"] = gap_rel
         run["absorbed"] = False
         run.pop("evidence_errors", None)
-        # R8 audit: run-reconcile IS the promised adopting step after a hold
+        # Run-reconcile IS the promised adopting step after a hold
         # review - clear the persisted deferral BEFORE the blocked check so a
         # released hold's obligation ends here (a still-active hold keeps
         # deferring below).
@@ -1478,10 +1444,10 @@ class AbsorbMixin:
     def _absorb_run(self, run: dict) -> None:
         if run.get("absorbed"):
             return
-        # R8 follow-up: the hold-review deferral must hold at THIS choke
+        # The hold-review deferral must hold at THIS choke
         # point, not only in the periodic sweep - the launch-card submit arms
-        # call here directly, and used to adopt a reviewed RUN right past an
-        # active hold (and past the persisted deferral marker). run-reconcile
+        # call here directly and must not adopt a reviewed RUN right past an
+        # active hold (or past the persisted deferral marker). run-reconcile
         # clears the marker before it calls in, so the promised
         # "reconcile adopts" path is unaffected.
         if run.get("kind") in ("stage", "eval") and self._run_adoption_blocked(run):
@@ -1496,7 +1462,7 @@ class AbsorbMixin:
         expect = "executing" if run.get("kind") == "stage" else "evaluating"
         recovering_same_run = bool(node and node.get("status") == "evidence_pending" and
                                    node.get("evidence_pending_run") == run.get("id"))
-        # R9 (external audit r6): crash-replay convergence. save_all commits
+        # Crash-replay convergence. save_all commits
         # graph/registry BEFORE the state marker; a crash in that window leaves
         # the GRAPH already advanced by this very absorption (node moved on,
         # this RUN recorded as an evidence head) while the old state still says
@@ -1519,7 +1485,7 @@ class AbsorbMixin:
                 erun.transition_adoption(run, "adopted",
                                          note="crash-replay of an absorption the graph already credits")
             if run.get("kind") == "eval" and run.get("repeat_measure_attempt"):
-                # R9-002 replay convergence: the graph already credits this
+                # Replay convergence: the graph already credits this
                 # repeat evaluation - converge the repeat bookkeeping the
                 # crash may have dropped, and leave the BASE eval fields
                 # (eval_run, floor freeze, receipt) strictly alone.
@@ -1579,7 +1545,7 @@ class AbsorbMixin:
                              node_status=node.get("status"))
             self._close_watch_tasks(run)
             return
-        # R9-002 (reviewer finding): while the approved repeat lane is still
+        # While the approved repeat lane is still
         # owed, the node's CURRENT position belongs to the repeat attempt -
         # but the stage cursor is shared with the base lane, so a late
         # base-lane reconcile could satisfy the position check by coincidence
@@ -1591,7 +1557,7 @@ class AbsorbMixin:
             node is not None and run.get("kind") in ("stage", "eval")
             and not run.get("repeat_measure_attempt")
             and self._repeat_run_pending(node) is not None)
-        # R10-001: a real external failure that ended BEFORE a job id existed
+        # A real external failure that ended BEFORE a job id existed
         # never flipped the node to executing/evaluating, so the status test
         # below filed it as unrelated history - no failure ledger entry, no
         # retry counter, no replacement-spend door, and the same position was
@@ -1635,7 +1601,7 @@ class AbsorbMixin:
                 if result_errs:
                     self._mark_run_evidence_pending(node, run, result_errs)
                 elif run.get("repeat_measure_attempt"):
-                    # R9-002: the bought-back repeat is a REAL eval RUN. It
+                    # The bought-back repeat is a REAL eval RUN. It
                     # settles BESIDE the first measurement, never over it: the
                     # base eval_run pointer, the frozen floor, the resource
                     # receipt and the calibration inputs all stay untouched -
@@ -1652,7 +1618,7 @@ class AbsorbMixin:
                     node["repeat_eval_run"] = run["id"]
                     node.pop("repeat_pending_seed", None)
                     node["status"] = "workflow_done"
-                    # R11-001: the second measurement is now sealed - publish
+                    # The second measurement is now sealed - publish
                     # the repeat workflow's deferred product generations in
                     # the SAME transaction, so registry head and adopted
                     # measurement move together.
@@ -1671,13 +1637,21 @@ class AbsorbMixin:
                     node["eval_done"] = True
                     node["eval_run"] = run["id"]
                     node["eval_resource_accounted"] = True
-                    # v11.1 P4 boundary: the repeat-measure trigger must judge
+                    # The repeat-measure trigger must judge
                     # with the floor as it stood BEFORE this evaluation - the
                     # measurement being judged may not move its own ruler - so
                     # freeze it before self-calibration ingests this seed set.
                     node["eval_floor_frozen"] = {
                         str(c.get("id") or ""): econfig.noise_floor(self.cfg, str(c.get("id") or ""), self.st)
                         for c in egraph.decision_cells(self.cfg)}
+                    # ... and the user's bar on top of the floor, so a later
+                    # change of the multiple never re-judges this measurement.
+                    node["eval_floor_multiple_frozen"] = econfig.noise_floor_multiple(self.cfg)
+                    # The per-cell judged constants (margins, worthwhile
+                    # deltas, required flags, goal lines) freeze with the
+                    # floors: a later notebook correction changes the ruler
+                    # for nodes measured after it, never for this one.
+                    node["eval_cells_frozen"] = evalid.frozen_cell_constants(self.cfg)
                     self._calibrate_observed_noise(node, run)
                     self._maybe_open_repeat_measure(node, run)
                     egraph.touch(node)
@@ -1746,15 +1720,15 @@ class AbsorbMixin:
             node["status"] = "workflow_done"   # retry only after a repeat-spend decision
         maxa = int(self.cfg.get("budgets", {}).get("max_attempts", 3))
         if fails >= maxa:
-            # v11 R1: this node's TRAINING is already paid for - eval-failure
+            # This node's TRAINING is already paid for - eval-failure
             # exhaustion is exactly the expensive-terminal situation the
             # protected-task list guards, and auto-abandoning here bypassed it.
-            # The user decides; on_stuck=abandon no longer silently destroys a
+            # The user decides; on_stuck=abandon never silently destroys a
             # trained node over evaluation plumbing.
             self.store.new_gate(
                 self.st, "escalation",
                 {"node": node["id"],
-                 # R10-015: an exhaustion born from the repeat buy-back lane
+                 # An exhaustion born from the repeat buy-back lane
                  # is retired together with the purchase when the user waives
                  **({"repeat_source_run": run["id"]}
                     if run.get("repeat_measure_attempt") else {})},
@@ -1811,7 +1785,7 @@ class AbsorbMixin:
                 run["scientific_gate"] = decision
                 if decision["outcome"] == "stop_node":
                     if repeat_lane:
-                        # R10-013: a continuation gate is a spend-control rule
+                        # A continuation gate is a spend-control rule
                         # for this node's pipeline, and the base pass already
                         # decided it. The user bought EXACTLY ONE full
                         # workflow+eval as a second measurement - letting a
@@ -1841,7 +1815,7 @@ class AbsorbMixin:
                     completion["repeat_measure"] = True
                 node.setdefault("replicas_completed", []).append(completion)
             if repeat_lane:
-                # R9-002: the repeat lane finishes exactly once - it must
+                # The repeat lane finishes exactly once - it must
                 # never re-enter the preplanned seed loop below (its seed is
                 # not one of the spec lanes). The node returns to
                 # workflow_done, where the scheduler prepares the repeat
@@ -1869,7 +1843,7 @@ class AbsorbMixin:
         egraph.touch(node)
 
     def _calibrate_observed_noise(self, node: dict, run: dict) -> None:
-        """v11.1 P3: self-calibrated noise floors, preplanned mode only.
+        """Self-calibrated noise floors, preplanned mode only.
 
         A completed preplanned seed set is a direct measurement of THIS
         project's run-to-run spread on THIS harness, which beats any
@@ -1897,7 +1871,7 @@ class AbsorbMixin:
             cid = str(cell.get("id") or "")
             rec = self.st.setdefault("observed_noise", {}).setdefault(
                 cid, {"runs": {}, "sets": 0})
-            # (final audit C30 + R7) contributions are keyed by the TRAINING
+            # Contributions are keyed by the TRAINING
             # SET's identity (node + its seed set), not the eval RUN id: a
             # crash replay reuses the same RUN and overwrote itself already,
             # but an evaluation-only recovery mints a NEW eval RUN over the
@@ -1927,7 +1901,7 @@ class AbsorbMixin:
                              width=rec["width"], sets=rec["sets"])
 
     def _maybe_open_repeat_measure(self, node: dict, run: dict) -> None:
-        """v11.1 P4 trigger. Fires at most once per node, purely mechanically:
+        """The repeat-measure trigger. Fires at most once per node, purely mechanically:
         the node pre-registered a repeat_rule, the project is single-run, and
         the SINGLE measured delta lands within the registered band (explicit
         band first, else the floor FROZEN BEFORE this evaluation - the
@@ -1945,7 +1919,7 @@ class AbsorbMixin:
                     and (gate.get("subject") or {}).get("node") == node["id"] \
                     and gate.get("status") in {"open", "paused", "approved", "rejected"} \
                     and not gate.get("superseded_by_restart"):
-                # R7 follow-up: a gate stamped superseded_by_restart belongs to
+                # A gate stamped superseded_by_restart belongs to
                 # a PREVIOUS implementation revision (its settled repeat was
                 # archived by the restart) - it must not dedup the fresh
                 # revision's own near-the-line judgement.
@@ -1959,7 +1933,7 @@ class AbsorbMixin:
             return
         rule_errs = evalid.repeat_rule_errors(self.cfg, meta, st=self.st)
         if rule_errs:
-            # v11.1 (R2 fix): the trigger honors only rules that pass the SAME
+            # The trigger honors only rules that pass the SAME
             # registration validator the mature door applies - a rule smuggled
             # into a meta no validator saw (or malformed) can never open the
             # protected gate under a false "pre-registered" banner.
@@ -1985,7 +1959,7 @@ class AbsorbMixin:
             return
         value = float(value)
         idx = egraph.by_id(self.g)
-        # v11.1 (R1 fix): judge the delta against the FROZEN effect comparator
+        # Judge the delta against the FROZEN effect comparator
         # (the quantity the verdict will actually settle on), not blindly the
         # first parent - the two may legally differ (declared baseline
         # comparator, hybrid parents). Boundary (2) is about the decision.
@@ -2015,7 +1989,7 @@ class AbsorbMixin:
         gt = cell.get("goal_threshold")
         if isinstance(gt, (int, float)) and not isinstance(gt, bool) and abs(value - float(gt)) <= band:
             hits.append(f"goal_threshold {float(gt):g}")
-        # R4 science audit: when a floor is active, the verdict's EFFECTIVE
+        # When a floor is active, the verdict's EFFECTIVE
         # flip lines sit floor-shifted from the registered ones (improved at
         # improve+floor, regressed at -max(margin,floor), goal at gt+/-floor).
         # A registered band narrower than the floor would patrol lines the
@@ -2056,7 +2030,7 @@ class AbsorbMixin:
             while econfig.seed_slug(repeat_seed) in taken_int:
                 repeat_seed += 1
         else:
-            # R7: the constant "repeat" collided with a project whose seed IS
+            # The constant "repeat" collided with a project whose seed IS
             # the string "repeat" - the gate then promised a "fresh seed" that
             # the replication validator would reject as a duplicate.
             taken = {econfig.seed_slug(s) for s in seeds}
@@ -2078,9 +2052,9 @@ class AbsorbMixin:
             f"repeat of the full training+eval with a fresh seed ({repeat_seed!r}); both runs are then "
             "reported as a 2-run set on that metric and the verdict settles ONCE on their mean - the "
             "aggregate can never trigger another repeat. On approval the ENGINE schedules the repeat "
-            "as first-class RUNs (R9-002): every stage and the evaluation get their own prepared "
+            "as first-class RUNs: every stage and the evaluation get their own prepared "
             "attempt with token, scheduler slot, landing lease and resource-ledger charge. The repeat "
-            "executes the frozen commands at the spec's OWN landings (R10-012: one resolution rule "
+            "executes the frozen commands at the spec's OWN landings (one resolution rule "
             "for every attempt): the first attempt's leftover LOCAL bytes at those landings are "
             "archived per-RUN before the repeat writes (its sealed evidence lives in immutable "
             "snapshots either way), shared product rows advance to a new registry generation with "
@@ -2109,7 +2083,7 @@ class AbsorbMixin:
 
     def _register_or_defer_stage_products(self, node: dict, stage: dict, stage_index: int,
                                           replica_seed: Any | None, run: dict) -> None:
-        """R11-001: a repeat lane's product registrations are DEFERRED.
+        """A repeat lane's product registrations are DEFERRED.
 
         While the repeat executes, the registry head keeps the BASE
         measurement's generation - a consumer that binds mid-repeat binds
@@ -2133,7 +2107,7 @@ class AbsorbMixin:
         self._register_stage_artifacts(node, stage, replica_seed, run)
 
     def _flush_repeat_product_registrations(self, node: dict) -> None:
-        """Flush the repeat lane's deferred product registrations (R11-001).
+        """Flush the repeat lane's deferred product registrations.
 
         Called in the same absorption that seals the repeat evaluation, and
         as an idempotent belt when the 2-run aggregate settles - registration
@@ -2169,12 +2143,12 @@ class AbsorbMixin:
             if not uri:
                 continue
             existing = eartifact.find_by_uri(self.reg, uri)
-            # R9 (external audit r6): 'invalid' (a local product missing at first
+            # 'invalid' (a local product missing at first
             # registration) is the SAME node's own row and must be repairable by
             # its own producer's later, now-present bytes - not frozen forever in
             # the conflict-event branch. record_generation re-runs content_custody
             # and flips status to available when the bytes now exist.
-            # R10 self-audit (major): the SAME node re-producing its own
+            # The SAME node re-producing its own
             # 'available' row is a legitimate NEW GENERATION too - a repeat
             # buy-back lane (and a later preplanned replica) writes the same
             # fixed URI with fresh bytes, and the conflict-event branch left
@@ -2185,7 +2159,7 @@ class AbsorbMixin:
             # CROSS-node collision remains a conflict event.
             if existing is not None and existing.get("node") == node["id"] \
                     and existing.get("status") in ("stale", "invalid", "available"):
-                # R11 (W6 self-audit): a generation is minted by exactly one
+                # A generation is minted by exactly one
                 # producing RUN. The estore commit order (graph, registry,
                 # state) leaves a window where the registry already carries
                 # this run's generation but the state lost the absorbed flag -
@@ -2254,7 +2228,7 @@ class AbsorbMixin:
             node["implementation_repair_source_run"] = run["id"]
         maxa = int(self.cfg.get("budgets", {}).get("max_attempts", 3))
         if fails >= maxa:
-            # R2 audit: stage exhaustion was the ONE exhaustion door that
+            # Stage exhaustion was the ONE exhaustion door that
             # auto-abandoned a training-paid node (multi-seed: earlier seeds
             # fully trained, last seed's stage failing). Every sibling path
             # (eval exhaustion, stuck tasks, fix cycles, full_auto escalation
@@ -2298,11 +2272,11 @@ class AbsorbMixin:
                          failure_class=failure_class, repair_scope=repair_scope)
 
     def _archive_repeat_measure(self, node: dict, reason: str) -> None:
-        """R7 external audit: a settled repeat_measure is evidence of the OLD
-        implementation revision. Leaving it across a restart forced the new
+        """A settled repeat_measure is evidence of the OLD implementation
+        revision. Left in place across a restart it would force the new
         evaluation to report "BOTH runs" with an old-revision repeat against a
         new-revision base (exactly the mixing these restarts forbid), while
-        waive-repeat refused because done=True. Archive it; the fresh eval
+        waive-repeat would refuse because done=True. Archive it; the fresh eval
         re-judges near-the-line and reopens its own gate if warranted."""
         if not (node.get("repeat_measure") or node.get("repeat_measure_done")):
             return
@@ -2314,7 +2288,7 @@ class AbsorbMixin:
              "superseded_reason": reason})))
         node.pop("repeat_measure", None)
         node.pop("repeat_measure_done", None)
-        # R9-002: the engine-run repeat execution state belongs to the archived
+        # The engine-run repeat execution state belongs to the archived
         # approval - a restart must not leave the scheduler owing a repeat
         # lane for a revision that no longer exists.
         node.pop("repeat_pending_seed", None)
@@ -2450,7 +2424,7 @@ class AbsorbMixin:
                       if r.get("node") == node.get("id") and r.get("kind") == "stage"
                       and r.get("adoption_status") == "adopted" and r.get("status") == "finished"
                       and r.get("evidence_status") == "complete"
-                      # R9-002: the repeat lane is an extra purchased attempt,
+                      # The repeat lane is an extra purchased attempt,
                       # not part of the preplanned workflow head this count
                       # proves complete
                       and not r.get("repeat_measure_attempt")]

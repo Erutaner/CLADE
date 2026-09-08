@@ -7,6 +7,7 @@ from __future__ import annotations
 import hashlib
 import re
 
+import eamend
 import eutil
 import econfig
 import egraph
@@ -49,10 +50,10 @@ def _lesson_partition(all_lessons: list[dict], g: dict, st: dict,
                       *, parents: list[str], tags: list[str]) -> tuple[list[dict], list[dict]]:
     """(lineage/tag-matched lessons, global lessons), each newest-first.
 
-    R7 multi-round audit: relevance outranks recency. An exact-lineage (or
+    relevance outranks recency. An exact-lineage (or
     tag-matched) lesson is the one specific to THIS task's parents; twelve
-    newer globals used to evict it silently and the agent then repeated a
-    recorded failure. Matched lessons are pinned before globals."""
+    newer globals must not evict it silently (the agent would then repeat a
+    recorded failure). Matched lessons are pinned before globals."""
     lineage_nodes = set(parents)
     for p in parents:
         lineage_nodes.update(egraph.ancestors(g, p))
@@ -96,7 +97,7 @@ def errors_block(store, cfg: dict, *, node: str | None = None,
         out.append(f"- [{r.get('id')}] node {r.get('node')} stage {r.get('stage') or '-'} "
                    f"(run {r.get('run') or '-'}): {r.get('note') or 'no note recorded'}")
     if len(recs) > len(picked):
-        # R7 audit: silent truncation read as "this is everything"
+        # Silent truncation read as "this is everything"
         out.append(f"- (+{len(recs) - len(picked)} older execution errors omitted; full journal at "
                    "`.evo/errors.jsonl` - grep your failing surface/command)")
     return out
@@ -105,7 +106,7 @@ def errors_block(store, cfg: dict, *, node: str | None = None,
 def playbook_block(store, cfg: dict, st: dict | None = None) -> list[str]:
     """Platform playbook: infrastructure fixes that WORKED here, routed by
     surface into every execution-bearing bundle regardless of lineage (infra
-    knowledge is platform-shaped, not ancestry-shaped - v10.2). Latest fix
+    knowledge is platform-shaped, not ancestry-shaped). Latest fix
     per surface wins; capped like the error journal."""
     cap = int(cfg.get("budgets", {}).get("max_error_items_in_bundle", 8))
     failures = {str(r.get("id")): r for r in store.error_records(st)}
@@ -149,7 +150,7 @@ def playbook_block(store, cfg: dict, st: dict | None = None) -> list[str]:
     total_distinct = len({(str(r.get("surface") or "other"), eutil.norm_ws(str(r.get("fix"))))
                           for r in fixed})
     if total_distinct > len(out):
-        # R7 audit: once all eight coarse surfaces have one fix each, a second
+        # Once all eight coarse surfaces have one fix each, a second
         # still-necessary fix in any surface could never survive the cap - and
         # nothing said so. Disclose; the journal keeps every validated fix.
         out.append(f"- (+{total_distinct - len(out)} more validated fixes omitted; full journal at "
@@ -158,7 +159,7 @@ def playbook_block(store, cfg: dict, st: dict | None = None) -> list[str]:
 
 
 def prior_wiring_block(store, g: dict, *, limit: int = 3) -> list[str]:
-    """How the most recent implemented nodes wired their artifact I/O (v10.2):
+    """How the most recent implemented nodes wired their artifact I/O:
     the engine extracts READS:/WRITES: rows from prior BUILD_REPORTs so a new
     implement task starts from working point-of-use knowledge instead of
     re-deriving the platform's load/save ritual from scratch."""
@@ -223,8 +224,6 @@ def _settlement_gaps(node: dict, limit: int = 3) -> str:
                        ("required_group_uncertain", "required task group")):
         for cid in (summary.get(key) or []):
             gaps.append(f"{label} {cid} undecided against this node's own comparator")
-    if node.get("mechanism_status") not in (None, "confirmed", "not_applicable"):
-        gaps.append(f"mechanism probe {node.get('mechanism_status')}")
     if node.get("needs_fidelity") and node.get("fidelity_pending"):
         gaps.append("implementation-fidelity audit outstanding")
     if not gaps:
@@ -234,7 +233,7 @@ def _settlement_gaps(node: dict, limit: int = 3) -> str:
 
 
 def tombstones_block(store) -> list[str]:
-    """v11.2: published-territory tombstones for the ROUND STRATEGIST.
+    """Published-territory tombstones for the ROUND STRATEGIST.
 
     This block never reaches a generator directly. The strategist quotes a
     criterion into an overlapping lane's forbidden moves (with the
@@ -274,7 +273,7 @@ def tombstones_block(store) -> list[str]:
 
 
 def tombstones_reviewer_block(store) -> list[str]:
-    """v11.2: the tombstone ledger as a CRITIC reference (tournament/red team).
+    """The tombstone ledger as a CRITIC reference (tournament/red team).
 
     Two jobs: (a) a collision kill that re-hits bounded territory cites the
     TB id instead of authoring a near-duplicate criterion; (b) an author of a
@@ -301,6 +300,15 @@ def tombstones_reviewer_block(store) -> list[str]:
     return out
 
 
+def project_facts_lines(store) -> list[str]:
+    """Notebook rows on project-level facts (contract facts, profile, dossier,
+    rubric) for reviewers and gates; empty when none were recorded."""
+    try:
+        return list(eamend.history_lines(store, project=True) or [])
+    except (AttributeError, TypeError, OSError, ValueError):
+        return []
+
+
 def frontier_block(g: dict, cfg: dict, st: dict | None = None) -> list[str]:
     """Four layers, because one filtered list answers only one of four questions.
 
@@ -320,7 +328,7 @@ def frontier_block(g: dict, cfg: dict, st: dict | None = None) -> list[str]:
     holders: dict[str, list[str]] = {}
     records = egraph.cell_records(g, cfg)
     for row in records:
-        # v11.1 P6: the winner's-curse label travels with the record row here
+        # The winner's-curse label travels with the record row here
         # too, not only in FRONTIER.md - the strategist reads THIS block.
         holder = idx.get(row["node"]) or {}
         tag = "?" if egraph.provisional_record(
@@ -343,7 +351,7 @@ def frontier_block(g: dict, cfg: dict, st: dict | None = None) -> list[str]:
     for n in perf:
         out.append(
             f"- {n['id']} '{n.get('title','')}' role={n.get('role')} {egraph.level_label(n)} "
-            f"verdict={n.get('verdict') or '-'} science={n.get('scientific_promotion_status') or '-'} "
+            f"verdict={n.get('verdict') or '-'} science={egraph.promotion_label(n)} "
             f"{primary}={egraph.primary_score(n, primary)} "
             f"records={','.join(holders.get(n['id'], [])) or 'none'} "
             f"inheritable={'yes' if n['id'] in fr_ids else 'no'}")
@@ -352,13 +360,23 @@ def frontier_block(g: dict, cfg: dict, st: dict | None = None) -> list[str]:
         out.append("- none yet")
 
     out.append("Active inheritance frontier (legal exploit parents"
-               + ("; research mode also requires the frozen M/E/T settlement):"
+               + ("; research mode inherits a claim that STANDS - a claimed cell really rose and"
+                  " the user's vote passed inside the claimed groups (verdict improved / specialist /"
+                  " dominant, or tradeoff with a claimed win) - with the build audited. effect= is"
+                  " the bet's record, losses= what the node lost, mechanism= the causal status the"
+                  " ablation settled with the probe's answer beside it; none gates parenthood."
+                  " mechanism=deferred: build on the PROGRAM, never cite its KC# as a cause."
+                  " mechanism=refuted (via N###; build on N###): build on that control version and"
+                  " never carry the refuted kernel into a child):"
                   if econfig.is_research(cfg) else "):"))
     for n in fr:
         r = n.get("rollup") or {}
         out.append(
             f"- {n['id']} '{n.get('title','')}' role={n.get('role')} "
             f"purpose={n.get('experiment_purpose') or 'candidate'} {egraph.level_label(n)} "
+            f"verdict={n.get('verdict') or '-'} effect={n.get('effect_contract_status') or '-'} "
+            f"science={egraph.promotion_label(n)} mechanism={egraph.mechanism_label(n)} "
+            f"losses={egraph.losses_fragment(n)} "
             f"{primary}={egraph.primary_score(n, primary)} "
             f"descendants={r.get('descendants',0)} improved_descendants={r.get('descendants_improved',0)} "
             f"best_descendant_display={r.get('best_descendant_primary')}")
@@ -399,9 +417,9 @@ def frontier_block(g: dict, cfg: dict, st: dict | None = None) -> list[str]:
         out.append(
             f"- {n['id']}{f" ({n.get('retire_reason')} - revive first)" if str(n.get('retire_reason') or '') in ('archived', 'pruned') else ''} "
             f"'{n.get('title','')}' verdict={n.get('verdict') or '-'} "
-            f"science={n.get('scientific_promotion_status') or '-'} "
+            f"science={egraph.promotion_label(n)} "
             f"effect={n.get('effect_contract_status') or '-'} "
-            f"mechanism={n.get('mechanism_status') or '-'} "
+            f"mechanism={egraph.mechanism_label(n)} "
             f"{primary}={egraph.primary_score(n, primary)} "
             f"records={','.join(holders.get(n['id'], [])) or 'none'} "
             f"on_performance_frontier={'yes' if n['id'] in perf_ids else 'no'}"
@@ -525,14 +543,14 @@ def calibration_block(g: dict) -> list[str]:
                    + ("predictions look sandbagged - demand more aggressive kill thresholds" if rate > 0.9
                       else "forecasts are systematically optimistic - discount promised gains" if rate < 0.4
                       else "calibration is in a healthy band"))
-        # R7 audit: a large early cohort can dominate the pooled rate for many
+        # A large early cohort can dominate the pooled rate for many
         # rounds after the forecasting regime changed; show the recent cohort
         # separately so the strategist sees when the two disagree. (The advice
         # line above is ALL-HISTORY; when the cohorts diverge, weigh recent.)
-        # R9 (external audit r6): order by the persisted conclusion sequence, not
+        # Order by the persisted conclusion sequence, not
         # by graph insertion order - a later-created node routinely concludes
         # first (parallel lanes, slow external RUNs), which silently inverted
-        # "recent". Legacy nodes without the field sort first (oldest-known).
+        # "recent". Nodes without the field sort first (oldest-known).
         with_stats = [n for n in g.get("nodes", []) if n.get("prediction_stats")]
         recent_nodes = sorted(with_stats, key=lambda n: int(n.get("conclusion_seq") or 0))[-5:]
         r_tot = {"confirmed": 0, "refuted": 0, "inconclusive": 0}
@@ -591,6 +609,29 @@ def build_bundle(store, st: dict, cfg: dict, g: dict, task: dict, *, inputs: lis
         for e in task["last_errors"]:
             lines.append(f"- {e}")
         lines.append("Fix precisely these; do not regress anything that already passed.")
+    # The notebook: corrections recorded on this subject travel with every
+    # card, so a reviewer judges the current text knowing what changed when.
+    subj_lane = str(subj.get("lane") or "") or None
+    subj_node = str(subj.get("node") or "") or None
+    if subj_node and not subj_lane:
+        subj_lane = str((egraph.by_id(g).get(subj_node) or {}).get("lane") or "") or None
+    lane_row = next((l for l in st.get("lanes", []) if str(l.get("id")) == subj_lane), None) \
+        if subj_lane else None
+    if subj_lane or subj_node:
+        history = eamend.history_lines(store, lane=subj_lane, node=subj_node,
+                                       idea=str((lane_row or {}).get("idea") or "") or None)
+        if history:
+            lines.append("")
+            lines.append("## Notebook corrections on this subject")
+            lines.extend(history)
+    # Project-level facts (floors, margins, required cells, the ablation
+    # allowance) are the ruler every later node is judged with: a reviewer
+    # sees who changed them, when and why, on every card.
+    project_history = project_facts_lines(store)
+    if project_history:
+        lines.append("")
+        lines.append("## Project facts corrected (floors / margins / required / ablation allowance)")
+        lines.extend(project_history)
     lessons: list[dict] = []
     if lesson_parents is not None:
         st_eff = st
@@ -609,7 +650,7 @@ def build_bundle(store, st: dict, cfg: dict, g: dict, task: dict, *, inputs: lis
         omitted = len(matched_all) + len(global_all) - len(lessons)
         if lessons:
             lines.append("")
-            # R7 audit: the old heading promised "repeating a recorded failure
+            # The old heading promised "repeating a recorded failure
             # is a rejection" - no validator enforces that beyond exact
             # kernel/contract repeats. Say what is true, and disclose the cap.
             lines.append("## Lessons routed to this task (lineage/tag matches first; exact rejected "
@@ -623,18 +664,18 @@ def build_bundle(store, st: dict, cfg: dict, g: dict, task: dict, *, inputs: lis
         consumed = {}
         task["consumed_context"] = consumed
     consumed["lesson_ids"] = [str(l.get("id")) for l in lessons if str(l.get("id") or "")]
-    # v11.1 T2: a block whose rendered text is BYTE-IDENTICAL to the same-titled
+    # A block whose rendered text is BYTE-IDENTICAL to the same-titled
     # block in this subject's PREVIOUS bundle collapses to a one-line reference.
-    # Safety rules (binding, from the amnesia audit): only stable-knowledge
+    # Safety rules (binding): only stable-knowledge
     # blocks may collapse (whitelist); execution-critical blocks are always
     # full; the referenced full text stays on disk in the previous bundle; the
     # header rule below tells a cold-started agent to READ anything it is not
     # certain of. Worst case (agent trusts nothing) = today's behavior.
     prev_blocks, prev_rel = _previous_bundle_blocks(store, st, task)
-    # Per-stage title variants ("Phenomenon ledger (x)" vs "(y)") used to defeat
-    # the title-keyed lookup even for byte-identical bodies; a normalized key
-    # (parenthetical stripped) recovers those matches - body equality still
-    # decides, so distinct content can never cross-collapse.
+    # Per-stage title variants ("Phenomenon ledger (x)" vs "(y)") would defeat
+    # a title-keyed lookup even for byte-identical bodies; the normalized key
+    # (parenthetical stripped) matches them - body equality still decides, so
+    # distinct content can never cross-collapse.
     prev_by_norm = {_norm_block_title(t): (t, b) for t, b in prev_blocks.items()}
     referenced_any = False
     for title, block in (extra_blocks or []):
@@ -681,7 +722,7 @@ def build_bundle(store, st: dict, cfg: dict, g: dict, task: dict, *, inputs: lis
 # Stable-knowledge blocks that may collapse to references when byte-identical
 # to the previous same-subject bundle. Execution-critical material (playbook,
 # wiring, errors, retry directions, gate notes) is deliberately ABSENT: it is
-# small and load-bearing, and its repetition is the v10.2 knowledge loop
+# small and load-bearing, and its repetition is the knowledge loop
 # working as designed.
 _REFERENCEABLE_BLOCKS = re.compile(
     # 'lesson' is deliberately kept although lessons are currently rendered
@@ -710,7 +751,7 @@ def _chain_source(prev_body: str, digest: str) -> tuple[str, str] | None:
     if not prev_body.startswith("- unchanged since") or f"sha {digest}" not in prev_body:
         return None
     # Greedy title match anchored to the line's fixed tail, so an apostrophe
-    # INSIDE a block title cannot truncate the parsed heading (final audit L24).
+    # INSIDE a block title cannot truncate the parsed heading.
     m = re.search(r"full text at `([^`]+)` under the heading '## (.*)'\. If you are not CERTAIN",
                   prev_body)
     return (m.group(1), m.group(2)) if m else None

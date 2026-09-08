@@ -43,7 +43,7 @@ Write `.evo/nodes/{{NODE}}/NODE_SPEC.json`:
 - Omit `workflow` when a trained baseline already exists (normal case). If the
   baseline must first be produced, declare canonical `workflow.stages` with the
   same purpose/control/budget/result contract used by later nodes. Top-level
-  `train` is not a v9.2 schema field.
+  `train` is not a schema field.
 - The baseline obeys the same user-approved training-seed protocol as ordinary
   candidates. `record_only` records the existing run's one seed and never
   launches repeats. `preplanned` exposes every approved seed/run, either from

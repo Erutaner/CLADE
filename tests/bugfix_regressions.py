@@ -19,7 +19,7 @@ def comparator_boundary_checks(drive: M.D) -> None:
         "name": "root-comparator", "intent": "wildcat", "min_level": 4,
         "parents": [], "search_origin": "constructive"}])
     root = drive.lane_by_name("root-comparator")
-    rel = ".evo/v91_checks/ROOT_PROGRAMS.json"
+    rel = ".evo/scratch_checks/ROOT_PROGRAMS.json"
     M.w_sketches(drive, {"outputs": [rel]}, root["id"], M.L4_DIMS, [])
     ctx = M.evalid.Ctx(drive.store(), drive.state(), M.project_cfg(drive),
                        drive.graph(), drive.reg())
@@ -38,7 +38,7 @@ def comparator_boundary_checks(drive: M.D) -> None:
     tournament = M.json.loads(
         (drive.repo / r1["tournament_path"]).read_text(encoding="utf-8"))
     tournament["audits"][0]["effect"]["frontier_refs"] = ["N002"]
-    tournament_rel = ".evo/v91_checks/TOURNAMENT_NREF.json"
+    tournament_rel = ".evo/scratch_checks/TOURNAMENT_NREF.json"
     M.wj(drive.repo, tournament_rel, tournament)
     tournament_md = r1["tournament_path"].replace(".json", ".md")
     errs = M.evalid.v_tournament(ctx, {

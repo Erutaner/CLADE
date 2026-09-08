@@ -56,8 +56,11 @@ mechanism failed - not some drive-by refactor.
      that resembles novelty prose. Diagnostics without a kernel use a
      substantive diagnostic-to-file row instead.
    - `## Deviations` - every place the implementation differs from the idea doc,
-     and why ("none" is a valid entry only if literally true). The fidelity
-     auditor reads this section.
+     and why ("none" is a valid entry only if literally true), including every
+     load-bearing ADDITION beyond the frozen program - a training-loop change,
+     a kernel, a stabilizer that could move the number on its own is never a
+     silent "tweak"; the fidelity auditor reads this section and the
+     conclusion attributes the gain against it.
    - `## Artifact wiring` - REQUIRED whenever the spec declares stage
      `consumes` or `produces`: one row per declared input and output binding
      the contract to the exact code, checked literally against the files:

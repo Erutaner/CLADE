@@ -69,14 +69,14 @@ def rpath(repo: Path, stored: str) -> Path:
 
 
 def norm_uri(uri: str) -> str:
-    """Canonical form for landing/artifact identity COMPARISONS (R7 audit).
+    """Canonical form for landing/artifact identity COMPARISONS.
 
     Exclusivity checks (landing lease, registry duplicate, pending-producer
-    reservation) used to compare raw strings, so `a/./b`, `a//b` and `a\\b`
-    all bypassed a guard while the filesystem resolved them to the same file
-    as `a/b`. Local scheme-less paths are normalized to a canonical POSIX
+    reservation) must never compare raw strings: `a/./b`, `a//b` and `a\\b`
+    would all bypass a guard while the filesystem resolves them to the same
+    file as `a/b`. Local scheme-less paths are normalized to a canonical POSIX
     spelling; scheme URIs (s3://...) keep backend semantics and are returned
-    verbatim. Case handling follows the HOST (R10-002): on a
+    verbatim. Case handling follows the HOST: on a
     case-insensitive filesystem `out/Result.JSON` and `out/result.json` are
     one physical landing, so comparisons fold case exactly where the host
     does; on case-sensitive hosts case is preserved (collapsing there would
@@ -99,7 +99,7 @@ _CASE_INSENSITIVE_HOST: bool | None = None
 
 def case_insensitive_host() -> bool:
     """Does this host's filesystem treat two case-variant spellings as ONE
-    object? R10 self-audit: the OS family is not the filesystem - a
+    object? The OS family is not the filesystem - a
     case-insensitive volume exists on posix hosts too (and the identity
     guards must match what the filesystem actually does). Probed once per
     process with a real file; Windows short-circuits (its supported volumes
@@ -122,7 +122,7 @@ def case_insensitive_host() -> bool:
 def paths_overlap(a: str, b: str) -> bool:
     """Do two landing identities denote overlapping filesystem objects?
 
-    R10-002: claim comparisons used exact string equality, so a directory
+    claim comparisons used exact string equality, so a directory
     product `out/shared` and a sibling's file `out/shared/model.pt` were
     judged disjoint while prepare-time archiving moved the whole directory -
     the overlap relation is equality OR ancestry for local paths. Scheme
@@ -147,10 +147,10 @@ def write_text(path: Path, text: str) -> None:
 
 
 def write_text_atomic(path: Path, text: str) -> None:
-    """R9 (external audit r6): temp + fsync + os.replace. In-place rewrites of
-    engine-owned journals (ghost quarantine, doctor torn-tail repair) used
-    plain write_text - a crash inside the truncate/write window destroyed the
-    very rows the rewrite meant to KEEP. Same Windows retry as
+    """temp + fsync + os.replace. In-place rewrites of
+    engine-owned journals (ghost quarantine, doctor torn-tail repair) must
+    never use a plain write_text - a crash inside the truncate/write window
+    would destroy the very rows the rewrite meant to KEEP. Same Windows retry as
     write_json_atomic."""
     path.parent.mkdir(parents=True, exist_ok=True)
     fd, tmp = tempfile.mkstemp(dir=str(path.parent), suffix=".tmp")
@@ -298,7 +298,7 @@ def read_jsonl(path: Path, *, lenient: bool = False) -> list[dict]:
 
 
 def scan_jsonl(path: Path) -> tuple[list[dict], list[tuple[int, str]]]:
-    """R8: tolerant scanner for recovery surfaces - parsed rows plus
+    """Tolerant scanner for recovery surfaces - parsed rows plus
     (line_number, raw_line) for every unparseable line, so doctor can keep
     working through the very damage it is asked to diagnose."""
     if not path.exists():
@@ -321,11 +321,11 @@ def fmt_id(prefix: str, n: int, width: int) -> str:
 
 
 ID_WIDTHS = {"N": 3, "L": 3, "I": 3, "T": 4, "G": 3, "R": 3, "RUN": 3, "E": 3, "M": 3, "LS": 3,
-             "AR": 3, "ER": 3, "OB": 3, "H": 3, "REC": 3}
+             "AR": 3, "ER": 3, "OB": 3, "H": 3, "REC": 3, "AM": 3, "IC": 3, "PC": 3}
 
 # Derived from ID_WIDTHS (longest prefix first) so the parseable-id set can
-# never drift from the allocatable-id set again (v9.2 forgot OB here and the
-# doctor counter audit silently skipped the whole phenomenon ledger).
+# never drift from the allocatable-id set (a prefix missing here would make
+# the doctor counter audit silently skip that whole ledger).
 _ID_RE = re.compile(
     "(" + "|".join(sorted(ID_WIDTHS, key=len, reverse=True)) + r")(\d+)")
 
@@ -354,12 +354,12 @@ def md_sections(text: str) -> dict[str, str]:
     """Map heading title (lowercased, '#' stripped) -> body text.
 
     Fence-aware: a '#' line inside a ``` / ~~~ code block is content, never a
-    heading (v9.2 was fence-blind, so a Python comment inside a required
-    section truncated the section and corrupted ~38 validators).
-    LEVEL-aware (R6 blind-operator audit): a child heading (###) inside a
+    heading (a fence-blind parser would let a Python comment inside a
+    required section truncate the section for every validator).
+    LEVEL-aware: a child heading (###) inside a
     parent section (##) is part of the parent's body - the parent closes only
-    at the next heading of the SAME or HIGHER level. The old flat parser
-    closed on ANY heading, so a normally-nested `### A1` made its populated
+    at the next heading of the SAME or HIGHER level. A flat parser closing
+    on ANY heading would let a normally-nested `### A1` make its populated
     parent read as empty and fail MD_SECTION_THIN. Every heading still gets
     its own entry (child titles stay directly findable), and entries keep
     document order (find_section's fallback depends on it)."""
@@ -401,8 +401,8 @@ def md_sections(text: str) -> dict[str, str]:
 
 def find_section(sections: dict[str, str], name: str) -> str | None:
     """Exact key, else the first heading (document order) containing every word
-    of ``name`` as a whole word. v9.2 used substring containment, which let a
-    required section bind to an unrelated heading ('setup' -> 'presetup')."""
+    of ``name`` as a whole word - never substring containment, which would let
+    a required section bind to an unrelated heading ('setup' -> 'presetup')."""
     key = name.strip().lower()
     if key in sections:
         return sections[key]
@@ -414,3 +414,13 @@ def find_section(sections: dict[str, str], name: str) -> str | None:
         if all(w in heading_words for w in words):
             return v
     return None
+
+
+def clip_words(text: str, limit: int = 240) -> str:
+    """Shorten a note for an event row without cutting a word in half; the
+    full text lives in the artifact the event points at."""
+    text = str(text or "")
+    if len(text) <= limit:
+        return text
+    head = text[:limit].rsplit(" ", 1)[0].rstrip(" ,;:-")
+    return (head or text[:limit]) + " ..."

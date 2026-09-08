@@ -74,6 +74,13 @@ def soak_nx(d, typ=None, kind="task"):
             r = d.submit(out["task"])
             m.ok(r["kind"] == "accepted", f"kernel fidelity audit must accept: {r}")
             continue
+        if typ != "design_ablation" and k == "task" and t == "design_ablation":
+            # research mode taxes every program-level win with an engine-opened
+            # ablation; the soak user declines it (recorded on the parent) and
+            # the loop goes on - the doors drive pays that lifecycle end to end
+            m.ok(m.decline_engine_ablations(d) >= 1,
+                 "a design_ablation appeared for a lane the engine did not open")
+            continue
         if typ == "evaluate" and k == "task" and t == "eval_launch":
             out["_deferred_evaluate"] = True
             return out
@@ -133,9 +140,8 @@ def preload_mech_ledger(d):
 # ---------------------------------------------------------------- round legs
 def soak_exploit_round(d, rid, i, parent, score):
     name = f"soak-e{i:03d}"
-    # v11.4 fixture sync: a 1-lane round with a focus tag now exceeds the
-    # 50% focus share cap (no single-candidate exception); the soak's rounds
-    # never needed the tag.
+    # A 1-lane round with a focus tag exceeds the 50% focus share cap (no
+    # single-candidate exception); the soak's rounds never needed the tag.
     m.open_round(d, rid, [m.exploit_lane(name, parent)])
     lid, mech = m.drive_lane_to_plan(d, name, dims=m.L2_DIMS)
     m.drive_mature_redteam(d, lid, mech_ids=mech, score=score)
@@ -209,8 +215,8 @@ def main():
 
     def cfg_override(dd, out, **kw):
         kw.setdefault("rounds_max", ROUNDS + 10)
-        # v11.4 fixture sync: the focus share cap has no single-candidate
-        # exception anymore - a serial single-lane soak can never legally
+        # The focus share cap has no single-candidate exception - a serial
+        # single-lane soak can never legally
         # serve a starved focus direction, so push the neglect window past
         # the whole soak horizon (same treatment as the doors drive).
         kw.setdefault("focus_neglect", ROUNDS + 10)

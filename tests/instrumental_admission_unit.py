@@ -1,12 +1,11 @@
 """Unit-speed coverage for instrumental admission and its knowledge ledger.
 
-    python tests/v102_instrumental_admission_unit.py
+    python tests/instrumental_admission_unit.py
 
-The v10.2a test audit found nearly every validator-level admission rule
-(INJECT_*, the revisable-rewind hint, parent legality, resolution retraction)
-lived ONLY inside the 12-minute mock drive - a regression cost 12 minutes to
-observe. These are direct validator calls on synthetic state; the drive keeps
-only what genuinely needs a live engine.
+The validator-level admission rules (INJECT_*, the revisable-rewind hint,
+parent legality, resolution retraction) are pinned here as direct validator
+calls on synthetic state, so a regression costs seconds to observe; the mock
+drive keeps only what genuinely needs a live engine.
 """
 from __future__ import annotations
 
@@ -206,7 +205,7 @@ def resolution_retraction():
         check(store.error_resolutions() == [],
               "recovery voids the dispositions whose evidence it invalidated")
         check(pending() == [er1],
-              "the knowledge duty REOPENS - the surplus check used to forbid "
+              "the knowledge duty REOPENS - the surplus check must not forbid "
               "re-dispositioning forever")
         store.add_error_resolution({"resolves": er1, "node": "N010",
                                     "disposition": "fixed", "surface": "artifact_io",
@@ -226,9 +225,14 @@ def resolution_retraction():
 
 
 def injectable_tables():
-    check(set(econfig.INJECTABLE_PURPOSES) ==
-          set(econfig.INSTRUMENTAL_PURPOSES) - {"targeted_ablation"},
-          "injectable = instrumental minus targeted_ablation, proven, not assumed")
+    check(set(econfig.INJECTABLE_PURPOSES) == set(econfig.INSTRUMENTAL_PURPOSES),
+          "every instrumental purpose has a mid-round door - ablation included, so a causal "
+          "question can be settled the moment a descendant depends on it")
+    defaults = econfig.merged_default().get("budgets") or {}
+    check(all(econfig.INJECTABLE_CAP_KEYS.get(p) in defaults for p in ("diagnostic_probe", "maintenance"))
+          and "targeted_ablation" not in econfig.INJECTABLE_CAP_KEYS,
+          "probe and maintenance doors have a per-round cap key in the default budgets; the inheritance "
+          "tax has none - every program-level win owes one, bounded by the allowance")
     check(not eflow.check_tables(), "check_tables holds with the injectable tables")
 
 
@@ -238,7 +242,7 @@ def main() -> None:
     gain_chain()
     resolution_retraction()
     injectable_tables()
-    done("V10.2 INSTRUMENTAL ADMISSION UNIT")
+    done("INSTRUMENTAL ADMISSION UNIT")
 
 
 if __name__ == "__main__":

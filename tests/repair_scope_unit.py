@@ -30,7 +30,7 @@ def check(condition: bool, message: str) -> None:
 
 
 def fresh_project() -> M.D:
-    repo = Path(__file__).resolve().parent / "out" / "v92_repair_scope_unit"
+    repo = Path(__file__).resolve().parent / "out" / "repair_scope_unit"
     if repo.exists():
         M.rmtree(repo)
     M.make_repo(repo, with_git=True)
@@ -113,7 +113,7 @@ The workflow-path mutation is committed and the fixture deliberately verifies th
     node["stage_cursor"] = 1
     node["replicas_completed"] = [{"seed": None, "run": run["id"]}]
     node["status"] = "evaluating"
-    # R8: registration now verifies a locally-checkable product exists (a
+    # Registration now verifies a locally-checkable product exists (a
     # ghost registered 'available' handed consumers a name with no bytes) -
     # write the checkpoint like the real training stage would have.
     (workdir / "model.bin").write_bytes(b"fixture-checkpoint-v1")
@@ -290,7 +290,7 @@ def approval_scope_matches_replay_scope() -> None:
             return gate
 
         def get_run(self, state, run_id):
-            # R10-016 stub sync: the gate summary inspects the source RUN to
+            # the gate summary inspects the source RUN to
             # disclose the repeat lane's third exit when applicable
             return next((r for r in state.get("runs", []) if r.get("id") == run_id), None)
 
@@ -330,7 +330,7 @@ def planned_evaluator_recovery_preserves_workflow() -> None:
 
 
 def copy_mode_runtime_outputs_are_not_code() -> None:
-    repo = Path(__file__).resolve().parent / "out" / "v92_repair_scope_unit_copy"
+    repo = Path(__file__).resolve().parent / "out" / "repair_scope_unit_copy"
     if repo.exists():
         M.rmtree(repo)
     M.make_repo(repo, with_git=False)
@@ -386,7 +386,7 @@ def main() -> None:
     approval_scope_matches_replay_scope()
     planned_evaluator_recovery_preserves_workflow()
     copy_mode_runtime_outputs_are_not_code()
-    print(f"V9.2 REPAIR SCOPE UNIT GREEN: {CHECKS} checks passed")
+    print(f"REPAIR SCOPE UNIT GREEN: {CHECKS} checks passed")
 
 
 if __name__ == "__main__":

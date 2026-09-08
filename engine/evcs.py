@@ -31,7 +31,7 @@ class GitCheckError(RuntimeError):
 # --------------------------------------------------------------------------- invocation-scoped memo
 # Within ONE engine invocation (one CLI command / one Engine method call) the
 # engine provably never mutates a worktree - every transition write lands under
-# .evo (v10.2b audit, re-verified: evcs contains only read-only git commands and
+# .evo (evcs contains only read-only git commands and
 # no engine code writes workarea bytes). Repeating an identical probe inside the
 # same invocation therefore returns the same answer by construction; across
 # invocations the cache MUST die, because out-of-band edits between commands are
@@ -55,9 +55,9 @@ def _cached(kind: str, workdir: Path, compute):
 class GitWorkdirMissingError(GitCheckError):
     """The audited workdir directory does not exist at all.
 
-    Callers must treat this as its own typed condition: v9.2 collapsed it into
-    a generic git failure, so a worktree in its legal remove/re-add window (or
-    removed by an authorized revision) nondeterministically killed unrelated
+    Callers must treat this as its own typed condition, never a generic git
+    failure: a worktree in its legal remove/re-add window (or removed by an
+    authorized revision) must not nondeterministically kill unrelated
     full-graph seal sweeps.
     """
 
@@ -80,11 +80,11 @@ def ignored_paths(workdir: Path, rels: list[str]) -> set[str]:
     """The subset of ``rels`` that gitignore rules currently classify as
     ignored (pattern-level: works for deleted paths too).
 
-    R8/N003 audit: manifest construction hashes on-disk gitignored files
+    Manifest construction hashes on-disk gitignored files
     (they are in neither the tracked set nor the non-ignored untracked set),
     yet a per-launch runtime bookkeeping file is EXPECTED to change on every
-    stage - freezing it wedged the node on a mutated-closure report with no
-    repair verb. The audit side needs this classification to demote exactly
+    stage - freezing it would wedge the node on a mutated-closure report with
+    no repair verb. The audit side needs this classification to demote exactly
     those rows to advisory. rc 0 (some ignored) and rc 1 (none ignored) are
     both substantive answers; anything else raises via the integrity path."""
     wanted = sorted({str(r) for r in rels if str(r)})
@@ -171,7 +171,7 @@ def status_facts(workdir: Path) -> tuple[str, bool, list[str]]:
     """(head_commit, tracked_tree_clean, untracked_files) in ONE subprocess.
 
     ``git status --porcelain=v2 --branch`` answers, from documented plumbing
-    output, everything the audit used to spawn three processes for: the
+    output, everything the audit needs without three processes: the
     ``# branch.oid`` header equals ``rev-parse HEAD``; any ``1 ``/``2 ``/``u ``
     entry means tracked working bytes or the index differ from HEAD (the exact
     semantics of the two ``diff --quiet`` probes, index bits honored the same
@@ -205,9 +205,9 @@ def integrity_facts(workdir: Path) -> tuple[Path | None, str | None, bool]:
     """Strict (worktree_root, head_commit, tracked_tree_clean) in <=2 subprocesses.
 
     The root comes from one (memoized) ``rev-parse --show-toplevel``; commit and
-    cleanliness come from the single ``status --porcelain=v2`` probe. The audit
-    used to pay 3 spawns per node per sweep; on Windows the spawn itself is the
-    dominant cost (~25 ms each).
+    cleanliness come from the single ``status --porcelain=v2`` probe - one
+    spawn per node per sweep instead of three; on Windows the spawn itself is
+    the dominant cost (~25 ms each).
     """
     root = _cached("toplevel", workdir, lambda: worktree_root(workdir, strict=True))
     commit, clean, _untracked = status_facts(workdir)
@@ -225,11 +225,11 @@ def tracked_file_flags(workdir: Path) -> dict[str, str]:
 
     One spawn yields two facts the closure audit needs: the TRACKED SET (a
     manifest row absent from it is gitignored - SOURCE-suffixed rows keep
-    their byte hash; non-source ignored rows are enforced as advisory since
-    the R8/N003 fix, see implementation_manifest_errors), and the per-file
+    their byte hash; non-source ignored rows are enforced as advisory, see
+    implementation_manifest_errors), and the per-file
     index bits - a lowercase letter (assume-unchanged) or ``S``
     (skip-worktree) makes ``git diff``/``status`` blind to real edits of that
-    file, which is exactly the spoof the v10.2b audit demonstrated. Callers
+    file, which is exactly the spoof this guards against. Callers
     fall back to full byte hashing when any suspicious letter appears.
     """
     def compute():
@@ -270,9 +270,9 @@ def branch_exists(repo: Path, name: str) -> bool:
 def is_ancestor(repo: Path, ancestor_ref: str, descendant_ref: str) -> bool:
     """rc=1 is the substantive 'not an ancestor'; any other failure raises.
 
-    v9.2 collapsed bad refs, timeouts and a missing git binary into "not an
-    ancestor", turning operational failures into spurious ancestry-violation
-    verdicts.
+    Bad refs, timeouts and a missing git binary are never collapsed into "not
+    an ancestor" - that would turn operational failures into spurious
+    ancestry-violation verdicts.
     """
     rc, _ = _git_integrity(repo, "merge-base", "--is-ancestor",
                            ancestor_ref, descendant_ref, valid_rcs=(0, 1))

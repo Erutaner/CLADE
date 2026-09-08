@@ -67,14 +67,20 @@ wrong thing for months.
    Never collapse the contract to an unapproved weighted sum. A node succeeds
    by its pre-registered claim scope: generalist, specialist, or efficiency;
    the engine reports per-cell wins, losses, uncertainty and guardrail status.
-   `cell.required=true` means every model claim must include that target and it
-   may not regress; `group.required=true` means that group must remain
-   non-inferior. `decision.min_target_groups_improved` separately controls how
-   many groups must actually improve. A `specialist` verdict is a valid scoped
-   result but is explicitly not an overall-contract pass. Under
-   `single_checkpoint`, regression on an out-of-scope target is still a
-   `tradeoff`; under `task_adapted`/`portfolio`, the incumbent checkpoint or
-   route may remain active for tasks outside the specialist scope.
+   `required` is about DELIVERY, not parenthood: `cell.required=true` means
+   every claim must include that target and a loss beyond its margin there
+   makes the node undeliverable as the project's model - it never stops the
+   node from seeding further research, because a real win elsewhere is a
+   measured fact. So leave `required` empty unless the user truly cannot ship a
+   model that slipped on that cell; say this out loud, with an example ("a node
+   that gains ten points on three datasets and loses one point on this one
+   would be marked undeliverable"). `group.required=true` means that group must
+   remain non-inferior for delivery. `decision.min_target_groups_improved`
+   controls how many groups must improve for a win. A `specialist` verdict is a
+   valid scoped result but not an overall-contract pass. Under
+   `single_checkpoint`, a regression on an out-of-scope target also makes the
+   node undeliverable (one checkpoint serves every cell); under
+   `task_adapted`/`portfolio` the incumbent may stay active there.
    Relative node progress and absolute project attainment are reported
    separately: `improved` does not secretly mean “SOTA reached”.
 
@@ -91,40 +97,35 @@ wrong thing for months.
       `min_target_groups_improved=1`, and no regression on required targets or
       global guardrails. Allow specialist claims, but label them `specialist`,
       never “overall SOTA”. Record this default as U# rather than hiding it.
-   4. Derive margins LITERATURE-FIRST: documented benchmark resolution, or the
-      typical increment between successive published results on this
-      benchmark (what step size the field itself treats as an advance). A
-      user-relevant effect size overrides only when the user states one; when
-      the user is UNSURE, propose the literature-derived value, record it as a
-      U# assumption, and say plainly at the sign-off that the number is
-      provisional - the bootstrap sign-off FREEZES it for the project's life.
-      There is no post-freeze edit channel: if the later SOTA scan surfaces
-      variance/margin norms that contradict it, report that in the scan
-      summary for the USER; adopting it is a deliberate reconfigure/restart,
-      never a silent move of a decision line. (In preplanned multi-seed
-      projects the engine's observed-noise calibration overlays the frozen
-      floor automatically once >= 2 seed sets exist - the one designed
-      post-freeze correction.) All of this is PER CELL: each dataset/task/metric cell
-      derives its own margin (and noise floor) from ITS OWN benchmark's
-      literature - one project may mix a well-studied public benchmark with a
-      private dataset that has no literature at all, and each cell resolves
-      independently (literature / user-stated / provisional zero). If a
-      field simply has no margin norms, a zero margin IS that field's own
-      convention (any positive delta counts) - record the zero as DELIBERATE
-      in its U# so the sign-off approves it knowingly. If no literature
-      source exists either, use a provisional zero margin the same way. Do not request repeated training merely to obtain
-      mean/std; optional uncertainty must come from a fixed evaluation artifact
-      (analytic or prediction-bootstrap interval) and add zero training runs.
-      ALSO record the field's own measurement noise per decision cell into
-      `evaluation_contract.noise_floors` `{cell_id: width}`: published
-      run-to-run/seed spread on this dataset+metric, or typical leaderboard
-      neighbor gaps. Ask the user what the field's convention is (one run or
-      many?). With a floor recorded, a bare-scalar result is compared as
-      value+-floor (hiding an error bar stops paying), wins inside the noise
-      are labeled provisional, and deficits inside it still count as
-      noninferior. No source -> leave 0, record the gap as a U# assumption,
-      and disclose it at the sign-off (frozen thereafter; preplanned
-      projects self-calibrate the floor from measured seed spread).
+   4. Margins and noise floors are WORLD FACTS, not bets: what step the field
+      treats as an advance, and how much the same code moves between runs.
+      The user is the authority; the literature is the evidence you bring so
+      the question can be answered. Put ONE table in front of the user, per
+      decision cell: proposed `min_improvement`, proposed `noninferiority_margin`,
+      proposed `noise_floors` width, and the source of each (a paper's reported
+      seed spread, the typical gap between neighbouring leaderboard entries,
+      the benchmark's documented resolution). The user confirms, changes, or
+      says "our field has no such number" - then the value is 0, and 0 is that
+      field's own convention (any positive delta counts). Record where each
+      number came from in `evaluation_contract.noise_floor_sources` and
+      `evaluation_contract.margin_sources` as `user` | `literature` |
+      `provisional` (a floor without its source is refused). In the same
+      table ask ONE more number, `evaluation_contract.noise_floor_multiple`:
+      how many floor widths a real win must clear (default 1 = one width; a
+      field with wide floors or tightly packed leaders may say 2 or 3). It is
+      the user's bar, not a world fact; it needs no source and stays amendable;
+      a node keeps the multiple it was measured with. A private dataset
+      with no literature resolves to a provisional zero the same way; never
+      request repeated training merely to obtain mean/std, and never invent a
+      number the project does not have. These facts stay correctable after
+      the sign-off: a later scan or measurement that contradicts one is an
+      `evo amend` on `.evo/config.json` with the reason, forward-only - every
+      already-settled node keeps the floor it was judged with, and in
+      preplanned multi-seed projects the engine's own observed-noise
+      calibration overlays the recorded floor once >= 2 seed sets exist. With
+      a floor recorded, a bare-scalar result is compared as value+-floor
+      (hiding an error bar stops paying), wins inside the noise are labeled
+      provisional, and deficits inside it still count as noninferior.
    5. Never invent an absolute SOTA threshold. If the user has not supplied or
       approved a dated source, set `goal_threshold:null`, explain progress-only
       in `goal_threshold_source`, set the goal-group minimum accordingly, and
@@ -160,13 +161,20 @@ wrong thing for months.
        or bad node. Record process/domain evidence, claim relevance, field norm,
        cost, the user's decision, and a concrete revisit trigger in
        `evidence_policy.training_replication`.
-     - **Ablation:** ask whether the engine may later propose a manually
-       approved, one-run causal diagnostic when one component question would
-       change the next DAG choice and cheap logs/eval cannot answer it. Map to
-       `ablation.mode: off|targeted`; `targeted` has
-       `max_costly_runs_per_node:1`. It does not schedule an ablation now or
-       after every gain, never creates a sweep, and never crosses with seed
-       repeats.
+     - **Ablation (the inheritance tax):** when a node wins at program level
+       with its mechanism never instrumented, the engine (research mode only) opens ONE targeted
+       ablation on that node, while the checkpoints are warm, to settle whether
+       the new part caused the gain. Ask how much of the winning node's own
+       cost that settlement may spend and map it to
+       `evidence_policy.ablation.budget_multiple` (a number >= 0; whenever it
+       is > 0 at least one retrain is inside the allowance). A design inside
+       the allowance resolves under the normal autonomy policy; a larger one
+       waits for the user. Recommend 2 in research mode; 0 is legal but say
+       plainly what it means: mechanisms stay deferred for good and can never be
+       cited as a planning premise. Engineering mode that only chases numbers
+       usually wants 0. The engine never sweeps and never crosses the ablation
+       with the project's seed protocol; the number of runs is the design's
+       own call, one by default.
      - **Cheap probes/scaling:** ask how many eval-only interventions a node may
        afford and whether scaling is `off|reuse_only|budgeted|full`.
        `budgeted|full` is still an explicit after-signal descendant proposal,
@@ -176,17 +184,22 @@ wrong thing for months.
        afford the larger-scale training runs if a result looks promising?" -
        and let the USER's answers pick the mode; scaling is a per-field choice,
        not a default (many domains never need it).
-   - **Q2 - budget (facts):** Confirm the discovery draft: "Across the whole
-     evolution, what hard totals may we spend (for example GPU-hours, training
-     tokens, API tokens or wall-clock minutes)? How many rounds, and how many
-     stage jobs may run concurrently?" -> `resource_contract.limits` + `basis`
-     + `on_exhaustion:"ask"`, `budgets.rounds_max`, and
-     `infra.max_concurrent_stage_jobs`. Every stage/eval must cap at least one
-     tracked unit. The scheduler reserves and cumulatively charges these totals;
-     exhaustion creates a non-automatic user gate. The top-level config key
-     `stage_budget_tolerance` (>= 1.0, default 1.0 = strict) exists as a
-     validity band on declared stage/eval caps; it sits outside the bootstrap
-     contract digest and changes affect future ingestions only. The in-engine ledger covers
+   - **Q2 - budget (facts):** First confirm WHAT this project spends: the
+     scan's `resource_kinds` is a proposal read off the code ("trains on
+     accelerators -> gpu_hours / wall-clock", "calls an API -> api_tokens"),
+     and a cloned repository may carry costs the user will never pay or miss
+     ones the user's setup adds - ask, and keep only the kinds the user
+     confirms. Then, in exactly those units: "Across the whole evolution, what
+     hard totals may we spend? How many rounds?" -> `resource_contract.limits`
+     + `basis` + `on_exhaustion:"ask"` and `budgets.rounds_max`. Every
+     stage/eval must cap at least one tracked unit. The scheduler reserves and
+     cumulatively charges these totals; exhaustion creates a non-automatic
+     user gate. Per-stage caps are notebook numbers a node plans for itself
+     and may correct on record (`evo amend`); the project totals here are the
+     contract. Do NOT ask here how many devices we may hold at once or what
+     one node may spend at most: those depend on the machines, which the
+     infrastructure scan has not seen yet - the infrastructure interview asks
+     them once it has. The in-engine ledger covers
      scheduler-controlled workflow stages and evaluations. The bootstrap
      integrated canary, smoke checks and the operating agent's own tool/provider charges are
      not independently meterable here: keep them tiny and constrain them with
@@ -214,8 +227,9 @@ wrong thing for months.
      bootstrap contract gate is mandatory in every mode: automation cannot
      approve its own success/resource rules. Even `full_auto` pauses (waits
      for the user) on an infrastructure-canary blocker, the design AND
-     workflow gate of any instrumental node (targeted ablation, diagnostic
-     probe, maintenance), a resource-limit increase, and an escalation under
+     workflow gate of a diagnostic probe or a maintenance repair, a targeted
+     ablation ABOVE its pre-authorized allowance (inside it the ordinary
+     autonomy policy applies), a resource-limit increase, and an escalation under
      `on_stuck: "ask"`. A blocked PROVISION pass is different under
      `full_auto`: it STOPS the run (recorded as the terminal reason) rather
      than waiting - an unattended run cannot supply missing credentials/data,
@@ -246,7 +260,9 @@ wrong thing for months.
    re-evaluated under the new mode at the next `evo next`. Switching to
    `full_auto` releases only gate kinds that mode is allowed to decide; protected
    user decisions above remain open. Switching back makes future automatic
-   gates wait again. Never hand-edit `policy.autonomy`.
+   gates wait again. Never hand-edit `policy.autonomy`: `evo autonomy` validates
+   the result, records the switch in the event trail and in the amendment
+   ledger (`.evo/amendments.jsonl`), and re-evaluates open gates.
 6. Review remaining `budgets` and `infra` only if the user asks; defaults are sane.
 7. Do not touch other `.evo/` files.
 

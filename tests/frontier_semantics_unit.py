@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Frontier, selection and settlement semantics (DESIGN_V10 §11).
+"""Frontier, selection and settlement semantics.
 
 Regression cover for the field-report defects: a node holding every cell record
 was invisible because its verdict was judged against its own parent, a
@@ -11,8 +11,11 @@ satisfied by genuinely equal cost, and "not measured yet" was reported as
 from __future__ import annotations
 
 import copy
+import json
 import sys
+import tempfile
 from pathlib import Path
+from types import SimpleNamespace
 
 PKG = Path(__file__).resolve().parents[1]
 sys.path.insert(0, str(PKG / "engine"))
@@ -190,16 +193,20 @@ def required_group_reads_its_own_aggregation():
        f"the group was not lost: {assessment['required_group_losses']}")
     required_slip = {"lp_ap": 0.90, "lp_auc": 0.70, "nc_f1": 0.90, "nc_micro": 0.90}
     required = evalid.computed_assessment(ctx, child, required_slip)
-    ok(required["verdict"] == "regressed" and required["required_target_losses"] == ["C2"],
-       f"a cell the user marked required still vetoes: {required['verdict']}")
+    ok(required["verdict"] == "tradeoff" and required["required_target_losses"] == ["C2"]
+       and required["deliverable"] is False and required["real_win"] is True,
+       "a required cell that slipped is recorded as a loss and makes the node undeliverable, "
+       f"but the real wins keep it a tradeoff, not a regression: {required['verdict']}")
     guard_slip = {"lp_ap": 0.90, "lp_auc": 0.90, "nc_f1": 0.90, "nc_micro": 0.70}
     guarded = evalid.computed_assessment(ctx, child, guard_slip)
-    ok(guarded["verdict"] == "regressed" and guarded["guardrail_losses"] == ["C4"],
-       f"a guardrail loss still vetoes: {guarded['verdict']}")
+    ok(guarded["verdict"] == "tradeoff" and guarded["guardrail_losses"] == ["C4"]
+       and guarded["deliverable"] is False,
+       f"a guardrail loss is a recorded loss and an undeliverable node, not a regression: {guarded['verdict']}")
     everything = {"lp_ap": 0.70, "lp_auc": 0.70, "nc_f1": 0.70, "nc_micro": 0.90}
     lost = evalid.computed_assessment(ctx, child, everything)
-    ok(lost["verdict"] == "regressed" and lost["required_group_losses"] == ["G1", "G2"],
-       f"a group that really is lost under `all` still vetoes: {lost}")
+    ok(lost["verdict"] == "regressed" and lost["required_group_losses"] == ["G1", "G2"]
+       and lost["real_win"] is False,
+       f"a node that won nothing it claimed is regressed: {lost['verdict']}")
 
 
 def a_cycle_never_empties_the_frontier():
@@ -266,7 +273,7 @@ def archiving_does_not_delete_the_record():
     for n in pruned["nodes"]:
         if n["id"] == "N005":
             n["retire_reason"] = "pruned"
-    # R9 audit: retirement is a LINEAGE decision, never an observation one.
+    # Retirement is a LINEAGE decision, never an observation one.
     # Pruning removes inheritance rights (checked below) but the node's
     # MEASURED numbers stay on the performance frontier and the records -
     # deleting them let closing a dead lineage rewrite measured history and
@@ -426,8 +433,12 @@ def unsettled_is_not_refuted():
                "_effect_resources": copy.deepcopy(RESOURCES)}
     assessment = evalid.computed_assessment(ctx, child, {**metrics, "_idea": None})
     contract = evalid.effect_contract_assessment(ctx, child, metrics, _effect_meta())
-    ok(contract["status"] == "uncertain" and contract["evidence_gaps"],
-       f"an unpriced comparator leaves the contract undecided, with reasons: {contract}")
+    # Resource rows are sub-rows of the bet's record: an unpriced comparator
+    # leaves the RESOURCE block undecided (each gap named) and does not flip
+    # the target row's own status.
+    ok(contract["status"] == "met" and contract["resources"]["status"] == "uncertain"
+       and contract["evidence_gaps"],
+       f"an unpriced comparator leaves the resource block undecided, with reasons: {contract}")
     ok(all("comparator" in gap or "candidate" in gap for gap in contract["evidence_gaps"]),
        f"each gap names what is missing: {contract['evidence_gaps']}")
     ok(assessment["verdict"] == "improved",
@@ -436,31 +447,51 @@ def unsettled_is_not_refuted():
 
 def promotion_status_separates_the_two_failures():
     cases = [
-        ({"status": "uncertain"}, {"status": "not_applicable"}, "improved", "pending_evidence"),
-        ({"status": "failed"}, {"status": "not_applicable"}, "improved", "blocked"),
-        ({"status": "met"}, {"status": "refuted"}, "improved", "blocked"),
-        ({"status": "met"}, {"status": "unclear"}, "improved", "pending_evidence"),
-        ({"status": "met"}, {"status": "not_applicable"}, "regressed", "blocked"),
+        # Inheritance follows the measured win; the bet's own record (met /
+        # uncertain / failed) stays next to it as history and never vetoes.
+        ({"status": "uncertain"}, "improved", "met"),
+        ({"status": "failed"}, "improved", "met"),
+        ({"status": "invalid"}, "improved", "blocked"),
+        ({"status": "met"}, "regressed", "blocked"),
+        # cells rose but the claim's own vote did not pass: decided against as
+        # claimed (the post-hoc claim door re-scopes it), not an evidence gap
+        ({"status": "partial"}, "partial", "blocked"),
         # A paradigm root AT parity with nothing regressed is stronger evidence
         # than the inconclusive below it; it cannot be the harsher status.
-        ({"status": "uncertain"}, {"status": "not_applicable"}, "promising", "pending_evidence"),
-        ({"status": "uncertain"}, {"status": "not_applicable"}, "inconclusive", "pending_evidence"),
-        ({"status": "met"}, {"status": "not_applicable"}, "tradeoff", "blocked"),
-        ({"status": "met"}, {"status": "not_applicable"}, "improved", "met"),
-        ({"status": "not_applicable"}, {"status": "not_applicable"}, "regressed", "not_applicable"),
+        ({"status": "uncertain"}, "promising", "pending_evidence"),
+        ({"status": "uncertain"}, "inconclusive", "pending_evidence"),
+        ({"status": "met"}, "improved", "met"),
+        ({"status": "not_applicable"}, "regressed", "not_applicable"),
     ]
-    for effect, mechanism, verdict, expected in cases:
-        got = evalid.promotion_status(verdict, effect, mechanism,
-                                      research_kernel=False, fidelity_settled=True)
-        ok(got == expected,
-           f"effect={effect['status']} mechanism={mechanism['status']} verdict={verdict} "
-           f"-> {got}, expected {expected}")
-    ok(evalid.promotion_status("improved", {"status": "met"}, {"status": "not_applicable"},
-                               research_kernel=True, fidelity_settled=True) == "pending_evidence",
-       "a research kernel needs its own confirmed mechanism, but an absent one is not a refutation")
-    ok(evalid.promotion_status("improved", {"status": "met"}, {"status": "confirmed"},
-                               research_kernel=True, fidelity_settled=False) == "pending_evidence",
+    for effect, verdict, expected in cases:
+        got = evalid.promotion_status(verdict, effect, fidelity_settled=True)
+        ok(got == expected, f"effect={effect['status']} verdict={verdict} -> {got}, expected {expected}")
+    ok(evalid.promotion_status("improved", {"status": "met"}, fidelity_settled=False) == "pending_evidence",
        "an outstanding fidelity audit is an evidence gap, not a verdict against")
+    # Gains here, losses there: a tradeoff with a real win on the claimed cells
+    # inherits; a tradeoff that won nothing claimed does not.
+    ok(evalid.promotion_status("tradeoff", {"status": "failed"}, fidelity_settled=True, real_win=True) == "met",
+       "a tradeoff with a real claimed win is a legal parent even though the bet was lost")
+    ok(evalid.promotion_status("tradeoff", {"status": "met"}, fidelity_settled=True, real_win=False) == "blocked",
+       "a tradeoff without a claimed win is decided against")
+    # Mechanism knowledge is written next to the node and gates planning
+    # premises; it never decides parenthood - the function does not even read it.
+    import inspect
+    ok("mechanism" not in inspect.signature(evalid.promotion_status).parameters,
+       "parenthood is decided by the claim and the build alone")
+    # Noise-aware settlement of a frozen rule: the line is read with the
+    # observations' own scatter, in both directions.
+    rule = {"field": "gate", "aggregation": "mean", "comparison": ">=", "threshold": 1.0}
+    inside = evalid.settle_decision_rule(rule, [1.0004, 0.9996, 1.0002, 0.9999, 1.0001])
+    ok(inside["status"] == "unclear" and "scatter" in inside,
+       f"a mean within two standard errors of the line is unclear, not a coin-flip verdict: {inside}")
+    miss = evalid.settle_decision_rule(rule, [0.9944, 0.9947, 0.9942, 0.9945, 0.9947])
+    ok(miss["status"] == "refuted", f"a miss well outside the scatter is refuted: {miss}")
+    hit = evalid.settle_decision_rule(rule, [1.02, 1.03, 1.025, 1.04, 1.02])
+    ok(hit["status"] == "confirmed", f"a clear pass is confirmed: {hit}")
+    single = evalid.settle_decision_rule(rule, [0.9999])
+    ok(single["status"] == "refuted" and "scatter" not in single,
+       "one observation has no scatter to consult and settles on the bare comparison")
 
 
 def strategist_sees_what_the_engine_knows():
@@ -479,7 +510,7 @@ def strategist_sees_what_the_engine_knows():
 
 
 def contradictory_focus_policy_is_refused_at_config_time():
-    # v11.4 reconciliation: with neglect forcing ON the pair is always
+    # With neglect forcing ON the pair is always
     # satisfiable (the one starvation-forced lane rides outside the cap,
     # stated in the configure card); what stays refused is a config whose
     # directions can NEVER be served - forcing off AND a cap below one lane
@@ -500,7 +531,7 @@ def contradictory_focus_policy_is_refused_at_config_time():
 
 
 def instrumental_purposes_are_frontier_transparent_both_ways():
-    """v10.2: a repair that measures BETTER must not evict the lineage it
+    """A repair that measures BETTER must not evict the lineage it
     repaired (that deadlocked every later exploit), and a probe is evidence,
     never a tip.  Parent legality still resolves THROUGH the repair."""
     cfg = cfg_of(FOUR_CELLS)
@@ -543,7 +574,7 @@ def instrumental_purposes_are_frontier_transparent_both_ways():
 
 
 def instrumental_nodes_do_not_count_as_scientific_descendants():
-    """v10.2 R2: rollups must traverse THROUGH instrumental nodes without
+    """Rollups must traverse THROUGH instrumental nodes without
     counting them, or a probe reports itself as an improved descendant in the
     strategy bundle."""
     cfg = cfg_of(FOUR_CELLS)
@@ -564,7 +595,7 @@ def instrumental_nodes_do_not_count_as_scientific_descendants():
 
 
 def maintenance_gain_is_recorded_even_though_it_licenses_nothing():
-    """v10.2 R2: a repair's recovered headroom had nowhere to be booked, which
+    """A repair's recovered headroom had nowhere to be booked, which
     quietly punished doing the plumbing before the science."""
     assessment = {
         "target_cells": ["C1", "C2"], "guardrail_cells": ["C4"],
@@ -584,6 +615,217 @@ def maintenance_gain_is_recorded_even_though_it_licenses_nothing():
     ok(evalid.maintenance_parity_status({"target_cells": [], "guardrail_cells": [],
                                          "cells": {}}) == "not_met",
        "no decision cells at all cannot silently settle as met")
+
+
+def a_measured_node_keeps_its_ruler():
+    """The per-cell judged constants freeze with the floors at eval absorb: a
+    notebook correction of a worthwhile delta / margin / required flag changes
+    the ruler for nodes measured after it, never for a node already measured."""
+    cfg = cfg_of(FOUR_CELLS)
+    parent = node("P", scores={"lp_ap": 0.80, "lp_auc": 0.80, "nc_f1": 0.80, "nc_micro": 0.80})
+    measured = node("K", parents=["P"], verdict=None, status="evaluated", scores={},
+                    eval_cells_frozen=evalid.frozen_cell_constants(cfg))
+    g = {"nodes": [parent, measured]}
+    metrics = {"lp_ap": 0.81, "lp_auc": 0.90, "nc_f1": 0.90, "nc_micro": 0.90}
+    before = evalid.computed_assessment(evalid.Ctx(None, {}, cfg, g, reg={}), measured, metrics)
+    ok(before["cells"]["C1"]["status"] == "improved" and before["verdict"] == "improved",
+       f"under the ruler in force at measurement C1's +0.01 clears the 0.005 line: {before['verdict']}")
+    corrected = copy.deepcopy(cfg)
+    corrected["evaluation_contract"]["cells"][0]["min_improvement"] = 0.05
+    corrected["evaluation_contract"]["cells"][1]["required"] = False
+    corrected_ctx = evalid.Ctx(None, {}, corrected, g, reg={})
+    after = evalid.computed_assessment(corrected_ctx, measured, metrics)
+    ok(after == before, "the settlement of a measured node does not move under a later correction")
+    held = evalid.settlement_cell_spec(corrected_ctx, measured)
+    ok(held["C2"]["required"] is True and held["C1"]["min_improvement"] == 0.005,
+       f"the node's ruler is the frozen one: {held['C1']}")
+    later = node("L", parents=["P"], verdict=None, status="evaluating", scores={})
+    fresh = evalid.computed_assessment(corrected_ctx, later, metrics)
+    ok(fresh["cells"]["C1"]["status"] == "noninferior"
+       and evalid.settlement_cell_spec(corrected_ctx, later)["C2"]["required"] is False,
+       f"a node measured after the correction reads the corrected values: {fresh['cells']['C1']['status']}")
+    ok(set(evalid.frozen_cell_constants(cfg)["C1"]) == set(evalid.FROZEN_CELL_KEYS),
+       "the frozen ruler carries exactly the judged constants")
+
+
+def the_group_rule_is_not_a_verdict_input():
+    """decision.min_target_groups_improved is the claim's own vote, taken
+    inside the groups the claim covers. A cell that rose while the vote failed
+    on decided rows is `partial` (not a parent as claimed), never
+    inconclusive; the vote passing plus a loss elsewhere is a tradeoff."""
+    cells = [cell("C1", "T1", "target", "lp_ap", required=True),
+             cell("C2", "T2", "target", "lp_auc"),
+             cell("C3", "T2", "guardrail", "nc_micro")]
+    cfg = cfg_of(cells)
+    cfg["evaluation_contract"]["decision"]["min_target_groups_improved"] = 2
+    parent = node("P", scores={"lp_ap": 0.80, "lp_auc": 0.80, "nc_micro": 0.80})
+    child = node("K", parents=["P"], verdict=None, status="evaluating", scores={})
+    ctx = evalid.Ctx(None, {}, cfg, {"nodes": [parent, child]}, reg={})
+    split = evalid.computed_assessment(ctx, child, {"lp_ap": 0.90, "lp_auc": 0.70, "nc_micro": 0.80})
+    ok(split["verdict"] == "partial" and split["real_win"] is False and split["group_rule_met"] is False
+       and split["target_wins"] == ["C1"] and split["target_losses"] == ["C2"] and split["deliverable"] is False,
+       f"C1 rose but C2 lost under a two-group vote: the claim does not stand - partial, not a parent, "
+       f"never inconclusive: {split['verdict']}")
+    clean = evalid.computed_assessment(ctx, child, {"lp_ap": 0.90, "lp_auc": 0.80, "nc_micro": 0.80})
+    ok(clean["verdict"] == "partial" and clean["real_win"] is False and clean["group_rule_met"] is False
+       and clean["target_wins"] == ["C1"] and not clean["target_losses"] and clean["deliverable"] is False
+       and clean["overall_contract_pass"] is False,
+       f"one group rose, nothing lost, but the vote wants two groups: partial - honest about the rise, "
+       f"not a parent as claimed: {clean['verdict']}")
+    cfg["evaluation_contract"]["decision"]["min_target_groups_improved"] = 1
+    one = evalid.computed_assessment(ctx, child, {"lp_ap": 0.90, "lp_auc": 0.80, "nc_micro": 0.80})
+    ok(one["verdict"] == "improved" and one["group_rule_met"] is True and one["deliverable"] is True,
+       f"with the rule met the same numbers ship: {one['deliverable']}")
+    quiet = evalid.computed_assessment(ctx, child, {"lp_ap": 0.80, "lp_auc": 0.80, "nc_micro": 0.80})
+    ok(quiet["verdict"] == "inconclusive" and quiet["real_win"] is False and quiet["deliverable"] is False,
+       f"nothing beyond noise and nothing lost is inconclusive: {quiet['verdict']}")
+    guard_only = evalid.computed_assessment(ctx, child, {"lp_ap": 0.80, "lp_auc": 0.80, "nc_micro": 0.70})
+    ok(guard_only["verdict"] == "regressed" and guard_only["guardrail_losses"] == ["C3"],
+       f"no claimed win and a guardrail loss is regressed: {guard_only['verdict']}")
+    undecided = evalid.computed_assessment(ctx, child, {"lp_ap": 0.90, "lp_auc": 0.80})
+    ok(undecided["verdict"] == "inconclusive" and undecided["guardrail_uncertain"] == ["C3"],
+       f"a real win with an unmeasured guardrail and no loss stays undecided: {undecided['verdict']}")
+    undecided_loss = evalid.computed_assessment(ctx, child, {"lp_ap": 0.90, "lp_auc": 0.70})
+    ok(undecided_loss["verdict"] == "tradeoff",
+       f"a real win plus a loss is never inconclusive, unmeasured guardrail or not: {undecided_loss['verdict']}")
+
+
+def the_effect_status_says_partial_when_the_rows_split():
+    """met = every target row met and the group rule met; partial = the rows
+    split, or all met but the group rule unmet; failed = no row met. Guardrail
+    and resource rows stay recorded as sub-rows and never flip it."""
+    cfg = cfg_of(FOUR_CELLS)
+    equal = {axis: {"lower": 4.0, "upper": 6.0, "source": "r"} for axis in eprogram.RESOURCE_AXES}
+    parent = node("P", scores={"lp_ap": 0.8, "lp_auc": 0.8, "nc_f1": 0.8, "nc_micro": 0.8}, resources=equal)
+    child = node("K", parents=["P"], verdict=None, status="evaluating", scores={})
+    ctx = evalid.Ctx(None, {}, cfg, {"nodes": [parent, child]}, reg={})
+    meta = _effect_meta()
+    meta["claim_scope"] = {"kind": "generalist", "target_cells": ["C1", "C2", "C3"], "guardrail_cells": []}
+    meta["effect_case"]["chain"] = [
+        {"target_cell": cid, "direction": "increase", "minimum_worthwhile_delta": 0.01,
+         "expected_delta_interval": [0.02, 0.2]} for cid in ("C1", "C2")]
+    res = {"_effect_resources": copy.deepcopy(equal)}
+    split = evalid.effect_contract_assessment(
+        ctx, child, {"lp_ap": 0.9, "lp_auc": 0.7, "nc_f1": 0.9, "nc_micro": 0.9, **res}, meta)
+    ok(split["status"] == "partial" and split["targets"]["C1"]["status"] == "met"
+       and split["targets"]["C2"]["status"] == "failed",
+       f"one row met and one failed is partial: {split['status']}")
+    guarded = {"lp_ap": 0.9, "lp_auc": 0.9, "nc_f1": 0.9, "nc_micro": 0.7, **res}
+    both = evalid.effect_contract_assessment(ctx, child, guarded, meta)
+    ok(both["status"] == "met" and both["guardrails"]["C4"]["status"] == "failed",
+       f"a failed guardrail row is recorded and does not flip the status: {both['status']}")
+    full = evalid.computed_assessment(ctx, child, guarded, meta_override=meta)
+    ok(full["verdict"] == "tradeoff" and full["deliverable"] is False and full["effect_contract_status"] == "met",
+       f"the guardrail loss still lands in the verdict and the deliverable: {full['verdict']}/{full['deliverable']}")
+    none = evalid.effect_contract_assessment(
+        ctx, child, {"lp_ap": 0.7, "lp_auc": 0.7, "nc_f1": 0.9, "nc_micro": 0.9, **res}, meta)
+    ok(none["status"] == "failed", f"no row met is failed: {none['status']}")
+    cfg["evaluation_contract"]["decision"]["min_target_groups_improved"] = 2
+    rule = evalid.effect_contract_assessment(
+        ctx, child, {"lp_ap": 0.9, "lp_auc": 0.9, "nc_f1": 0.8, "nc_micro": 0.9, **res}, meta)
+    ok(rule["status"] == "partial" and rule["group_rule_met"] is False
+       and all(r["status"] == "met" for r in rule["targets"].values()),
+       f"every row met but the portfolio rule unmet is partial: {rule['status']}")
+    ok(evalid.promotion_status("tradeoff", {"status": "partial"}, fidelity_settled=True, real_win=True) == "met",
+       "a partial bet does not veto a lineage that really moved the numbers")
+    # the same metrics judged as a whole: cells rose, the vote did not pass
+    part = evalid.computed_assessment(
+        ctx, child, {"lp_ap": 0.9, "lp_auc": 0.9, "nc_f1": 0.8, "nc_micro": 0.9, **res}, meta_override=meta)
+    ok(part["verdict"] == "partial" and part["real_win"] is False and part["group_rule_met"] is False
+       and part["target_wins"] and part["scientific_promotion_status"] == "blocked"
+       and part["deliverable"] is False,
+       f"cells rose but the claim's vote failed: partial, not a parent as claimed: {part['verdict']}")
+
+
+def the_efficiency_branch_prices_wins_and_losses_honestly():
+    """regressed when no improvement cell improved and something lost; tradeoff
+    only when an improvement cell improved and something lost; dominant needs
+    no loss anywhere; a parity-only dominant is a win and deliverable."""
+    cells = [cell("C1", "T1", "target", "a"), cell("C2", "T2", "target", "b"),
+             cell("C3", "T3", "target", "c")]
+    cfg = cfg_of(cells)
+    equal = {axis: {"lower": 4.0, "upper": 6.0, "source": "r"} for axis in eprogram.RESOURCE_AXES}
+    parent = node("P", scores={"a": 0.8, "b": 0.8, "c": 0.8}, resources=equal)
+    child = node("K", parents=["P"], verdict=None, status="evaluating", scores={})
+    ctx = evalid.Ctx(None, {}, cfg, {"nodes": [parent, child]}, reg={})
+    meta = _effect_meta()
+    meta["effect_case"]["chain"] = [{"target_cell": "C1", "direction": "increase", "minimum_worthwhile_delta": 0.01,
+                                     "expected_delta_interval": [0.02, 0.2]}]
+    meta["claim_scope"] = {"kind": "efficiency", "target_cells": ["C1", "C2"], "improvement_cells": ["C1"],
+                           "parity_cells": ["C2"], "guardrail_cells": []}
+    meta["dominance"] = {"metric": "a", "comparison": ">=", "value": 0.85}
+    res = {"_effect_resources": copy.deepcopy(equal)}
+
+    def settle(metrics):
+        return evalid.computed_assessment(ctx, child, {**metrics, **res}, meta_override=meta)
+
+    no_win = settle({"b": 0.7, "c": 0.8})
+    ok(no_win["verdict"] == "regressed" and no_win["real_win"] is False and no_win["target_losses"] == ["C2"],
+       f"no improvement cell improved and a parity cell lost: regressed, not tradeoff: {no_win['verdict']}")
+    win_loss = settle({"a": 0.9, "b": 0.7, "c": 0.8})
+    ok(win_loss["verdict"] == "tradeoff" and win_loss["real_win"] is True and win_loss["target_losses"] == ["C2"],
+       f"an improvement cell won and a parity cell lost: tradeoff: {win_loss['verdict']}")
+    breadth = settle({"a": 0.9, "b": 0.8, "c": 0.7})
+    ok(breadth["verdict"] == "tradeoff" and breadth["breadth_losses"] == ["C3"],
+       f"a breadth loss is a loss, so dominance is off the table: {breadth['verdict']}")
+    clean = settle({"a": 0.9, "b": 0.8, "c": 0.8})
+    ok(clean["verdict"] == "dominant" and clean["deliverable"] is True and clean["real_win"] is True,
+       f"the improvement cell won, parity held, nothing lost: dominant: {clean['verdict']}")
+    meta["claim_scope"] = {"kind": "efficiency", "target_cells": ["C1", "C2"], "improvement_cells": [],
+                           "parity_cells": ["C1", "C2"], "guardrail_cells": []}
+    meta["effect_case"]["chain"] = [{"target_cell": "C1", "direction": "stabilize", "minimum_worthwhile_delta": 0.01,
+                                     "expected_delta_interval": [-0.01, 0.01]}]
+    parity = settle({"a": 0.8, "b": 0.8, "c": 0.8})
+    ok(parity["verdict"] == "dominant" and parity["real_win"] is False and parity["deliverable"] is True
+       and parity["scientific_promotion_status"] == "met",
+       f"same quality, cheaper: a parity-only dominant is a win and deliverable: {parity['verdict']}/"
+       f"{parity['deliverable']}")
+
+
+def one_retrain_at_the_parents_own_caps_is_inside_at_both_gates():
+    """allowed = max(k x charged, one run, the parent's declared caps per run):
+    the idea gate (runs x per-run charge) and the workflow gate (the spec's
+    caps) agree that one retrain at the parent's caps is inside. A planned
+    unit the parent never charged is never inside - it cannot be compared."""
+    with tempfile.TemporaryDirectory() as td:
+        repo = Path(td)
+        spec = {"workflow": {"stages": [{"id": "train", "budget": {"limits": {"gpu_hours": 10}}}]},
+                "eval": {"budget": {"limits": {"gpu_hours": 0.5}}}}
+        (repo / "spec.json").write_text(json.dumps(spec), encoding="utf-8")
+        cfg = cfg_of(FOUR_CELLS)
+        cfg["evidence_policy"]["ablation"] = {"budget_multiple": 1.0}
+        parent = node("P", scores={"lp_ap": 0.8, "lp_auc": 0.8, "nc_f1": 0.8, "nc_micro": 0.8}, spec="spec.json")
+        st = {"resource_ledger": [{"id": "RC1", "node": "P", "kind": "stage", "usage": {"gpu_hours": 6.0}}]}
+        ctx = evalid.Ctx(SimpleNamespace(repo=repo), st, cfg, {"nodes": [parent]}, reg={})
+        a = evalid.ablation_allowance(ctx, "P")
+        ok(a["parent_charged"] == {"gpu_hours": 6.0} and a["declared_caps"] == {"gpu_hours": 10.5}
+           and a["allowed"] == {"gpu_hours": 10.5},
+           f"k=1 on a parent charged 6 under caps 10 + 0.5 allows one retrain at those caps: {a}")
+        design_inside, design_lines = evalid.ablation_within_allowance(a, evalid.ablation_design_estimate(a, 1))
+        spec_inside, spec_lines = evalid.ablation_within_allowance(a, evalid.ablation_planned_cost(spec))
+        ok(design_inside and spec_inside and "vs allowed 10.5" in spec_lines[0]
+           and "one retrain at the parent's own caps 10.5" in spec_lines[0],
+           f"both gates price the one-retrain design inside: {design_lines} / {spec_lines}")
+        two_runs = json.loads(json.dumps(spec))
+        two_runs["training_replication"] = {"source": "workflow", "seeds": [1, 2]}
+        above, above_lines = evalid.ablation_within_allowance(a, evalid.ablation_planned_cost(two_runs))
+        ok(not above and "ABOVE" in above_lines[0] and "planned 20.5" in above_lines[0],
+           f"two retrains at the caps are above k=1: {above_lines}")
+        mixed, mixed_lines = evalid.ablation_within_allowance(a, {"gpu_hours": 5.0, "api_tokens": 5e6})
+        ok(not mixed and len(mixed_lines) == 2 and mixed_lines[0].startswith("api_tokens: planned 5e+06")
+           and "cannot be compared" in mixed_lines[0] and "inside" in mixed_lines[1],
+           f"a planned unit the parent never charged makes the design not-inside and says so: {mixed_lines}")
+        empty, empty_lines = evalid.ablation_within_allowance(a, {})
+        ok(not empty and "nothing to compare" in empty_lines[0],
+           f"no declared caps: nothing to compare, the user decides: {empty_lines}")
+        cfg["evidence_policy"]["ablation"] = {"budget_multiple": 0.5}
+        a = evalid.ablation_allowance(ctx, "P")
+        ok(a["allowed"] == {"gpu_hours": 10.5},
+           f"a multiple below one retrain still allows one retrain at the parent's caps: {a['allowed']}")
+        del parent["spec"]
+        a = evalid.ablation_allowance(ctx, "P")
+        ok(a["allowed"] == {"gpu_hours": 6.0} and a["declared_caps"] == {},
+           f"without a spec the floor is one run of the parent's charge: {a['allowed']}")
 
 
 def main():
@@ -607,7 +849,12 @@ def main():
     instrumental_purposes_are_frontier_transparent_both_ways()
     instrumental_nodes_do_not_count_as_scientific_descendants()
     maintenance_gain_is_recorded_even_though_it_licenses_nothing()
-    print(f"V10 FRONTIER/SELECTION SEMANTICS GREEN: {CHECKS} checks passed")
+    a_measured_node_keeps_its_ruler()
+    the_group_rule_is_not_a_verdict_input()
+    the_effect_status_says_partial_when_the_rows_split()
+    the_efficiency_branch_prices_wins_and_losses_honestly()
+    one_retrain_at_the_parents_own_caps_is_inside_at_both_gates()
+    print(f"FRONTIER / SELECTION SEMANTICS GREEN: {CHECKS} checks passed")
 
 
 if __name__ == "__main__":
