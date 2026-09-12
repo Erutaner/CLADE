@@ -34,6 +34,19 @@
 
 ---
 
+## 📰 News
+
+**2026-09-12** — A fresh internal run spanning 17 rounds and 33 nodes surfaced
+two problems with the current system. First, under certain settings CLADE
+**collapses the auto-research task into a new-operator-invention task**. Second, the red-team
+agent's criteria for judging novelty are flawed: as is well known, excellent
+work often introduces nothing new at either the theoretical level or the
+operator level — DDPM built on existing theory with existing operators, and
+its contribution was a perspective that finally made the approach work. We are
+working on both.
+
+<br>
+
 ## 📖 TL;DR
 
 <table>
