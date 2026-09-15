@@ -24,9 +24,9 @@
 
 <br>
 
-<img src="assets/dashboard.png" alt="CLADE dashboard - 演化图谱" width="900">
+<img src="assets/architecture.png" alt="CLADE 架构 - 操作层与演化层" width="900">
 
-<sub>内置仪表盘：单个自包含 HTML 文件，随演化进程自动刷新 · 图为示例数据</sub>
+<sub>上半为操作层，逐轮完成 lane 规划、实现与审计 · 下半为演化层，即这些轮次构建出的研究 DAG，谱系在其中分叉、重组，并不因某一次胜出而终结 · 点击可放大</sub>
 
 <br>
 

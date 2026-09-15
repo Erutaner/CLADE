@@ -24,9 +24,9 @@
 
 <br>
 
-<img src="assets/dashboard.png" alt="CLADE dashboard - the evolution atlas" width="900">
+<img src="assets/architecture.png" alt="CLADE architecture - the operation level above the evolution level" width="900">
 
-<sub>The built-in dashboard: a single self-contained HTML file, refreshed as the run proceeds · sample data shown</sub>
+<sub>The operation level plans, implements and audits each round · the evolution level is the research DAG those rounds build, where lineages branch, recombine and outlive any single winner · click to enlarge</sub>
 
 <br>
 
