@@ -36,14 +36,11 @@
 
 ## 📰 News
 
-**2026-09-12** — A fresh internal run spanning 17 rounds and 33 nodes surfaced
-two problems with the current system. First, under certain settings CLADE
-**collapses the auto-research task into a new-operator-invention task**. Second, the red-team
-agent's criteria for judging novelty are flawed: as is well known, excellent
-work often introduces nothing new at either the theoretical level or the
-operator level — DDPM built on existing theory with existing operators, and
-its contribution was a perspective that finally made the approach work. We are
-working on both.
+**2026-09-15** — We are exploring whether CLADE can evolve itself — recursive
+self-improvement — while it evolves an ML project.
+
+**2026-09-12** — CLADE is currently stronger at **inventing new operators** than
+at innovating on an approach as a whole. We are working on it.
 
 <br>
 
