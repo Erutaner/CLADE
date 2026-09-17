@@ -1,6 +1,6 @@
 <div align="center">
 
-<sub><b>English</b> &nbsp;·&nbsp; <a href="README.zh-CN.md">简体中文</a></sub>
+<sub><a href="README.en.md">English</a> &nbsp;·&nbsp; <b>简体中文</b></sub>
 
 <br>
 
@@ -8,7 +8,7 @@
 
 ### **C**losed-**L**oop **A**gentic **D**iscovery **E**ngine<br>*for Machine Learning Research and Engineering*
 
-### *Evolve your ML project the way organisms evolve*
+### *让你的 ML 项目像生物一样演化*
 
 ### Ji Zhang &nbsp;·&nbsp; <a href="mailto:jizhang@g.harvard.edu">jizhang@g.harvard.edu</a>
 
@@ -18,15 +18,15 @@
 <br>
 
 ![Python](https://img.shields.io/badge/Python-3.10+-3cc9b0?style=for-the-badge&logo=python&logoColor=white)
-![Dependencies](https://img.shields.io/badge/dependencies-none-5fd39a?style=for-the-badge)
-![Modes](https://img.shields.io/badge/modes-Research%20%7C%20Engineering-d9b45b?style=for-the-badge)
-![Setup](https://img.shields.io/badge/setup-natural%20language-b58cf5?style=for-the-badge)
+![Dependencies](https://img.shields.io/badge/依赖-零第三方库-5fd39a?style=for-the-badge)
+![Modes](https://img.shields.io/badge/模式-Research%20%7C%20Engineering-d9b45b?style=for-the-badge)
+![Setup](https://img.shields.io/badge/配置-全自然语言-b58cf5?style=for-the-badge)
 
 <br>
 
-<img src="assets/architecture.png" alt="CLADE architecture - the operation level above the evolution level" width="900">
+<img src="assets/architecture.png" alt="CLADE 架构 - 操作层与演化层" width="900">
 
-<sub>The operation level plans, implements and audits each round · the evolution level is the research DAG those rounds build, where lineages branch, recombine and outlive any single winner · click to enlarge</sub>
+<sub>上半为操作层，逐轮完成 lane 规划、实现与审计 · 下半为演化层，即这些轮次构建出的研究 DAG，谱系在其中分叉、重组，并不因某一次胜出而终结 · 点击可放大</sub>
 
 <br>
 
@@ -34,139 +34,157 @@
 
 ---
 
-## 📰 News
+> 整日做横向干杂活，实验室卡都空着没空 research？
+>
+> 认真思考问题本质，想做个“大的”出来，却论文难产被导师怀疑天天摸鱼？
+>
+> 独自一人单挑一个方向，导师泉水挂机同门实习单飞，实验迟迟没有进度？
+>
+> 踏踏实实做研究，却只能看着隔壁流水线灌水天团拿下“故事会”大满贯？
+>
+> 自己实验室自古没发过几篇三大会，大家群龙无首，隔壁学校却有人一人投稿 40 篇 NIPS？
 
-**2026-09-15** — We are exploring whether CLADE can evolve itself — recursive
-self-improvement — while it evolves an ML project.
+<div align="center">
 
-**2026-09-12** — CLADE is currently stronger at **inventing new operators** than
-at innovating on an approach as a whole. We are working on it.
+### 停止焦虑，只要 Token 管够，CLADE 给您无限可能
+
+</div>
+
+---
+
+## 📰 最新进展
+
+**2026-09-16** — 技术报告即将上线 arXiv。
+
+**2026-09-15** — 我们正在探索：CLADE 能否在演化一个 ML 项目的同时，对自身实现递归自我改进（RSI）。
+
+**2026-09-12** — CLADE 目前更擅长**发明新算子**，而非对一个方法做整体革新。我们正在尝试解决。
 
 <br>
 
 ## 📖 TL;DR
 
 <table>
-<tr><td width="130"><b>🔬 What it is</b></td><td>
+<tr><td width="130"><b>🔬 这是什么</b></td><td>
 
-An engine for automated ML scientific discovery and engineering iteration, with no learning curve and no configuration cost, that has produced results in real industrial and academic settings. It organises model experiments — differing in paradigm and in lineage — as a directed acyclic graph, and "evolves" your existing project in a manner analogous to biological evolution: it drives an agent to explore both improvements to the model you already have and entirely new paradigms unlike your current line of thought, in order to reach better results on the datasets and tasks you specify. Your agent queries the engine for the current task, completes it, and submits it for the engine to verify, round after round.
+这是个零学习门槛和配置成本的，在真实工业和学术场景下取得过成绩的自动 ML 科学发现／工程迭代引擎，通过有向无环图组织不同范式和血缘关系的模型实验，用类似自然界生物演化的形式「演化」你的已有项目，驱动 agent 自动探索你已有模型的各种改进可能和与你当前思路完全不同的全新范式，来在指定数据集和任务上达到更好的效果。您的 agent 会自动地向引擎查询当前任务，完成任务，并提交任务供引擎核验，如此循环往复。
 
 </td></tr>
-<tr><td><b>👥 Who it is for</b></td><td>
+<tr><td><b>👥 适合什么人群</b></td><td>
 
-Researchers and engineers in machine learning. The engine runs in one of two modes: **Research mode** aims at proposing novel mechanisms and competing for state of the art, while **Engineering mode** places a lower demand on methodological novelty, runs faster and costs less, and is aimed primarily at raising the numbers.
+ML 领域的研究人员或工程师。引擎分为**科研模式**和**工程模式**，科研模式力主提出创新机制冲击 SOTA，工程模式对方法创新性要求较低，执行速度更快且成本更低，主要用于涨点。
 
 </td></tr>
 </table>
 
 <br>
 
-## 🎒 What you need
+## 🎒 您需要有什么
 
-### ✅ Required
-
-<br>
-
-**1️⃣ An existing ML codebase**
-
-> It does not matter if it is unpolished or performs poorly: the engine does not depend on your method, and it will drive the agent to explore paradigms entirely unlike yours while it also improves what you have. Nor does it matter if the code has bugs — the engine will drive the agent to fix them until it runs.
-
-**2️⃣ Any training infrastructure, and a way to reach it**
-
-> It can be a cloud platform such as AutoDL, a GPU on your own machine, your own server, or an internal company AI hub. During configuration the engine drives the agent to learn end to end how your infrastructure is used, and asks you whenever it gets stuck. The engine supports running the coding agent, reading and writing datasets, GPU computation, and saving model weights on four different platforms, so it suits almost anyone's setup; if yours does not suit it, it will tell you during configuration rather than waste your time and resources.
-
-**3️⃣ The datasets, tasks and evaluation criteria you specify**
-
-> Multiple datasets, multiple tasks and multiple evaluation criteria are supported.
+### ✅ 必须
 
 <br>
 
-### 💡 Recommended
+**1️⃣ 一个现成的 ML 项目代码**
+
+> 即使它很不完善或者效果很差也没关系，引擎不会依赖你的方法，它会驱动 agent 在改进你方法的同时探索与你思路完全不同的新范式；代码有 bug 也没有关系，引擎会驱动 agent 修复直到跑通。
+
+**2️⃣ 任意训练基础设施和访问方式**
+
+> 可以是 AutoDL 等云平台，可以是您的本机 GPU，也可以是您的服务器或者公司内部 AIHUB，引擎会在配置阶段自动驱动 agent 全链路学习您的基础设施用法，遇到卡点会向您询问；引擎支持 coding agent 运行，数据集读入保存，GPU 计算和模型权重保存使用四个不同的平台，因此对绝大多数人的基础设施都适用，如果您的基础设施不适用它会在配置阶段告诉您，不会浪费您的时间和资源。
+
+**3️⃣ 指定的数据集，任务和评测标准**
+
+> 支持多数据集，多任务，多评测标准。
+
+<br>
+
+### 💡 推荐
 
 > [!TIP]
-> A document on how your infrastructure is used. It need not be exhaustive, but it is best to mention the common pitfalls and sticking points. This holds especially for the hastily assembled, bug-prone infrastructure often found in industrial settings. If you are on a mature, low-bug platform such as AutoDL, or on a GPU in your own server, giving the access method is enough.
+> 一份您基础设施的使用方法文档，不需要事无巨细，但最好说一下常见的坑或卡点，这点尤其对于工业场景下一些临时搭建的，bug 较多的基础设施成立。如果您用的是 AutoDL 这类比较成熟，bug 少的平台或者自己服务器上的 GPU，那只需要提供访问方式即可。
 
 <br>
 
-## 🚀 Thirty seconds to start
+## 🚀 三十秒启动
 
 <div align="center">
 
 | | |
 |:---:|:---|
-| **1** | Download the CLADE archive to **any path** inside your ML project |
-| **2** | Ask your coding assistant (Codex, Claude Code, …) to **unpack it** |
-| **3** | Ask it to **read `OPERATOR_PROMPT.md` and evolve the current project** |
-| **4** | Answer whatever the agent asks; once configuration is done, open the auto-generated `.evo/views/DASHBOARD.html` at your project root in a browser to watch the run |
+| **1** | 把 CLADE 项目压缩包下载到您的 ML 项目里的**任意路径** |
+| **2** | 让自己的 coding 助手（比如 Codex、Claude Code 等）**解压** |
+| **3** | 让它**阅读 `OPERATOR_PROMPT.md` 并演化当前项目** |
+| **4** | agent 问什么就答什么；配置完成后，用浏览器打开项目根目录下自动生成的 `.evo/views/DASHBOARD.html` 查看演化进度 |
 
 </div>
 
-> **No coding, no commands, no configuration file.** Configuration happens entirely through natural-language interaction: the engine asks you what it needs to know.
+> **无需懂代码，无需敲命令，无需写配置文件。** 配置全部通过自然语言交互进行，引擎会问您它该知道的东西。
 
 <br>
 
-## ⭐ What CLADE offers over comparable projects
+## ⭐ CLADE 相比类似项目的优势是什么
 
 <br>
 
-### ⚡ 1 · Thirty seconds to start, running on your own agent subscription
+### ⚡ 1 · 30 秒内即可启动，跑在您自己的 agent 订阅上
 
-No coding, no commands, no configuration file. Just download the CLADE archive to any path inside your ML project, then ask your coding assistant (Codex, Claude Code and the like) to unpack it, read `OPERATOR_PROMPT.md` and evolve the current project. Configuration happens entirely through natural-language interaction: the engine asks you what it needs to know.
-
-<br>
-
-### 🏆 2 · Validated in practice
-
-In a real industrial setting, CLADE's **Engineering mode** improved a recommendation model trained on a dataset of hundreds of millions of records, together with its post-training method, and delivered the largest gain obtained from model-side changes alone in five months. In one of our real research settings, CLADE's **Research mode** improved the aggregate performance ranking across 13 public benchmarks, and the mechanism it proposed passed a blind novelty review by human domain experts. As far as we know, at the time of this release, few open-source auto-research harnesses claim results of this kind. For confidentiality reasons we cannot disclose the specific settings. Because it has also been run long-horizon in several real settings, we have already walked into many of the pitfalls ourselves, so using this project may go better than you expect.
+无需懂代码，无需敲命令，无需写配置文件，只需把 CLADE 项目压缩包下载到您的 ML 项目里的任意路径，然后让自己的 coding 助手（比如 Codex，Claude Code 等）解压并阅读 `OPERATOR_PROMPT.md` 并演化当前项目即可。配置全部通过自然语言交互进行，引擎会问您它该知道的东西。
 
 <br>
 
-### 🔁 3 · Long-horizon operation
+### 🏆 2 · 经过实践验证
 
-All evolution state is kept locally. A network outage, an exhausted quota, even switching to a different coding assistant (from Codex to Claude Code, say) can all be picked up seamlessly, with progress restored.
+CLADE **Engineering 模式**在我们的真实工业场景中改进了一个在亿级规模数据集上训练的推荐模型与其后训练方法，取得了 5 个月内纯模型侧改动带来的最大提升；CLADE **Research 模式**在我们的某个真实科研场景中提升了 13 个公开基准上的综合性能排名，其提出的机制能通过人类领域专家的创新性盲审。据我们所知，截至本项目开源，宣称达成此类效果的开源 auto research harness 非常少。出于保密原因，我们具体的场景不便透露。此外，由于在不同真实场景下长程运行过，很多坑我们都踩了，所以这个项目的使用体验可能会比你想象的好。
 
 <br>
 
-### 🧠 4 · It does research the way a human ML scientist does
+### 🔁 3 · 超长程运行
 
-Unlike certain auto-research projects that organise experiments as a tree or a linear pipeline, CLADE does not depend on the initial idea you supply: while it improves your model, it also explores paradigms unlike yours, and it represents the entire search as a **directed acyclic graph** rather than a tree. Your initial approach is only one of its root nodes; other roots may have paradigm lineages entirely unlike yours. Nodes can also be **crossed** to produce offspring carrying combined traits, and the experience of success or failure **propagates** through the graph, so the agent grows more capable as it goes. Unlike most auto-research projects — which largely drive an agent to read the literature and write code, or simply have an LLM propose an idea and dispatch sub-agents to check it for prior work — CLADE is designed in fine detail around how to innovate scientifically, and how to establish whether a given scientific mechanism actually works.
+演化状态全部本地保存，网络中断，额度中断，甚至切换不同的 coding 助手（比如从 Codex 换到 Claude Code）都可以无缝衔接并恢复进度。
+
+<br>
+
+### 🧠 4 · 真正像人类 ML 科学家一样做研究
+
+不同于其他的某些 auto research 项目用树结构或线性流水线组织实验，CLADE 不依赖您提供的初始思路，它会在改进您模型的同时探索与您思路不同的其他范式，用**有向无环图**而不是树表示整个探索路径。您的初始方案仅仅是其中一个根节点，其他根节点的范式血统与您的方案可能完全不同；此外，节点之间可以**杂交**以产生具备融合特性的子代，实验的成功或失败经验均会在图上**传播**，让 agent 越做越聪明。不同于大部分 auto research 项目（这些项目大都仅仅是驱动 agent 查阅文献写代码，或者简单地让 LLM 提出 idea 并派子 agent 查重），CLADE 对如何科学地进行研究创新，如何探索某种科学机制的有效性进行了非常精细的设计。
 
 <br>
 
 > [!NOTE]
-> This document is still being updated. A detailed account of the mechanisms will be added shortly; should it grow too large, it will be posted separately to arXiv.
+> 本文档仍在持续更新中。近日将补充详细的机制说明；如果篇幅过大，会另行挂到 arXiv 上。
 
 <br>
 
-## ⚠️ Limitations of CLADE
+## ⚠️ CLADE 的局限
 
 <br>
 
 > [!WARNING]
-> ### 💰 1 · Heavy token consumption
+> ### 💰 1 · Token 消耗量大
 >
-> For reference: in our testing, the weekly Fable 5 quota of a Claude MAX 20× subscription was enough for only 4–5 evolution nodes, and the weekly Fable 5.1 quota for only 2–3. If you want CLADE to keep Fable working without interruption, you may need 2–3 MAX 20× subscriptions. We therefore recommend using CLADE with at least one Codex / Claude Code 20× subscription, or an equivalent token budget. (Even three subscriptions, however, are far cheaper than a human engineer, or than a graduate student.)
+> 参考值：在我们的测试中，Claude MAX 20 倍会员下，Fable 5 的周额度仅够迭代 4-5 个演化节点，Fable 5.1 的周额度仅够迭代 2-3 个演化节点。如果您希望使用 CLADE 引擎驱动 Fable 不间断工作，可能需要 2-3 个 MAX 20 倍会员。因此我们推荐您在至少有一个 Codex／Claude Code 20 倍会员或同级别 Token 预算的情况下使用（不过，即使是三个会员账户也比人类工程师甚至研究生便宜的多）。
 
 > [!WARNING]
-> ### 📏 2 · Not validated at industrial LLM scale
+> ### 📏 2 · 未在工业级 LLM 规模上验证
 >
-> Our resources being limited, we have not run CLADE on the evolution of an industrial-scale LLM or anything of comparable size. In both Engineering and Research mode we have tested only deep learning models below 7B, with GPU scheduling below 16 cards. No agent harness can be made absolutely reliable; if your resources are tight, or you cannot absorb the loss of a failed experiment, please use it with care.
+> 受限于我们的资源，我们没有对 CLADE 进行过演化工业级 LLM 或者类似规模的实验。我们在 Engineering 和 Research 模式下都仅对 7B 以下的深度学习模型进行过测试，测试时 GPU 调度规模在 16 张以下。任何 agent harness 都没法做到绝对可靠，如果您的资源比较紧张或者无法承受实验失败带来的损失，请谨慎使用。
 
 > [!WARNING]
-> ### 🤖 3 · Bounded by the underlying model
+> ### 🤖 3 · 受基模能力限制
 >
-> The engine's ceiling is set by the base model you use. We recommend a frontier model with strong instruction following. If your LLM follows instructions poorly — for instance, if it frequently does things outside its instructions, or is over-defensive to the point of hallucination — the engine will most likely deliver less.
+> 引擎最终能力受到您所使用的基模的限制。推荐使用指令遵循能力较强的前沿模型，如果您使用的 LLM 指令遵循能力较弱（例如经常做指令以外的无关事情或者幻觉式过度防御），引擎效果大概率会打折扣。
 
 > [!CAUTION]
-> ### 🚧 4 · Still a work in progress
+> ### 🚧 4 · 仍处在待完善阶段
 >
-> This project is still being brought to completion. Although we have run long-horizon tests across several settings (a real one-month run in Research mode, 30+ nodes; a real run of more than 20 days in Engineering mode, 15+ nodes) and CLADE ships with several repair mechanisms, we still cannot guarantee that no deadlocks or other bugs occur during a run. The agent should be permitted to modify CLADE's engine code when a genuine bug in the engine's design has led to a deadlock, which is a further reason we recommend a frontier LLM.
+> 这是一个还处在待完善阶段的项目，尽管我们进行了多场景下的长程测试（Research 模式下真实运行 1 个月，30+ 节点；Engineering 模式下真实运行 20+ 天，15+ 节点），CLADE 也自带多种修复机制，但运行中仍无法确保完全没有死锁等 bug。应当准许 agent 在由于引擎设计真实存在 bug 导致进入死锁时修改 CLADE 引擎代码，这也是我们为什么推荐使用前沿 LLM。
 
 <br>
 
-## 📄 License
+## 📄 许可证
 
-Released under the [MIT License](LICENSE) · Copyright © 2026 Ji Zhang
+本项目以 [MIT License](LICENSE) 开源 · Copyright © 2026 Ji Zhang
 
 <br>
 
